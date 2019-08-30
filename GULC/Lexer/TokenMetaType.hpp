@@ -1,4 +1,5 @@
-#pragma once
+#ifndef GULC_TOKENMETATYPE_HPP
+#define GULC_TOKENMETATYPE_HPP
 
 namespace gulc {
 	enum class TokenMetaType {
@@ -10,3 +11,5 @@ namespace gulc {
 		SPECIAL
 	};
 }
+
+#endif //GULC_TOKENMETATYPE_HPP

@@ -1,4 +1,5 @@
-﻿#pragma once
+﻿#ifndef GULC_TOKENTYPE_HPP
+#define GULC_TOKENTYPE_HPP
 
 namespace gulc {
 	enum class TokenType {
@@ -116,6 +117,6 @@ namespace gulc {
 		// TODO: Probably not needed.
 		ENDOFFILE // might be removed, just used to double check everything is parsed correctly
 	};
-
-
 }
+
+#endif //GULC_TOKENTYPE_HPP

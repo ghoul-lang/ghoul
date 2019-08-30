@@ -4,7 +4,7 @@
 cmake_minimum_required (VERSION 3.8)
 
 # Add source to this project's executable.
-add_executable (GULC "main.cpp")
+add_executable (GULC "main.cpp" "Lexer/Lexer.cpp" Parser/Parser.cpp Parser/Parser.hpp Lexer/LexerCheckpoint.hpp)
 
 target_link_libraries(${PROJECT_NAME}
   LLVMCore

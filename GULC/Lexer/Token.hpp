@@ -1,4 +1,5 @@
-#pragma once
+#ifndef GULC_TOKEN_HPP
+#define GULC_TOKEN_HPP
 
 #include <string>
 #include "TokenType.hpp"
@@ -29,3 +30,5 @@ namespace gulc {
 		}
 	};
 }
+
+#endif //GULC_TOKEN_HPP
