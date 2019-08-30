@@ -17,7 +17,7 @@ namespace gulc {
         TokenMetaType peekMeta();
         Token peekToken();
         Token nextToken();
-        void consumeType(TokenType type);
+        bool consumeType(TokenType type);
 
         LexerCheckpoint createCheckpoint();
         void returnToCheckpoint(const LexerCheckpoint& checkpoint);

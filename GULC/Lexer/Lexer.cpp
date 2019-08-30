@@ -35,20 +35,15 @@ Token Lexer::nextToken() {
     return result;
 }
 
-void Lexer::consumeType(TokenType type) {
-    Token token = nextToken();
-
-    if (token.tokenType != type) {
-        // TODO: Improve this error message
-        printErrorAndExit("Unexpected token!");
-    }
+bool Lexer::consumeType(TokenType type) {
+    return nextToken().tokenType == type;
 }
 
 Token Lexer::lexOneToken() {
     TextPosition startPosition(_currentIndex, _currentLine, _currentColumn);
     std::string tmpTokenText;
     Token result(TokenType::NIL, TokenMetaType::NIL, nullptr, 0,
-                      startPosition, TextPosition(_currentIndex, _currentLine, _currentColumn));
+                 startPosition, TextPosition(_currentIndex, _currentLine, _currentColumn));
 
 #define PARSE_AND_RETURN_IF_TOKEN_TEXT_NOT_EMPTY() if (!tmpTokenText.empty()) return parseToken(tmpTokenText, startPosition);
 #define RETURN_GENERIC_TOKEN(nTokenType, nMetaType, nSymbol, nChar) ++_currentIndex; ++_currentColumn; return Token((nTokenType), (nMetaType), (nSymbol), (nChar), startPosition, TextPosition(_currentIndex, _currentLine, _currentColumn));
