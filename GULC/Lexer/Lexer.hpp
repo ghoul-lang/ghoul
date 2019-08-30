@@ -11,17 +11,16 @@
 namespace gulc {
 	class Lexer {
     public:
-        Lexer(std::string fileName, std::string sourceCode);
+        Lexer(std::string fileName, std::string sourceCode)
+                : _fileName(std::move(fileName)), _sourceCode(std::move(sourceCode)) { }
         TokenType peekType();
         TokenMetaType peekMeta();
         Token peekToken();
         Token nextToken();
         void consumeType(TokenType type);
-        void deleteToken(Token token);
 
         LexerCheckpoint createCheckpoint();
-        void returnToCheckpoint(LexerCheckpoint checkpoint);
-        void deleteCheckpoint(LexerCheckpoint checkpoint);
+        void returnToCheckpoint(const LexerCheckpoint& checkpoint);
 
         bool getRightShiftState();
         void setRightShiftState(bool enabled);
@@ -40,7 +39,7 @@ namespace gulc {
         Token lexOneToken();
         Token parseToken(std::string& tokenText, TextPosition startPosition);
 
-        void printErrorAndExit(std::string errorText, int errorCode = 1);
+        void printErrorAndExit(const std::string& errorText, int errorCode = 1);
         void errorUnexpectedEOF();
 	};
 }
