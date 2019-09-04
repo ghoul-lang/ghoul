@@ -26,7 +26,7 @@ Token Lexer::nextToken() {
     if (_nextToken.tokenType != TokenType::ENDOFFILE) {
         _nextToken.tokenType = TokenType::NIL;
         //_nextToken.tokenMetaType = TokenMetaType::NIL;
-        _nextToken.currentSymbol = nullptr;
+        _nextToken.currentSymbol = "";
         _nextToken.currentChar = 0;
         _nextToken.startPosition = TextPosition(0, 0, 0);
         _nextToken.endPosition = TextPosition(0, 0, 0);
@@ -36,13 +36,20 @@ Token Lexer::nextToken() {
 }
 
 bool Lexer::consumeType(TokenType type) {
-    return nextToken().tokenType == type;
+    TokenType currentType = peekType();
+
+    if (currentType == type) {
+        nextToken();
+        return true;
+    } else {
+        return false;
+    }
 }
 
 Token Lexer::lexOneToken() {
     TextPosition startPosition(_currentIndex, _currentLine, _currentColumn);
     std::string tmpTokenText;
-    Token result(TokenType::NIL, TokenMetaType::NIL, nullptr, 0,
+    Token result(TokenType::NIL, TokenMetaType::NIL, "", 0,
                  startPosition, TextPosition(_currentIndex, _currentLine, _currentColumn));
 
 #define PARSE_AND_RETURN_IF_TOKEN_TEXT_NOT_EMPTY() if (!tmpTokenText.empty()) return parseToken(tmpTokenText, startPosition);
@@ -54,6 +61,22 @@ Token Lexer::lexOneToken() {
     // Check to see if the EOF has been reached and return EOF if it has
     CHECK_AND_RETURN_EOF();
 
+    for (; _sourceCode[_currentIndex] == '\r' || _sourceCode[_currentIndex] == '\n' || isspace(_sourceCode[_currentIndex]); ++_currentIndex) {
+        if (_sourceCode[_currentIndex] == '\r' || _sourceCode[_currentIndex] == '\n') {
+            ++_currentLine;
+            _currentColumn = 1;
+
+            // If the character was '\r' then remove the '\n' that comes next
+            if (_sourceCode[_currentIndex] == '\r' && (_currentIndex + 1) < _sourceCode.length() && _sourceCode[_currentIndex + 1] == '\n') {
+                ++_currentIndex;
+            }
+        } else if (isspace(_sourceCode[_currentIndex])) {
+            ++_currentColumn;
+        }
+    }
+
+    startPosition = TextPosition(_currentIndex, _currentLine, _currentColumn);
+
     // TODO: This probably doesn't need to be a loop...
     for (; _currentIndex < _sourceCode.length(); ++_currentIndex, ++_currentColumn) {
         if (_sourceCode[_currentIndex] == '\r' || _sourceCode[_currentIndex] == '\n') {
@@ -61,7 +84,7 @@ Token Lexer::lexOneToken() {
             PARSE_AND_RETURN_IF_TOKEN_TEXT_NOT_EMPTY();
 
             ++_currentLine;
-            _currentColumn = 0;
+            _currentColumn = 1;
 
             // If the character was '\r' then remove the '\n' that comes next
             if (_sourceCode[_currentIndex] == '\r' &&
@@ -242,7 +265,7 @@ else { tmpString += (unescapedChar); }
                     if (_sourceCode[_currentIndex] != '\'') {
                         printErrorAndExit("Expected an ending single quote!");
                     } else {
-                        RETURN_GENERIC_TOKEN(TokenType::CHARACTER, TokenMetaType::VALUE, nullptr, resultChar);
+                        RETURN_GENERIC_TOKEN(TokenType::CHARACTER, TokenMetaType::VALUE, "", resultChar);
                     }
 
                     // It shouldn't be possible to reach here.
@@ -383,7 +406,7 @@ else { tmpString += (unescapedChar); }
                         ++_currentColumn;
                         RETURN_GENERIC_TOKEN(TokenType::SLASHEQUALS, TokenMetaType::OPERATOR, "/=", 0);
                     } else if (CHECK_NEXT_CHAR() == '/') {
-                        for (_currentColumn = 0, ++_currentLine;
+                        for (_currentColumn = 1, ++_currentLine;
                              _currentIndex < _sourceCode.length();
                              ++_currentIndex) {
                             if (_sourceCode[_currentIndex] == '\r') {
@@ -404,7 +427,7 @@ else { tmpString += (unescapedChar); }
                              _currentIndex < _sourceCode.length();
                              ++_currentIndex, ++_currentColumn) {
                             if (_sourceCode[_currentIndex] == '\r' || _sourceCode[_currentIndex] == '\n') {
-                                _currentColumn = 0;
+                                _currentColumn = 1;
                                 ++_currentLine;
 
                                 if (_sourceCode[_currentIndex] == '\r' && CHECK_NEXT_CHAR() == '\n') {
@@ -507,7 +530,7 @@ else { tmpString += (unescapedChar); }
 }
 
 Token Lexer::parseToken(std::string &tokenText, TextPosition startPosition) {
-    Token result(TokenType::NIL, TokenMetaType::NIL, nullptr, 0, startPosition, TextPosition(_currentIndex, _currentLine, _currentColumn));
+    Token result(TokenType::NIL, TokenMetaType::NIL, "", 0, startPosition, TextPosition(_currentIndex, _currentLine, _currentColumn));
 
     if (std::isdigit(static_cast<unsigned char>(tokenText[0]))) {
         result.tokenType = TokenType::NUMBER;
@@ -537,9 +560,6 @@ Token Lexer::parseToken(std::string &tokenText, TextPosition startPosition) {
         result.metaType = TokenMetaType::MODIFIER;
         result.tokenType = TokenType::CONST;
         result.currentSymbol = "const";
-    } else if (tokenText == "readonly") {
-        result.metaType = TokenMetaType::MODIFIER;
-        result.tokenType = TokenType::READONLY;
         result.currentSymbol = "readonly";
     } else if (tokenText == "extern") {
         result.metaType = TokenMetaType::MODIFIER;
@@ -732,7 +752,7 @@ Token Lexer::parseToken(std::string &tokenText, TextPosition startPosition) {
 }
 
 void Lexer::printErrorAndExit(const std::string& errorText, int errorCode) {
-    std::cout << "gulc lexer error[" << _fileName << ", " << _currentLine << ", " << _currentColumn << "]: "
+    std::cout << "gulc lexer error[" << _filePath << ", " << _currentLine << ", " << _currentColumn << "]: "
               << errorText << std::endl;
     std::exit(errorCode);
 }

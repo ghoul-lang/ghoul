@@ -55,7 +55,6 @@ namespace gulc {
 		INTERNAL, // 'internal'
 		STATIC, // 'static'
 		CONST, // 'const'
-		READONLY, // 'readonly', might be removed
 		EXTERN, // 'extern'
 		VOLATILE, // 'volatile'
 		ABSTRACT, // 'abstract'

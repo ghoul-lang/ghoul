@@ -1,4 +1,5 @@
-#pragma once
+#ifndef GULC_TEXTPOSITION_HPP
+#define GULC_TEXTPOSITION_HPP
 
 namespace gulc {
 	struct TextPosition {
@@ -13,3 +14,5 @@ namespace gulc {
 			: index(index), line(line), column(column) {}
 	};
 }
+
+#endif //GULC_TEXTPOSITION_HPP

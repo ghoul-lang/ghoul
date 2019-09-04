@@ -22,7 +22,7 @@ namespace gulc {
                 : tokenType(tokenType), metaType(metaType), currentSymbol(std::move(currentSymbol)),
                   currentChar(currentChar), startPosition(startPosition), endPosition(endPosition) {
 			// endPosition.column comes in as an inclusive value, make it exclusive
-			this->endPosition.column += 1;
+			//this->endPosition.column += 1;
 		}
 	};
 }

@@ -1,7 +1,3 @@
-//
-// Created by Brandon Huddle on 8/30/2019.
-//
-
 #ifndef GULC_LEXERCHECKPOINT_HPP
 #define GULC_LEXERCHECKPOINT_HPP
 
@@ -17,7 +13,7 @@ namespace gulc {
 
         LexerCheckpoint(Token nextToken,
                         unsigned int currentLine, unsigned int currentColumn, unsigned int currentIndex)
-                : _nextToken(nextToken),
+                : _nextToken(std::move(nextToken)),
                   currentLine(currentLine), currentColumn(currentColumn), currentIndex(currentIndex) { }
     };
 }

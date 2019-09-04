@@ -1,0 +1,8 @@
+int secondFunctionTest(int val) {
+    return (val % +3.0);
+}
+
+// Test
+int Function(int left, int right) {
+    return left + ++secondFunctionTest(right++);
+}
