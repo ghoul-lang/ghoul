@@ -7,6 +7,7 @@ namespace gulc {
     class Type {
     public:
         enum class TypeKind {
+            TemplateTypename,
             Unresolved
         };
 

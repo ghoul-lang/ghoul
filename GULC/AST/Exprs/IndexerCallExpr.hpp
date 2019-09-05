@@ -16,6 +16,7 @@ namespace gulc {
 
         const Expr* indexerReference() const { return _indexerReference; }
         const std::vector<Expr*>& arguments() const { return _arguments; }
+        bool hasArguments() const { return !_arguments.empty(); }
 
         ~IndexerCallExpr() override {
             delete _indexerReference;

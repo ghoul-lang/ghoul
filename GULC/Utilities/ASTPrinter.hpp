@@ -16,6 +16,11 @@
 #include <AST/Exprs/PostfixOperatorExpr.hpp>
 #include <AST/Exprs/ParenExpr.hpp>
 #include <AST/Exprs/FloatLiteralExpr.hpp>
+#include <AST/Exprs/PotentialExplicitCastExpr.hpp>
+#include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
+#include <AST/Exprs/IndexerCallExpr.hpp>
+#include <AST/Stmts/LabeledStmt.hpp>
+#include <AST/Stmts/IfStmt.hpp>
 
 namespace gulc {
     class ASTPrinter {
@@ -29,11 +34,14 @@ namespace gulc {
 
         // Decls
         static std::string getParametersString(const std::vector<ParameterDecl*>& parameters);
+        static std::string getTemplateParametersString(const std::vector<TemplateParameterDecl*>& templateParameters);
         static void printFunctionDecl(const FunctionDecl* functionDecl, const std::string& prefix = "");
 
         // Stmts
         static void printCompoundStmt(const CompoundStmt* compoundStmt, const std::string& prefix = "");
         static void printReturnStmt(const ReturnStmt* returnStmt, const std::string& prefix = "");
+        static void printLabeledStmt(const LabeledStmt* labeledStmt, const std::string& prefix = "");
+        static void printIfStmt(const IfStmt* ifStmt, const std::string& prefix = "");
 
         // Exprs
         static void printBinaryOperatorExpr(const BinaryOperatorExpr* binaryOperatorExpr, const std::string& prefix = "");
@@ -44,6 +52,9 @@ namespace gulc {
         static void printPostfixOperatorExpr(const PostfixOperatorExpr* postfixOperatorExpr, const std::string& prefix = "");
         static void printParenExpr(const ParenExpr* parenExpr, const std::string& prefix = "");
         static void printFloatLiteralExpr(const FloatLiteralExpr* floatLiteralExpr, const std::string& prefix = "");
+        static void printPotentialExplicitCastExpr(const PotentialExplicitCastExpr* potentialExplicitCastExpr, const std::string& prefix = "");
+        static void printLocalVariableDeclOrPrefixOperatorCallExpr(const LocalVariableDeclOrPrefixOperatorCallExpr* localVariableDeclOrPrefixOperatorCallExpr, const std::string& prefix = "");
+        static void printIndexerCallExpr(const IndexerCallExpr* indexerCallExpr, const std::string& prefix = "");
 
     };
 }

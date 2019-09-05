@@ -1,8 +1,13 @@
-int secondFunctionTest(int val) {
+int secondFunctionTest<T>(T val)
+{
     return (val % +3.0);
 }
 
 // Test
-int Function(int left, int right) {
-    return left + ++secondFunctionTest(right++);
+int Function<T, int max = (12)>(T left, int right = 1)
+{
+    break;
+    break testLabel;
+    if (left == right) return 0;
+    else testLabel: return left + (int)++secondFunctionTest<int<(i >> 2)>>(right++);
 }

@@ -10,7 +10,19 @@ namespace gulc {
         enum class StmtKind {
             Compound,
             Expr,
-            Return
+            Return,
+            Labeled,
+
+            If,
+            While,
+            For,
+            Do,
+            Switch,
+            Case,
+
+            Break,
+            Continue,
+            Goto
         };
 
         StmtKind getStmtKind() const { return _kind; }

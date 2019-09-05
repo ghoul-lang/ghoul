@@ -1,18 +1,18 @@
-#ifndef GULC_PARAMETERDECL_HPP
-#define GULC_PARAMETERDECL_HPP
+#ifndef GULC_TEMPLATEPARAMETERDECL_HPP
+#define GULC_TEMPLATEPARAMETERDECL_HPP
 
 #include <AST/Decl.hpp>
 #include <AST/Type.hpp>
 #include <AST/Expr.hpp>
 
 namespace gulc {
-    class ParameterDecl : public Decl {
+    class TemplateParameterDecl : public Decl {
     public:
-        static bool classof(const Decl *decl) { return decl->getDeclKind() == DeclKind::Parameter; }
+        static bool classof(const Decl *decl) { return decl->getDeclKind() == DeclKind::TemplateParameterDecl; }
 
-        ParameterDecl(std::string sourceFile, TextPosition startPosition, TextPosition endPosition, Type* type,
-                      std::string name, Expr* defaultArgument = nullptr)
-                : Decl(DeclKind::Parameter, std::move(sourceFile), startPosition, endPosition),
+        TemplateParameterDecl(std::string sourceFile, TextPosition startPosition, TextPosition endPosition, Type* type,
+                std::string name, Expr* defaultArgument = nullptr)
+                : Decl(DeclKind::TemplateParameterDecl, std::move(sourceFile), startPosition, endPosition),
                   _type(type), _name(std::move(name)), _defaultArgument(defaultArgument) {}
 
         const Type* type() const { return _type; }
@@ -20,13 +20,12 @@ namespace gulc {
         const Expr* defaultArgument() const { return _defaultArgument; }
         bool hasDefaultArgument() const { return _defaultArgument != nullptr; }
 
-        ~ParameterDecl() override {
+        ~TemplateParameterDecl() override {
             delete _type;
             delete _defaultArgument;
         }
 
     private:
-        // TODO: Support 'Modifiers' and default modifiers like 'in' and 'out'
         Type* _type;
         const std::string _name;
         // TODO: Should this be 'ConstExpr'?
@@ -35,4 +34,4 @@ namespace gulc {
     };
 }
 
-#endif //GULC_PARAMETERDECL_HPP
+#endif //GULC_TEMPLATEPARAMETERDECL_HPP

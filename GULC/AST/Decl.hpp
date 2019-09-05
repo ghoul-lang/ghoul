@@ -15,7 +15,8 @@ namespace gulc {
             Property,
             MemberFunction,
             MemberProperty,
-            Parameter
+            Parameter,
+            TemplateParameterDecl
         };
 
         DeclKind getDeclKind() const { return _kind; }

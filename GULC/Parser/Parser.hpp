@@ -6,9 +6,18 @@
 #include <AST/Decl.hpp>
 #include <vector>
 #include <AST/Decls/ParameterDecl.hpp>
+#include <AST/Decls/TemplateParameterDecl.hpp>
 #include <AST/Stmts/CompoundStmt.hpp>
 #include <AST/Stmts/ReturnStmt.hpp>
 #include <AST/Exprs/IdentifierExpr.hpp>
+#include <AST/Stmts/IfStmt.hpp>
+#include <AST/Stmts/WhileStmt.hpp>
+#include <AST/Stmts/ForStmt.hpp>
+#include <AST/Stmts/DoStmt.hpp>
+#include <AST/Stmts/SwitchStmt.hpp>
+#include <AST/Stmts/BreakStmt.hpp>
+#include <AST/Stmts/ContinueStmt.hpp>
+#include <AST/Stmts/GotoStmt.hpp>
 
 namespace gulc {
     class Parser {
@@ -24,6 +33,7 @@ namespace gulc {
         void printError(const std::string& errorMessage, TextPosition startPosition, TextPosition endPosition);
         void printWarning(const std::string& warningMessage, TextPosition startPosition, TextPosition endPosition);
 
+        std::vector<TemplateParameterDecl*> parseTemplateParameterDecls(TextPosition startPosition);
         std::vector<ParameterDecl*> parseParameterDecls(TextPosition startPosition);
 
         Type* parseType();
@@ -31,6 +41,14 @@ namespace gulc {
         Stmt* parseStmt();
         CompoundStmt* parseCompoundStmt();
         ReturnStmt* parseReturnStmt();
+        IfStmt* parseIfStmt();
+        WhileStmt* parseWhileStmt();
+        ForStmt* parseForStmt();
+        DoStmt* parseDoStmt();
+        SwitchStmt* parseSwitchStmt();
+        BreakStmt* parseBreakStmt();
+        ContinueStmt* parseContinueStmt();
+        GotoStmt* parseGotoStmt();
 
         /*
          * "templateTypingAllowed" allows us to parse 'Template<int>' alone.
@@ -45,8 +63,8 @@ namespace gulc {
          * functionCall
          */
         // TODO: Is this a good name for what this is?
-        Expr* parseRValue(bool templateTypingAllowed);
-        Expr* parseAssignmentMisc(bool templateTypingAllowed);
+        Expr* parseRValue(bool isStatement, bool templateTypingAllowed);
+        Expr* parseAssignmentMisc(bool isStatement, bool templateTypingAllowed);
         Expr* parseLogicalOr(bool templateTypingAllowed);
         Expr* parseLogicalAnd(bool templateTypingAllowed);
         Expr* parseBitwiseOr(bool templateTypingAllowed);

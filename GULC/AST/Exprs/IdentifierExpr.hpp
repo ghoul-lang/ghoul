@@ -17,6 +17,13 @@ namespace gulc {
 
         std::string name() const { return _name; }
         const std::vector<Expr*>& templateArguments() const { return _templateArguments; }
+        bool hasTemplateArguments() const { return !_templateArguments.empty(); }
+
+        ~IdentifierExpr() override {
+            for (Expr* templateArgument : _templateArguments) {
+                delete templateArgument;
+            }
+        }
                   
     private:
         std::string _name;

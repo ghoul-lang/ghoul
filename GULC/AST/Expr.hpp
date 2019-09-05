@@ -26,7 +26,11 @@ namespace gulc {
             IntegerLiteral,
             FloatLiteral,
             StringLiteral,
-            CharacterLiteral
+            CharacterLiteral,
+
+            PotentialExplicitCast,
+
+            LocalVariableDeclOrPrefixOperatorCallExpr
         };
 
         ExprKind getExprKind() const { return _kind; }

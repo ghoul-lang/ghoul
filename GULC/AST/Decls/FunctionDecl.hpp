@@ -6,6 +6,7 @@
 #include <vector>
 #include <AST/Stmts/CompoundStmt.hpp>
 #include "ParameterDecl.hpp"
+#include "TemplateParameterDecl.hpp"
 
 namespace gulc {
     class FunctionDecl : public Decl {
@@ -16,18 +17,25 @@ namespace gulc {
         // (i.e. `int f<T>(T param1);`, `class t<int len> { int[len] array; }` where no prefix to the name defaults to 'typename')
         // (`int f<T>(T param1);` == `int f<typename T>(T param1);`)
         FunctionDecl(std::string sourceFile, TextPosition startPosition, TextPosition endPosition, Type* resultType,
-                     std::string name, std::vector<ParameterDecl*> parameters, CompoundStmt* body)
+                     std::string name, std::vector<TemplateParameterDecl*> templateParameters,
+                     std::vector<ParameterDecl*> parameters, CompoundStmt* body)
                 : Decl(DeclKind::Function, std::move(sourceFile), startPosition, endPosition),
-                  _resultType(resultType), _name(std::move(name)), _parameters(std::move(parameters)), _body(body) {}
+                  _resultType(resultType), _name(std::move(name)), _templateParameters(std::move(templateParameters)),
+                  _parameters(std::move(parameters)), _body(body) {}
 
         const Type* resultType() const { return _resultType; }
         std::string name() const { return _name; }
+        const std::vector<TemplateParameterDecl*>& templateParameters() const { return _templateParameters; }
         const std::vector<ParameterDecl*>& parameters() const { return _parameters; }
         const CompoundStmt* body() const { return _body; }
 
         ~FunctionDecl() override {
             for (ParameterDecl* parameterDecl : _parameters) {
                 delete parameterDecl;
+            }
+
+            for (TemplateParameterDecl* templateParameterDecl : _templateParameters) {
+                delete templateParameterDecl;
             }
 
             delete _resultType;
@@ -37,6 +45,7 @@ namespace gulc {
     private:
         Type* _resultType;
         const std::string _name;
+        const std::vector<TemplateParameterDecl*> _templateParameters;
         const std::vector<ParameterDecl*> _parameters;
         CompoundStmt* _body;
 
