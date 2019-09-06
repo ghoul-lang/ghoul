@@ -8,6 +8,16 @@ int Function<T, int max = (12)>(T left, int right = 1)
 {
     break;
     break testLabel;
+
+    try
+    {
+        secondFunction<int>(right);
+    }
+    catch (WhoKnowsException e)
+    {
+        return 2;
+    }
+
     if (left == right) return 0;
     else testLabel: return left + (int)++secondFunctionTest<int<(i >> 2)>>(right++);
 }

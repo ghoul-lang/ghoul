@@ -17,6 +17,7 @@ namespace gulc {
         bool isDefault() const { return _isDefault; }
         const Expr* condition() const { return _condition; }
         const Stmt* trueStmt() const { return _trueStmt; }
+        bool hasCondition() const { return _condition != nullptr; }
 
         ~CaseStmt() override {
             delete _condition;

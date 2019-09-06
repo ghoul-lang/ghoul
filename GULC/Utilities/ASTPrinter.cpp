@@ -32,6 +32,39 @@ void ASTPrinter::printStmt(const Stmt *stmt, const std::string& prefix) {
         case Stmt::StmtKind::If:
             printIfStmt(llvm::dyn_cast<IfStmt>(stmt), prefix);
             break;
+        case Stmt::StmtKind::While:
+            printWhileStmt(llvm::dyn_cast<WhileStmt>(stmt), prefix);
+            break;
+        case Stmt::StmtKind::For:
+            printForStmt(llvm::dyn_cast<ForStmt>(stmt), prefix);
+            break;
+        case Stmt::StmtKind::Do:
+            printDoStmt(llvm::dyn_cast<DoStmt>(stmt), prefix);
+            break;
+        case Stmt::StmtKind::Switch:
+            printSwitchStmt(llvm::dyn_cast<SwitchStmt>(stmt), prefix);
+            break;
+        case Stmt::StmtKind::Case:
+            printCaseStmt(llvm::dyn_cast<CaseStmt>(stmt), prefix);
+            break;
+        case Stmt::StmtKind::Break:
+            printBreakStmt(llvm::dyn_cast<BreakStmt>(stmt), prefix);
+            break;
+        case Stmt::StmtKind::Continue:
+            printContinueStmt(llvm::dyn_cast<ContinueStmt>(stmt), prefix);
+            break;
+        case Stmt::StmtKind::Goto:
+            printGotoStmt(llvm::dyn_cast<GotoStmt>(stmt), prefix);
+            break;
+        case Stmt::StmtKind::Try:
+            printTryStmt(llvm::dyn_cast<TryStmt>(stmt), prefix);
+            break;
+        case Stmt::StmtKind::TryCatch:
+            printTryCatchStmt(llvm::dyn_cast<TryCatchStmt>(stmt), prefix);
+            break;
+        case Stmt::StmtKind::TryFinally:
+            printTryFinallyStmt(llvm::dyn_cast<TryFinallyStmt>(stmt), prefix);
+            break;
         default:
             std::cout << prefix << "[UNSUPPORTED STMT]" << std::endl;
             break;
@@ -192,6 +225,116 @@ void ASTPrinter::printIfStmt(const IfStmt *ifStmt, const std::string &prefix) {
         std::cout << prefix << "\\ FalseStmt: " << std::endl;
         printStmt(ifStmt->falseStmt(), prefix + "  ");
     }
+}
+
+void ASTPrinter::printWhileStmt(const WhileStmt *whileStmt, const std::string &prefix) {
+    std::cout << prefix << "| WhileStmt " << std::endl;
+    std::cout << prefix << "\\ Condition: " << std::endl;
+    printExpr(whileStmt->condition(), prefix + "  ");
+    std::cout << prefix << "\\ LoopStmt: " << std::endl;
+    printStmt(whileStmt->loopStmt(), prefix + "  ");
+}
+
+void ASTPrinter::printForStmt(const ForStmt *forStmt, const std::string &prefix) {
+    std::cout << prefix << "| ForStmt " << std::endl;
+    std::cout << prefix << "\\ PreLoop: " << std::endl;
+    printExpr(forStmt->preLoop(), prefix + "  ");
+    std::cout << prefix << "\\ Condition: " << std::endl;
+    printExpr(forStmt->condition(), prefix + "  ");
+    std::cout << prefix << "\\ IterationExpr: " << std::endl;
+    printExpr(forStmt->iterationExpr(), prefix + "  ");
+    std::cout << prefix << "\\ LoopStmt: " << std::endl;
+    printStmt(forStmt->loopStmt(), prefix + "  ");
+}
+
+void ASTPrinter::printDoStmt(const DoStmt *doStmt, const std::string &prefix) {
+    std::cout << prefix << "| DoStmt " << std::endl;
+    std::cout << prefix << "\\ LoopStmt: " << std::endl;
+    printStmt(doStmt->loopStmt(), prefix + "  ");
+    std::cout << prefix << "\\ While Condition: " << std::endl;
+    printExpr(doStmt->condition(), prefix + "  ");
+}
+
+void ASTPrinter::printSwitchStmt(const SwitchStmt *switchStmt, const std::string &prefix) {
+    std::cout << prefix << "| SwitchStmt " << std::endl;
+    std::cout << prefix << "\\ Condition: " << std::endl;
+    printStmt(switchStmt->condition(), prefix + "  ");
+
+    for (const CaseStmt* caseStmt : switchStmt->cases()) {
+        printCaseStmt(caseStmt, prefix + "  ");
+    }
+}
+
+void ASTPrinter::printCaseStmt(const CaseStmt *caseStmt, const std::string &prefix) {
+    if (caseStmt->isDefault()) {
+        std::cout << prefix << "| Default CaseExpr: " << std::endl;
+    }
+
+    if (caseStmt->hasCondition()) {
+        if (!caseStmt->isDefault()) {
+            std::cout << prefix << "| CaseExpr: " << std::endl;
+        }
+
+        std::cout << prefix << "\\ Condition: " << std::endl;
+        printExpr(caseStmt->condition(), prefix + "  ");
+    }
+
+    printStmt(caseStmt->trueStmt(), prefix + "  ");
+}
+
+void ASTPrinter::printBreakStmt(const BreakStmt *breakStmt, const std::string &prefix) {
+    std::cout << prefix << "| BreakStmt ";
+
+    if (!breakStmt->label().empty()) {
+        std::cout << "(label: " << breakStmt->label() << ")";
+    }
+
+    std::cout << std::endl;
+}
+
+void ASTPrinter::printContinueStmt(const ContinueStmt *continueStmt, const std::string &prefix) {
+    std::cout << prefix << "| ContinueStmt ";
+
+    if (!continueStmt->label().empty()) {
+        std::cout << "(label: " << continueStmt->label() << ")";
+    }
+
+    std::cout << std::endl;
+}
+
+void ASTPrinter::printGotoStmt(const GotoStmt *gotoStmt, const std::string &prefix) {
+    std::cout << prefix << "| GotoStmt (name: " << gotoStmt->label() << ")" << std::endl;
+}
+
+void ASTPrinter::printTryStmt(const TryStmt *tryStmt, const std::string &prefix) {
+    std::cout << prefix << "| TryStmt " << std::endl;
+    std::cout << prefix << "\\ EncapsulatedStmt: " << std::endl;
+    printStmt(tryStmt->encapsulatedStmt(), prefix + "  ");
+
+    for (const TryCatchStmt* tryCatchStmt : tryStmt->catchStmts()) {
+        printTryCatchStmt(tryCatchStmt, prefix);
+    }
+
+    if (tryStmt->hasFinallyStmt()) {
+        printTryFinallyStmt(tryStmt->finallyStmt(), prefix);
+    }
+}
+
+void ASTPrinter::printTryCatchStmt(const TryCatchStmt *tryCatchStmt, const std::string &prefix) {
+    std::cout << prefix << "| TryCatchStmt " << std::endl;
+
+    if (tryCatchStmt->hasExceptionDecl()) {
+        std::cout << prefix << "\\ ExceptionDecl: " << std::endl;
+        printExpr(tryCatchStmt->exceptionDecl(), prefix + "  ");
+    }
+
+    printStmt(tryCatchStmt->handlerStmt(), prefix + "  ");
+}
+
+void ASTPrinter::printTryFinallyStmt(const TryFinallyStmt *tryFinallyStmt, const std::string &prefix) {
+    std::cout << prefix << "| TryFinallyStmt " << std::endl;
+
+    printStmt(tryFinallyStmt->handlerStmt(), prefix + "  ");
 }
 
 // Exprs

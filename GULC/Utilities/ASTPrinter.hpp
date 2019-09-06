@@ -21,6 +21,14 @@
 #include <AST/Exprs/IndexerCallExpr.hpp>
 #include <AST/Stmts/LabeledStmt.hpp>
 #include <AST/Stmts/IfStmt.hpp>
+#include <AST/Stmts/WhileStmt.hpp>
+#include <AST/Stmts/ForStmt.hpp>
+#include <AST/Stmts/DoStmt.hpp>
+#include <AST/Stmts/SwitchStmt.hpp>
+#include <AST/Stmts/BreakStmt.hpp>
+#include <AST/Stmts/ContinueStmt.hpp>
+#include <AST/Stmts/GotoStmt.hpp>
+#include <AST/Stmts/TryStmt.hpp>
 
 namespace gulc {
     class ASTPrinter {
@@ -42,6 +50,17 @@ namespace gulc {
         static void printReturnStmt(const ReturnStmt* returnStmt, const std::string& prefix = "");
         static void printLabeledStmt(const LabeledStmt* labeledStmt, const std::string& prefix = "");
         static void printIfStmt(const IfStmt* ifStmt, const std::string& prefix = "");
+        static void printWhileStmt(const WhileStmt* whileStmt, const std::string& prefix = "");
+        static void printForStmt(const ForStmt* forStmt, const std::string& prefix = "");
+        static void printDoStmt(const DoStmt* doStmt, const std::string& prefix = "");
+        static void printSwitchStmt(const SwitchStmt* switchStmt, const std::string& prefix = "");
+        static void printCaseStmt(const CaseStmt* caseStmt, const std::string& prefix = "");
+        static void printBreakStmt(const BreakStmt* breakStmt, const std::string& prefix = "");
+        static void printContinueStmt(const ContinueStmt* continueStmt, const std::string& prefix = "");
+        static void printGotoStmt(const GotoStmt* gotoStmt, const std::string& prefix = "");
+        static void printTryStmt(const TryStmt* tryStmt, const std::string& prefix = "");
+        static void printTryCatchStmt(const TryCatchStmt* tryCatchStmt, const std::string& prefix = "");
+        static void printTryFinallyStmt(const TryFinallyStmt* tryFinallyStmt, const std::string& prefix = "");
 
         // Exprs
         static void printBinaryOperatorExpr(const BinaryOperatorExpr* binaryOperatorExpr, const std::string& prefix = "");

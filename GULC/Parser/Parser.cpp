@@ -392,9 +392,7 @@ Stmt *Parser::parseStmt() {
                        _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
             return nullptr;
         case TokenType::TRY:
-            printError("'try' statements not yet supported!",
-                       _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
-            return nullptr;
+            return parseTryStmt();
         default: {
             Expr* result = parseRValue(true, true);
 
@@ -870,6 +868,71 @@ GotoStmt *Parser::parseGotoStmt() {
     }
 
     return new GotoStmt(startPosition, endPosition, labelName);
+}
+
+TryStmt *Parser::parseTryStmt() {
+    TextPosition startPosition = _lexer.peekToken().startPosition;
+    TextPosition endPosition;
+
+    if (!_lexer.consumeType(TokenType::TRY)) {
+        printError("expected 'try' statement! (found '" + _lexer.peekToken().currentSymbol + "')",
+                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+        return nullptr;
+    }
+
+    CompoundStmt* encapsulatedStmt = parseCompoundStmt();
+    std::vector<TryCatchStmt*> catchStmts{};
+    TryFinallyStmt* finallyStmt = nullptr;
+
+    while (_lexer.peekType() == TokenType::CATCH || _lexer.peekType() == TokenType::FINALLY) {
+        if (_lexer.peekType() == TokenType::CATCH) {
+            TextPosition catchStartPosition = _lexer.peekToken().startPosition;
+            TextPosition catchEndPosition;
+
+            _lexer.consumeType(TokenType::CATCH);
+
+            Expr* exceptionDecl = nullptr;
+
+            // If there is a '(' then we will parse the exception variable, if not that is okay. There doesn't have to be one.
+            if (_lexer.consumeType(TokenType::LPAREN)) {
+                // TODO: We should improve this by making a 'type' parser and using that instead. This will ALWAYS be `type identifier`
+                exceptionDecl = parseRValue(true, true);
+
+                if (!_lexer.consumeType(TokenType::RPAREN)) {
+                    printError("expected closing ')' for catch statement! (found '" + _lexer.peekToken().currentSymbol + "')",
+                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                    return nullptr;
+                }
+            }
+
+            CompoundStmt* compoundStmt = parseCompoundStmt();
+            catchEndPosition = compoundStmt->endPosition();
+
+            catchStmts.push_back(new TryCatchStmt(catchStartPosition, catchEndPosition, exceptionDecl, compoundStmt));
+
+            endPosition = catchEndPosition;
+        } else if (_lexer.peekType() == TokenType::FINALLY) {
+            if (finallyStmt != nullptr) {
+                printError("duplicate 'finally' statement for 'try' statement!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            TextPosition finallyStartPosition = _lexer.peekToken().startPosition;
+            TextPosition finallyEndPosition;
+
+            _lexer.consumeType(TokenType::FINALLY);
+
+            CompoundStmt* compoundStmt = parseCompoundStmt();
+            finallyEndPosition = compoundStmt->endPosition();
+
+            finallyStmt = new TryFinallyStmt(finallyStartPosition, finallyEndPosition, compoundStmt);
+
+            endPosition = finallyEndPosition;
+        }
+    }
+
+    return new TryStmt(startPosition, endPosition, encapsulatedStmt, catchStmts, finallyStmt);
 }
 
 Expr *Parser::parseRValue(bool isStatement, bool templateTypingAllowed) {

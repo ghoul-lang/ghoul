@@ -22,7 +22,11 @@ namespace gulc {
 
             Break,
             Continue,
-            Goto
+            Goto,
+
+            Try,
+            TryCatch,
+            TryFinally
         };
 
         StmtKind getStmtKind() const { return _kind; }

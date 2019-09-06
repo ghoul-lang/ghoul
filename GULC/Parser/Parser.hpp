@@ -18,6 +18,7 @@
 #include <AST/Stmts/BreakStmt.hpp>
 #include <AST/Stmts/ContinueStmt.hpp>
 #include <AST/Stmts/GotoStmt.hpp>
+#include <AST/Stmts/TryStmt.hpp>
 
 namespace gulc {
     class Parser {
@@ -49,6 +50,7 @@ namespace gulc {
         BreakStmt* parseBreakStmt();
         ContinueStmt* parseContinueStmt();
         GotoStmt* parseGotoStmt();
+        TryStmt* parseTryStmt();
 
         /*
          * "templateTypingAllowed" allows us to parse 'Template<int>' alone.
