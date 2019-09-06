@@ -29,6 +29,10 @@
 #include <AST/Stmts/ContinueStmt.hpp>
 #include <AST/Stmts/GotoStmt.hpp>
 #include <AST/Stmts/TryStmt.hpp>
+#include <AST/Exprs/CharacterLiteralExpr.hpp>
+#include <AST/Exprs/StringLiteralExpr.hpp>
+#include <AST/Exprs/MemberAccessCallExpr.hpp>
+#include <AST/Exprs/TernaryExpr.hpp>
 
 namespace gulc {
     class ASTPrinter {
@@ -74,6 +78,10 @@ namespace gulc {
         static void printPotentialExplicitCastExpr(const PotentialExplicitCastExpr* potentialExplicitCastExpr, const std::string& prefix = "");
         static void printLocalVariableDeclOrPrefixOperatorCallExpr(const LocalVariableDeclOrPrefixOperatorCallExpr* localVariableDeclOrPrefixOperatorCallExpr, const std::string& prefix = "");
         static void printIndexerCallExpr(const IndexerCallExpr* indexerCallExpr, const std::string& prefix = "");
+        static void printCharacterLiteralExpr(const CharacterLiteralExpr* characterLiteralExpr, const std::string& prefix = "");
+        static void printStringLiteralExpr(const StringLiteralExpr* stringLiteralExpr, const std::string& prefix = "");
+        static void printMemberAccessCallExpr(const MemberAccessCallExpr* memberAccessCallExpr, const std::string& prefix = "");
+        static void printTernaryExpr(const TernaryExpr* ternaryExpr, const std::string& prefix = "");
 
     };
 }

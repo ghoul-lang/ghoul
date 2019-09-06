@@ -34,6 +34,20 @@ namespace gulc {
         }
 
     private:
+        // We require 'CompoundStmt' for 'try', 'catch', and 'finally' to prevent unwanted errors for:
+        //
+        //     try
+        //         // blah...
+        //     catch (Exception2 e2)
+        //     catch (Exception e)
+        //         try
+        //             // blah again, use imagination...
+        //         catch (IOException ioe)
+        //             // blah...
+        //         catch (Exception3 e3)
+        //
+        // In situations similar to that it would be difficult to tell if the nested catch statements are nested
+        // or attached to the first try statement
         CompoundStmt* _encapsulatedStmt;
         std::vector<TryCatchStmt*> _catchStmts;
         TryFinallyStmt* _finallyStmt;

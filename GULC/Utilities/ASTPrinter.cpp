@@ -106,8 +106,18 @@ void ASTPrinter::printExpr(const Expr *expr, const std::string& prefix) {
         case Expr::ExprKind::IndexerCall:
             printIndexerCallExpr(llvm::dyn_cast<IndexerCallExpr>(expr), prefix);
             break;
+        case Expr::ExprKind::CharacterLiteral:
+            printCharacterLiteralExpr(llvm::dyn_cast<CharacterLiteralExpr>(expr), prefix);
+            break;
+        case Expr::ExprKind::StringLiteral:
+            printStringLiteralExpr(llvm::dyn_cast<StringLiteralExpr>(expr), prefix);
+            break;
         case Expr::ExprKind::MemberAccessCall:
+            printMemberAccessCallExpr(llvm::dyn_cast<MemberAccessCallExpr>(expr), prefix);
+            break;
         case Expr::ExprKind::Ternary:
+            printTernaryExpr(llvm::dyn_cast<TernaryExpr>(expr), prefix);
+            break;
         default:
             std::cout << prefix << "[UNSUPPORTED EXPR]" << std::endl;
             break;
@@ -118,8 +128,14 @@ void ASTPrinter::printExpr(const Expr *expr, const std::string& prefix) {
 std::string ASTPrinter::getTypeName(const Type *type) {
     switch (type->getTypeKind()) {
         case Type::TypeKind::Unresolved: {
-            // TODO: We should also append the namespace
-            return llvm::dyn_cast<UnresolvedType>(type)->name();
+            auto* unresolvedType = llvm::dyn_cast<UnresolvedType>(type);
+            std::string result;
+
+            for (const std::string& namespacePath : unresolvedType->namespacePath()) {
+                result += namespacePath + ".";
+            }
+
+            return result + unresolvedType->name();
         }
         case Type::TypeKind::TemplateTypename:
             return "typename";
@@ -417,4 +433,30 @@ void ASTPrinter::printIndexerCallExpr(const IndexerCallExpr *indexerCallExpr, co
             printExpr(argument, prefix + "  ");
         }
     }
+}
+
+void ASTPrinter::printCharacterLiteralExpr(const CharacterLiteralExpr *characterLiteralExpr, const std::string &prefix) {
+    std::cout << prefix << "| CharacterLiteralExpr (characterValue: '" << static_cast<wchar_t>(characterLiteralExpr->characterValue()) << "' or " << characterLiteralExpr->characterValue() << ")" << std::endl;
+}
+
+void ASTPrinter::printStringLiteralExpr(const StringLiteralExpr *stringLiteralExpr, const std::string &prefix) {
+    std::cout << prefix << "| StringLiteralExpr (value: \"" << stringLiteralExpr->stringValue() << "\")" << std::endl;
+}
+
+void ASTPrinter::printMemberAccessCallExpr(const MemberAccessCallExpr *memberAccessCallExpr, const std::string &prefix) {
+    std::cout << prefix << "| MemberAccessCallExpr (dereference: " << memberAccessCallExpr->isArrowCall() << ")" << std::endl;
+    std::cout << prefix << "\\ Object Reference: " << std::endl;
+    printExpr(memberAccessCallExpr->objectRef(), prefix + "  ");
+    std::cout << prefix << "\\ Member: " << std::endl;
+    printExpr(memberAccessCallExpr->member(), prefix + "  ");
+}
+
+void ASTPrinter::printTernaryExpr(const TernaryExpr *ternaryExpr, const std::string &prefix) {
+    std::cout << prefix << "| TernaryExpr " << std::endl;
+    std::cout << prefix << "\\ Condition: " << std::endl;
+    printExpr(ternaryExpr->condition(), prefix + "  ");
+    std::cout << prefix << "\\ TrueExpr: " << std::endl;
+    printExpr(ternaryExpr->trueExpr(), prefix + "  ");
+    std::cout << prefix << "\\ FalseExpr: " << std::endl;
+    printExpr(ternaryExpr->falseExpr(), prefix + "  ");
 }
