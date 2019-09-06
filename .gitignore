@@ -263,3 +263,6 @@ __pycache__/
 # CMake Directories
 cmake-*/
 out/
+
+# VS CMake
+/CMakeSettings.json
