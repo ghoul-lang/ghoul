@@ -12,7 +12,7 @@ namespace gulc {
         CaseStmt(TextPosition startPosition, TextPosition endPosition,
                  Expr* condition, Stmt* trueStmt, bool isDefault)
                 : Stmt(StmtKind::Case, startPosition, endPosition),
-                  _condition(condition), _trueStmt(trueStmt), _isDefault(isDefault) {}
+			      _isDefault(isDefault), _condition(condition), _trueStmt(trueStmt) {}
 
         bool isDefault() const { return _isDefault; }
         const Expr* condition() const { return _condition; }

@@ -38,6 +38,16 @@ Parser::Parser(std::string filePath)
     }
 }
 
+FileAST Parser::parseFile() {
+    FileAST result(_filePath);
+
+    while (_lexer.peekType() != TokenType::ENDOFFILE) {
+        result.addTopLevelDecl(parseTopLevelDecl());
+    }
+
+    return result;
+}
+
 // TODO: Support adding the error to a list and continuing? Or just cancelling the compilation of this file?
 void Parser::printError(const std::string& errorMessage, TextPosition startPosition, TextPosition endPosition) {
     std::cout << "gulc parser error[" << _filePath << ", "
@@ -288,7 +298,7 @@ std::vector<TemplateParameterDecl *> Parser::parseTemplateParameterDecls(TextPos
         return std::vector<TemplateParameterDecl*>();
     }
 
-    return std::move(result);
+    return result;
 }
 
 std::vector<ParameterDecl*> Parser::parseParameterDecls(TextPosition startPosition) {
@@ -342,7 +352,7 @@ std::vector<ParameterDecl*> Parser::parseParameterDecls(TextPosition startPositi
         return std::vector<ParameterDecl*>();
     }
 
-    return std::move(result);
+    return result;
 }
 
 Type* Parser::parseType() {

@@ -19,13 +19,14 @@
 #include <AST/Stmts/ContinueStmt.hpp>
 #include <AST/Stmts/GotoStmt.hpp>
 #include <AST/Stmts/TryStmt.hpp>
+#include <AST/FileAST.hpp>
 
 namespace gulc {
     class Parser {
     public:
         explicit Parser(std::string filePath);
 
-        Decl* parseTopLevelDecl();
+        FileAST parseFile();
 
     private:
         std::string _filePath;
@@ -34,6 +35,7 @@ namespace gulc {
         void printError(const std::string& errorMessage, TextPosition startPosition, TextPosition endPosition);
         void printWarning(const std::string& warningMessage, TextPosition startPosition, TextPosition endPosition);
 
+        Decl* parseTopLevelDecl();
         std::vector<TemplateParameterDecl*> parseTemplateParameterDecls(TextPosition startPosition);
         std::vector<ParameterDecl*> parseParameterDecls(TextPosition startPosition);
 

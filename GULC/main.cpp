@@ -1,18 +1,15 @@
 ﻿#include <Parser/Parser.hpp>
-#include <iostream>
-#include <AST/Decls/FunctionDecl.hpp>
 #include <Utilities/ASTPrinter.hpp>
 
 using namespace gulc;
 
 int main() {
     Parser parser("Examples/FunctionTest.gul");
-    Decl* decl = parser.parseTopLevelDecl();
-    ASTPrinter::printDecl(decl);
-    delete decl;
+    FileAST fileAst(parser.parseFile());
 
-    decl = parser.parseTopLevelDecl();
-    ASTPrinter::printDecl(decl);
-    delete decl;
+    for (const Decl* topLevelDecl : fileAst.topLevelDecls()) {
+        ASTPrinter::printDecl(topLevelDecl);
+    }
+
 	return 0;
 }

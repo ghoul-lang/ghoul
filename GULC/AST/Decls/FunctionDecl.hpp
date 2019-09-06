@@ -13,9 +13,6 @@ namespace gulc {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == DeclKind::Function; }
 
-        // TODO: Support template functions. Template functions will have syntax similar to C# but support the same things as C++
-        // (i.e. `int f<T>(T param1);`, `class t<int len> { int[len] array; }` where no prefix to the name defaults to 'typename')
-        // (`int f<T>(T param1);` == `int f<typename T>(T param1);`)
         FunctionDecl(std::string sourceFile, TextPosition startPosition, TextPosition endPosition, Type* resultType,
                      std::string name, std::vector<TemplateParameterDecl*> templateParameters,
                      std::vector<ParameterDecl*> parameters, CompoundStmt* body)
