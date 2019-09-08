@@ -6,24 +6,22 @@
 namespace gulc {
     class PotentialExplicitCastExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::PotentialExplicitCast; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::PotentialExplicitCast; }
 
         PotentialExplicitCastExpr(TextPosition startPosition, TextPosition endPosition,
                                   Expr* castType, Expr* castee)
-                : Expr(ExprKind::PotentialExplicitCast, startPosition, endPosition),
-                  _castType(castType), _castee(castee) {}
+                : Expr(Kind::PotentialExplicitCast, startPosition, endPosition),
+                  castType(castType), castee(castee) {}
 
-        const Expr* castType() const { return _castType; }
-        const Expr* castee() const { return _castee; }
+        Expr* castType;
+        Expr* castee;
 
         ~PotentialExplicitCastExpr() override {
-            delete _castType;
-            delete _castee;
+            delete castType;
+            delete castee;
         }
 
     private:
-        Expr* _castType;
-        Expr* _castee;
 
     };
 }

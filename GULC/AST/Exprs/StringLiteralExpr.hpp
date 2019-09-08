@@ -7,10 +7,10 @@
 namespace gulc {
     class StringLiteralExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::StringLiteral; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::StringLiteral; }
 
         StringLiteralExpr(TextPosition startPosition, TextPosition endPosition, std::string stringValue)
-                : Expr(ExprKind::StringLiteral, startPosition, endPosition),
+                : Expr(Kind::StringLiteral, startPosition, endPosition),
                   _stringValue(std::move(stringValue)) {}
 
         std::string stringValue() const { return _stringValue; }

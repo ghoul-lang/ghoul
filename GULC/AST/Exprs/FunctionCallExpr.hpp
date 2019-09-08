@@ -7,18 +7,20 @@
 namespace gulc {
     class FunctionCallExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::FunctionCall; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::FunctionCall; }
 
         FunctionCallExpr(TextPosition startPosition, TextPosition endPosition,
                          Expr* functionReference, std::vector<Expr*> arguments)
-                : Expr(ExprKind::FunctionCall, startPosition, endPosition),
-                  _functionReference(functionReference), _arguments(std::move(arguments)) {}
+                : Expr(Kind::FunctionCall, startPosition, endPosition),
+                  functionReference(functionReference), _arguments(std::move(arguments)) {}
 
-        const Expr* functionReference() const { return _functionReference; }
+        Expr* functionReference;
+        std::vector<Expr*>& arguments() { return _arguments; }
         const std::vector<Expr*>& arguments() const { return _arguments; }
+        bool hasArguments() const { return !_arguments.empty(); }
 
         ~FunctionCallExpr() override {
-            delete _functionReference;
+            delete functionReference;
 
             for (Expr* argument : _arguments) {
                 delete argument;
@@ -26,7 +28,6 @@ namespace gulc {
         }
 
     private:
-        Expr* _functionReference;
         std::vector<Expr*> _arguments;
 
     };

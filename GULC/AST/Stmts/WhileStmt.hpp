@@ -7,24 +7,20 @@
 namespace gulc {
     class WhileStmt : public Stmt {
     public:
-        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == StmtKind::While; }
+        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == Kind::While; }
 
         WhileStmt(TextPosition startPosition, TextPosition endPosition,
                   Expr* condition, Stmt* loopStmt)
-                : Stmt(StmtKind::While, startPosition, endPosition),
-                  _condition(condition), _loopStmt(loopStmt) {}
+                : Stmt(Kind::While, startPosition, endPosition),
+                  condition(condition), loopStmt(loopStmt) {}
 
-        const Expr* condition() const { return _condition; }
-        const Stmt* loopStmt() const { return _loopStmt; }
+        Expr* condition;
+        Stmt* loopStmt;
 
         ~WhileStmt() override {
-            delete _condition;
-            delete _loopStmt;
+            delete condition;
+            delete loopStmt;
         }
-
-    private:
-        Expr* _condition;
-        Stmt* _loopStmt;
 
     };
 }

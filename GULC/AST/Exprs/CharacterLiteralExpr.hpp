@@ -6,10 +6,10 @@
 namespace gulc {
     class CharacterLiteralExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::CharacterLiteral; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::CharacterLiteral; }
 
         CharacterLiteralExpr(TextPosition startPosition, TextPosition endPosition, unsigned int characterLiteral)
-                : Expr(ExprKind::CharacterLiteral, startPosition, endPosition),
+                : Expr(Kind::CharacterLiteral, startPosition, endPosition),
                   _characterValue(characterLiteral) {}
 
         unsigned int characterValue() const { return _characterValue; }

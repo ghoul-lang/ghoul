@@ -8,20 +8,17 @@ namespace gulc {
     /// The 'finally' aspect of the 'try' Stmt
     class TryFinallyStmt : public Stmt {
     public:
-        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == StmtKind::TryFinally; }
+        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == Kind::TryFinally; }
 
         TryFinallyStmt(TextPosition startPosition, TextPosition endPosition, CompoundStmt* handlerStmt)
-                : Stmt(StmtKind::TryFinally, startPosition, endPosition),
-                  _handlerStmt(handlerStmt) {}
+                : Stmt(Kind::TryFinally, startPosition, endPosition),
+                  handlerStmt(handlerStmt) {}
 
-        const CompoundStmt* handlerStmt() const { return _handlerStmt; }
+        CompoundStmt* handlerStmt;
 
         ~TryFinallyStmt() override {
-            delete _handlerStmt;
+            delete handlerStmt;
         }
-
-    private:
-        CompoundStmt* _handlerStmt;
 
     };
 }

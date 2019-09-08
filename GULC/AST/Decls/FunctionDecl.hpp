@@ -11,39 +11,40 @@
 namespace gulc {
     class FunctionDecl : public Decl {
     public:
-        static bool classof(const Decl *decl) { return decl->getDeclKind() == DeclKind::Function; }
+        static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Function; }
 
         FunctionDecl(std::string sourceFile, TextPosition startPosition, TextPosition endPosition, Type* resultType,
                      std::string name, std::vector<TemplateParameterDecl*> templateParameters,
                      std::vector<ParameterDecl*> parameters, CompoundStmt* body)
-                : Decl(DeclKind::Function, std::move(sourceFile), startPosition, endPosition),
-                  _resultType(resultType), _name(std::move(name)), _templateParameters(std::move(templateParameters)),
+                : Decl(Kind::Function, std::move(sourceFile), startPosition, endPosition),
+                  resultType(resultType), templateParameters(std::move(templateParameters)), _name(std::move(name)),
                   _parameters(std::move(parameters)), _body(body) {}
 
-        const Type* resultType() const { return _resultType; }
+        Type* resultType;
         std::string name() const { return _name; }
-        const std::vector<TemplateParameterDecl*>& templateParameters() const { return _templateParameters; }
-        const std::vector<ParameterDecl*>& parameters() const { return _parameters; }
-        const CompoundStmt* body() const { return _body; }
+        std::vector<TemplateParameterDecl*> templateParameters;
+        std::vector<ParameterDecl*>& parameters() { return _parameters; }
+        std::vector<ParameterDecl*> parameters() const { return _parameters; }
+        CompoundStmt* body() const { return _body; }
+
+        bool hasTemplateArguments() const { return !templateParameters.empty(); }
 
         ~FunctionDecl() override {
             for (ParameterDecl* parameterDecl : _parameters) {
                 delete parameterDecl;
             }
 
-            for (TemplateParameterDecl* templateParameterDecl : _templateParameters) {
+            for (TemplateParameterDecl* templateParameterDecl : templateParameters) {
                 delete templateParameterDecl;
             }
 
-            delete _resultType;
+            delete resultType;
             delete _body;
         }
 
     private:
-        Type* _resultType;
         const std::string _name;
-        const std::vector<TemplateParameterDecl*> _templateParameters;
-        const std::vector<ParameterDecl*> _parameters;
+        std::vector<ParameterDecl*> _parameters;
         CompoundStmt* _body;
 
     };

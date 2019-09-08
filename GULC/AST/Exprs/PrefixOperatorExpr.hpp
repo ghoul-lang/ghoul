@@ -7,23 +7,22 @@
 namespace gulc {
     class PrefixOperatorExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::PrefixOperator; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::PrefixOperator; }
 
         PrefixOperatorExpr(TextPosition startPosition, TextPosition endPosition,
                            std::string operatorName, Expr* expr)
-                : Expr(ExprKind::PrefixOperator, startPosition, endPosition),
-                  _operatorName(std::move(operatorName)), _expr(expr) {}
+                : Expr(Kind::PrefixOperator, startPosition, endPosition),
+                  expr(expr), _operatorName(std::move(operatorName)) {}
 
         std::string operatorName() const { return _operatorName; }
-        const Expr* expr() const { return _expr; }
+        Expr* expr;
 
         ~PrefixOperatorExpr() override {
-            delete _expr;
+            delete expr;
         }
 
     private:
-        const std::string _operatorName;
-        const Expr* _expr;
+        std::string _operatorName;
 
     };
 }

@@ -7,28 +7,23 @@
 namespace gulc {
     class IfStmt : public Stmt {
     public:
-        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == StmtKind::If; }
+        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == Kind::If; }
 
         IfStmt(TextPosition startPosition, TextPosition endPosition,
                Expr* condition, Stmt* trueStmt, Stmt* falseStmt)
-                : Stmt(StmtKind::If, startPosition, endPosition),
-                  _condition(condition), _trueStmt(trueStmt), _falseStmt(falseStmt) {}
+                : Stmt(Kind::If, startPosition, endPosition),
+                  condition(condition), trueStmt(trueStmt), falseStmt(falseStmt) {}
 
-        const Expr* condition() const { return _condition; }
-        const Stmt* trueStmt() const { return _trueStmt; }
-        const Stmt* falseStmt() const { return _falseStmt; }
-        bool hasFalseStmt() const { return _falseStmt != nullptr; }
+        Expr* condition;
+        Stmt* trueStmt;
+        Stmt* falseStmt;
+        bool hasFalseStmt() const { return falseStmt != nullptr; }
 
         ~IfStmt() override  {
-            delete _condition;
-            delete _trueStmt;
-            delete _falseStmt;
+            delete condition;
+            delete trueStmt;
+            delete falseStmt;
         }
-
-    private:
-        Expr* _condition;
-        Stmt* _trueStmt;
-        Stmt* _falseStmt;
 
     };
 }

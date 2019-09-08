@@ -8,26 +8,25 @@
 namespace gulc {
     class IdentifierExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::Identifier; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::Identifier; }
 
         IdentifierExpr(TextPosition startPosition, TextPosition endPosition, std::string name,
                        std::vector<Expr*> templateArguments)
-                : Expr(ExprKind::Identifier, startPosition, endPosition), _name(std::move(name)),
-                  _templateArguments(std::move(templateArguments)) {}
+                : Expr(Kind::Identifier, startPosition, endPosition), 
+			      templateArguments(std::move(templateArguments)), _name(std::move(name)) {}
 
         std::string name() const { return _name; }
-        const std::vector<Expr*>& templateArguments() const { return _templateArguments; }
-        bool hasTemplateArguments() const { return !_templateArguments.empty(); }
+        std::vector<Expr*> templateArguments;
+        bool hasTemplateArguments() const { return !templateArguments.empty(); }
 
         ~IdentifierExpr() override {
-            for (Expr* templateArgument : _templateArguments) {
+            for (Expr* templateArgument : templateArguments) {
                 delete templateArgument;
             }
         }
                   
     private:
         std::string _name;
-        std::vector<Expr*> _templateArguments;
 
     };
 }

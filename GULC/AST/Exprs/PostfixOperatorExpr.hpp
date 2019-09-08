@@ -7,23 +7,22 @@
 namespace gulc {
     class PostfixOperatorExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::PostfixOperator; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::PostfixOperator; }
 
         PostfixOperatorExpr(TextPosition startPosition, TextPosition endPosition,
                 std::string operatorName, Expr* expr)
-                : Expr(ExprKind::PostfixOperator, startPosition, endPosition),
-                  _operatorName(std::move(operatorName)), _expr(expr) {}
+                : Expr(Kind::PostfixOperator, startPosition, endPosition), 
+			      expr(expr), _operatorName(std::move(operatorName)) {}
 
         std::string operatorName() const { return _operatorName; }
-        const Expr* expr() const { return _expr; }
+        Expr* expr;
 
         ~PostfixOperatorExpr() override {
-            delete _expr;
+            delete expr;
         }
 
     private:
-        const std::string _operatorName;
-        const Expr* _expr;
+        std::string _operatorName;
 
     };
 }

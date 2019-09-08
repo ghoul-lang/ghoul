@@ -7,10 +7,10 @@
 namespace gulc {
     class TemplateTypenameType : public Type {
     public:
-        static bool classof(const Type *expr) { return expr->getTypeKind() == TypeKind::TemplateTypename; }
+        static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::TemplateTypename; }
 
         TemplateTypenameType(TextPosition startPosition, TextPosition endPosition)
-                : Type(TypeKind::TemplateTypename, startPosition, endPosition) {}
+                : Type(Kind::TemplateTypename, startPosition, endPosition) {}
 
     };
 }

@@ -6,18 +6,17 @@ int secondFunctionTest<T>(T val)
 // Test
 int Function<T, int max = (12)>(T left, int right = 1)
 {
-    break;
-    break testLabel;
+    T test;
 
     try
     {
         secondFunction<int>(right);
     }
-    catch (WhoKnowsException e)
+    catch (int exInt)
     {
-        return 2;
+        return exInt;
     }
 
     if (left == right) return 0;
-    else testLabel: return left + (int)++secondFunctionTest<int<(i >> 2)>>(right++);
+    else testLabel: return left + (int)++secondFunctionTest<secondFunctionTest<((i >> 2) > 3)>()>(right++);
 }

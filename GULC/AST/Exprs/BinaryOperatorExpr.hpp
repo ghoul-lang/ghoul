@@ -7,26 +7,24 @@
 namespace gulc {
     class BinaryOperatorExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::BinaryOperator; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::BinaryOperator; }
 
         BinaryOperatorExpr(TextPosition startPosition, TextPosition endPosition,
                            std::string operatorName, Expr* leftValue, Expr* rightValue)
-                : Expr(ExprKind::BinaryOperator, startPosition, endPosition),
-                  _operatorName(std::move(operatorName)), _leftValue(leftValue), _rightValue(rightValue) {}
+                : Expr(Kind::BinaryOperator, startPosition, endPosition),
+			      leftValue(leftValue), rightValue(rightValue), _operatorName(std::move(operatorName)) {}
 
         std::string operatorName() const { return _operatorName; }
-        const Expr* leftValue() const { return _leftValue; }
-        const Expr* rightValue() const { return _rightValue; }
+        Expr* leftValue;
+        Expr* rightValue;
 
         ~BinaryOperatorExpr() override {
-            delete _leftValue;
-            delete _rightValue;
+            delete leftValue;
+            delete rightValue;
         }
 
     private:
         const std::string _operatorName;
-        const Expr* _leftValue;
-        const Expr* _rightValue;
 
     };
 }

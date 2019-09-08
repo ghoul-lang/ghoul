@@ -7,11 +7,11 @@
 namespace gulc {
     class IntegerLiteralExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::IntegerLiteral; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::IntegerLiteral; }
 
         IntegerLiteralExpr(TextPosition startPosition, TextPosition endPosition,
                            int numberBase, std::string numberString)
-                : Expr(ExprKind::IntegerLiteral, startPosition, endPosition),
+                : Expr(Kind::IntegerLiteral, startPosition, endPosition),
                   _numberBase(numberBase), _numberString(std::move(numberString)) {}
 
         unsigned int numberBase() const { return _numberBase; }

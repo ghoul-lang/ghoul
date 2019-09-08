@@ -8,26 +8,25 @@
 namespace gulc {
     class ParameterDecl : public Decl {
     public:
-        static bool classof(const Decl *decl) { return decl->getDeclKind() == DeclKind::Parameter; }
+        static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Parameter; }
 
         ParameterDecl(std::string sourceFile, TextPosition startPosition, TextPosition endPosition, Type* type,
                       std::string name, Expr* defaultArgument = nullptr)
-                : Decl(DeclKind::Parameter, std::move(sourceFile), startPosition, endPosition),
-                  _type(type), _name(std::move(name)), _defaultArgument(defaultArgument) {}
+                : Decl(Kind::Parameter, std::move(sourceFile), startPosition, endPosition),
+                  type(type), _name(std::move(name)), _defaultArgument(defaultArgument) {}
 
-        const Type* type() const { return _type; }
+        // TODO: Support 'Modifiers' and default modifiers like 'in' and 'out'
+        Type* type;
         std::string name() const { return _name; }
         const Expr* defaultArgument() const { return _defaultArgument; }
         bool hasDefaultArgument() const { return _defaultArgument != nullptr; }
 
         ~ParameterDecl() override {
-            delete _type;
+            delete type;
             delete _defaultArgument;
         }
 
     private:
-        // TODO: Support 'Modifiers' and default modifiers like 'in' and 'out'
-        Type* _type;
         const std::string _name;
         // TODO: Should this be 'ConstExpr'?
         Expr* _defaultArgument;

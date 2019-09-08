@@ -6,20 +6,19 @@
 namespace gulc {
     class ParenExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::Paren; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::Paren; }
 
         ParenExpr(TextPosition startPosition, TextPosition endPosition, Expr* containedExpr)
-                : Expr(ExprKind::Paren, startPosition, endPosition),
-                  _containedExpr(containedExpr) {}
+                : Expr(Kind::Paren, startPosition, endPosition),
+                  containedExpr(containedExpr) {}
 
-        Expr* containedExpr() const { return _containedExpr; }
+        Expr* containedExpr;
 
         ~ParenExpr() override {
-            delete _containedExpr;
+            delete containedExpr;
         }
 
     private:
-        Expr* _containedExpr;
 
     };
 }

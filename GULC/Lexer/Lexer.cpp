@@ -320,7 +320,11 @@ else { tmpString += (unescapedChar); }
                             RETURN_GENERIC_TOKEN(TokenType::RIGHT, TokenMetaType::OPERATOR, ">>", 0);
                         }
                     } else {
-                        RETURN_GENERIC_TOKEN(TokenType::GREATER, TokenMetaType::OPERATOR, ">", 0);
+                        if (_rightShiftEnabled) {
+                            RETURN_GENERIC_TOKEN(TokenType::GREATER, TokenMetaType::OPERATOR, ">", 0);
+                        } else {
+                            RETURN_GENERIC_TOKEN(TokenType::TEMPLATEEND, TokenMetaType::OPERATOR, ">", 0);
+                        }
                     }
                 case '<':
                     PARSE_AND_RETURN_IF_TOKEN_TEXT_NOT_EMPTY();

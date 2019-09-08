@@ -7,24 +7,20 @@
 namespace gulc {
     class DoStmt : public Stmt {
     public:
-        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == StmtKind::Do; }
+        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == Kind::Do; }
 
         DoStmt(TextPosition startPosition, TextPosition endPosition,
                Expr* condition, Stmt* loopStmt)
-                : Stmt(StmtKind::Do, startPosition, endPosition),
-                  _condition(condition), _loopStmt(loopStmt) {}
+                : Stmt(Kind::Do, startPosition, endPosition),
+                  condition(condition), loopStmt(loopStmt) {}
 
-        const Expr* condition() const { return _condition; }
-        const Stmt* loopStmt() const { return _loopStmt; }
+        Expr* condition;
+        Stmt* loopStmt;
 
         ~DoStmt() override {
-            delete _condition;
-            delete _loopStmt;
+            delete condition;
+            delete loopStmt;
         }
-
-    private:
-        Expr* _condition;
-        Stmt* _loopStmt;
 
     };
 }

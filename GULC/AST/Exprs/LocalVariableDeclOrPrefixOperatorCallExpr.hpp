@@ -6,24 +6,22 @@
 namespace gulc {
     class LocalVariableDeclOrPrefixOperatorCallExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::LocalVariableDeclOrPrefixOperatorCallExpr; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::LocalVariableDeclOrPrefixOperatorCallExpr; }
 
         LocalVariableDeclOrPrefixOperatorCallExpr(TextPosition startPosition, TextPosition endPosition,
                                                   Expr* typeOrPrefixOperator, Expr* nameOrExpr)
-                : Expr(ExprKind::LocalVariableDeclOrPrefixOperatorCallExpr, startPosition, endPosition),
-                  _typeOrPrefixOperator(typeOrPrefixOperator), _nameOrExpr(nameOrExpr) {}
+                : Expr(Kind::LocalVariableDeclOrPrefixOperatorCallExpr, startPosition, endPosition),
+                  typeOrPrefixOperator(typeOrPrefixOperator), nameOrExpr(nameOrExpr) {}
 
-        const Expr* typeOrPrefixOperator() const { return _typeOrPrefixOperator; }
-        const Expr* nameOrExpr() const { return _nameOrExpr; }
+        Expr* typeOrPrefixOperator;
+        Expr* nameOrExpr;
 
         ~LocalVariableDeclOrPrefixOperatorCallExpr() override {
-            delete _typeOrPrefixOperator;
-            delete _nameOrExpr;
+            delete typeOrPrefixOperator;
+            delete nameOrExpr;
         }
 
     private:
-        Expr* _typeOrPrefixOperator;
-        Expr* _nameOrExpr;
 
     };
 }

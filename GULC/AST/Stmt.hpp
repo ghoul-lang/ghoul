@@ -7,7 +7,7 @@
 namespace gulc {
     class Stmt {
     public:
-        enum class StmtKind {
+        enum class Kind {
             Compound,
             Expr,
             Return,
@@ -29,18 +29,18 @@ namespace gulc {
             TryFinally
         };
 
-        StmtKind getStmtKind() const { return _kind; }
+        Kind getStmtKind() const { return _kind; }
         TextPosition startPosition() const { return _startPosition; }
         TextPosition endPosition() const { return _endPosition; }
 
         virtual ~Stmt() = default;
 
     protected:
-        Stmt(StmtKind kind, TextPosition startPosition, TextPosition endPosition)
+        Stmt(Kind kind, TextPosition startPosition, TextPosition endPosition)
                 : _kind(kind), _startPosition(startPosition), _endPosition(endPosition) {}
 
     private:
-        const StmtKind _kind;
+        const Kind _kind;
         const TextPosition _startPosition;
         const TextPosition _endPosition;
 

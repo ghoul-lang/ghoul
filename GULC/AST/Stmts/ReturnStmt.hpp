@@ -7,19 +7,19 @@
 namespace gulc {
     class ReturnStmt : public Stmt {
     public:
-        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == StmtKind::Return; }
+        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == Kind::Return; }
 
         ReturnStmt(TextPosition startPosition, TextPosition endPosition, Expr* returnValue = nullptr)
-                : Stmt(StmtKind::Return, startPosition, endPosition), _returnValue(returnValue) {}
+                : Stmt(Kind::Return, startPosition, endPosition), returnValue(returnValue) {}
 
-        const Expr* returnValue() const { return _returnValue; }
+        Expr* returnValue;
+        bool hasReturnValue() const { return returnValue != nullptr; }
 
         ~ReturnStmt() override {
-            delete _returnValue;
+            delete returnValue;
         }
 
     private:
-        const Expr* _returnValue;
 
     };
 }

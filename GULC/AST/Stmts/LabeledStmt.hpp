@@ -7,22 +7,22 @@
 namespace gulc {
     class LabeledStmt : public Stmt {
     public:
-        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == StmtKind::Labeled; }
+        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == Kind::Labeled; }
 
         LabeledStmt(TextPosition startPosition, TextPosition endPosition, std::string label, Stmt* labeledStmt)
-                : Stmt(StmtKind::Labeled, startPosition, endPosition),
-                  _label(std::move(label)), _labeledStmt(labeledStmt) {}
+                : Stmt(Kind::Labeled, startPosition, endPosition),
+                  labeledStmt(labeledStmt), _label(std::move(label)) {}
 
         std::string label() const { return _label; }
-        const Stmt* labeledStmt() const { return _labeledStmt; }
+        Stmt* labeledStmt;
 
         ~LabeledStmt() override {
-            delete _labeledStmt;
+            delete labeledStmt;
         }
 
     private:
         std::string _label;
-        Stmt* _labeledStmt;
+
     };
 }
 

@@ -7,12 +7,13 @@
 namespace gulc {
     class CompoundStmt : public Stmt {
     public:
-        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == StmtKind::Compound; }
+        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == Kind::Compound; }
 
         CompoundStmt(TextPosition startPosition, TextPosition endPosition, std::vector<Stmt*> statements)
-                : Stmt(StmtKind::Compound, startPosition, endPosition), _statements(std::move(statements)) {}
+                : Stmt(Kind::Compound, startPosition, endPosition), _statements(std::move(statements)) {}
 
         const std::vector<Stmt*>& statements() const { return _statements; }
+        std::vector<Stmt*>& statements() { return _statements; }
 
     private:
         std::vector<Stmt*> _statements;

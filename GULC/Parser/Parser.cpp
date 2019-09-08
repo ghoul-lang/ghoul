@@ -19,6 +19,7 @@
 #include <AST/Types/TemplateTypenameType.hpp>
 #include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
 #include <AST/Stmts/LabeledStmt.hpp>
+#include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
 #include "Parser.hpp"
 
 using namespace gulc;
@@ -234,8 +235,11 @@ std::vector<TemplateParameterDecl *> Parser::parseTemplateParameterDecls(TextPos
         return std::vector<TemplateParameterDecl*>();
     }
 
+    bool oldRightShiftEnabledValue = _lexer.getRightShiftState();
+    _lexer.setRightShiftState(false);
+
     for (Token peekedToken = _lexer.peekToken();
-         peekedToken.tokenType != TokenType::GREATER && peekedToken.tokenType != TokenType::ENDOFFILE;
+         peekedToken.tokenType != TokenType::TEMPLATEEND && peekedToken.tokenType != TokenType::ENDOFFILE;
          peekedToken = _lexer.peekToken()) {
         Type* paramType = parseType();
 
@@ -245,7 +249,7 @@ std::vector<TemplateParameterDecl *> Parser::parseTemplateParameterDecls(TextPos
         Expr* defaultArgument = nullptr;
 
         if (peekedToken.tokenType == TokenType::COMMA || peekedToken.tokenType == TokenType::EQUALS ||
-                                                         peekedToken.tokenType == TokenType::GREATER) {
+                                                         peekedToken.tokenType == TokenType::TEMPLATEEND) {
             if (llvm::isa<UnresolvedType>(paramType)) {
                 auto* unresolvedType = llvm::dyn_cast<UnresolvedType>(paramType);
                 paramName = unresolvedType->name();
@@ -292,11 +296,13 @@ std::vector<TemplateParameterDecl *> Parser::parseTemplateParameterDecls(TextPos
         }
     }
 
-    if (!_lexer.consumeType(TokenType::GREATER)) {
+    if (!_lexer.consumeType(TokenType::TEMPLATEEND)) {
         printError("expected end '>' for template data declaration! (found '" + _lexer.peekToken().currentSymbol + "')",
                    _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
         return std::vector<TemplateParameterDecl*>();
     }
+
+    _lexer.setRightShiftState(oldRightShiftEnabledValue);
 
     return result;
 }
@@ -362,7 +368,30 @@ Type* Parser::parseType() {
         case TokenType::SYMBOL: {
             std::string typeName = peekedToken.currentSymbol;
             _lexer.consumeType(TokenType::SYMBOL);
-            return new UnresolvedType(peekedToken.startPosition, peekedToken. endPosition, {}, typeName);
+
+            std::vector<Expr*> templateArguments{};
+
+            if (_lexer.peekType() == TokenType::LESS) {
+                _lexer.consumeType(TokenType::LESS);
+
+                bool oldRightShiftEnabledValue = _lexer.getRightShiftState();
+                _lexer.setRightShiftState(false);
+
+                while (_lexer.peekType() != TokenType::TEMPLATEEND && _lexer.peekType() != TokenType::ENDOFFILE) {
+                    templateArguments.push_back(parseRValue(true, true));
+
+                    if (!_lexer.consumeType(TokenType::COMMA)) break;
+                }
+
+                if (!_lexer.consumeType(TokenType::TEMPLATEEND)) {
+                    printError("expected closing '>' for template type reference! (found: '" + _lexer.peekToken().currentSymbol + "')",
+                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                }
+
+                _lexer.setRightShiftState(oldRightShiftEnabledValue);
+            }
+
+            return new UnresolvedType(peekedToken.startPosition, peekedToken. endPosition, {}, typeName, templateArguments);
         }
         default:
             printError("unexpected token where type was expected! (found '" + _lexer.peekToken().currentSymbol + "')",
@@ -901,12 +930,19 @@ TryStmt *Parser::parseTryStmt() {
 
             _lexer.consumeType(TokenType::CATCH);
 
-            Expr* exceptionDecl = nullptr;
+            UnresolvedTypeRefExpr* unresolvedTypeRefExpr = nullptr;
+            std::string exceptionVarName;
 
             // If there is a '(' then we will parse the exception variable, if not that is okay. There doesn't have to be one.
             if (_lexer.consumeType(TokenType::LPAREN)) {
-                // TODO: We should improve this by making a 'type' parser and using that instead. This will ALWAYS be `type identifier`
-                exceptionDecl = parseRValue(true, true);
+                Type* type = parseType();
+                unresolvedTypeRefExpr = new UnresolvedTypeRefExpr(type->startPosition(), type->endPosition(), type);
+
+                if (_lexer.peekType() == TokenType::SYMBOL) {
+                    exceptionVarName = _lexer.peekToken().currentSymbol;
+
+                    _lexer.consumeType(TokenType::SYMBOL);
+                }
 
                 if (!_lexer.consumeType(TokenType::RPAREN)) {
                     printError("expected closing ')' for catch statement! (found '" + _lexer.peekToken().currentSymbol + "')",
@@ -918,7 +954,7 @@ TryStmt *Parser::parseTryStmt() {
             CompoundStmt* compoundStmt = parseCompoundStmt();
             catchEndPosition = compoundStmt->endPosition();
 
-            catchStmts.push_back(new TryCatchStmt(catchStartPosition, catchEndPosition, exceptionDecl, compoundStmt));
+            catchStmts.push_back(new TryCatchStmt(catchStartPosition, catchEndPosition, unresolvedTypeRefExpr, exceptionVarName, compoundStmt));
 
             endPosition = catchEndPosition;
         } else if (_lexer.peekType() == TokenType::FINALLY) {
@@ -1673,7 +1709,12 @@ Expr *Parser::parseNumberLiteral() {
     // </RANT>
 #define STARTS_WITH(check, begin) ((check).compare(0, (begin).length(), (begin)) == 0)
 
-    if (STARTS_WITH(peekedToken.currentSymbol, std::string("0x"))) {
+    // Without checking the length of the string we will confuse the literal suffixes (if a user adds one)
+    bool nonBase10Supported = peekedToken.currentSymbol.length() > 2;
+    // Without this we will generate a lone `0` as `IntegerLiteral(base: 8, number: "")`
+    bool base8Supported = peekedToken.currentSymbol.length() > 1;
+
+    if (nonBase10Supported && STARTS_WITH(peekedToken.currentSymbol, std::string("0x"))) {
         numberBase = 16;
         resultNumber = peekedToken.currentSymbol.substr(2);
         const std::string validCharacters = "0123456789abcdefABCDEF";
@@ -1684,7 +1725,7 @@ Expr *Parser::parseNumberLiteral() {
                 return nullptr;
             }
         }
-    } else if (STARTS_WITH(peekedToken.currentSymbol, std::string("0b"))) {
+    } else if (nonBase10Supported && STARTS_WITH(peekedToken.currentSymbol, std::string("0b"))) {
         numberBase = 2;
         resultNumber = peekedToken.currentSymbol.substr(2);
         const std::string validCharacters = "01";
@@ -1695,7 +1736,7 @@ Expr *Parser::parseNumberLiteral() {
                 return nullptr;
             }
         }
-    } else if (STARTS_WITH(peekedToken.currentSymbol, std::string("0"))) {
+    } else if (base8Supported && STARTS_WITH(peekedToken.currentSymbol, std::string("0"))) {
         numberBase = 8;
         resultNumber = peekedToken.currentSymbol.substr(1);
         const std::string validCharacters = "01234567";
@@ -1803,7 +1844,7 @@ IdentifierExpr *Parser::parseIdentifier(bool templateTypingAllowed, bool ignoreG
 
         _lexer.consumeType(TokenType::LESS);
 
-        while (_lexer.peekType() != TokenType::GREATER) {
+        while (_lexer.peekType() != TokenType::TEMPLATEEND) {
             templateData.push_back(parsePrefixes(true));
 
             if (_lexer.peekType() != TokenType::COMMA) break;
@@ -1813,14 +1854,14 @@ IdentifierExpr *Parser::parseIdentifier(bool templateTypingAllowed, bool ignoreG
         bool cancelled = true;
 
         // We don't error out here. If the syntax doesn't match what we expect we just return to our checkpoint.
-        if (_lexer.peekType() == TokenType::GREATER) {
+        if (_lexer.peekType() == TokenType::TEMPLATEEND) {
             TextPosition potentialNewEndPosition = _lexer.peekToken().endPosition;
-            _lexer.consumeType(TokenType::GREATER);
+            _lexer.consumeType(TokenType::TEMPLATEEND);
 
             if ((templateTypingAllowed && _lexer.peekType() == TokenType::SYMBOL)
                 || _lexer.peekType() == TokenType::LPAREN
                 || _lexer.peekType() == TokenType::RPAREN
-                || _lexer.peekType() == TokenType::GREATER
+                || _lexer.peekType() == TokenType::TEMPLATEEND
                 // TODO: Is this okay?
                 || _lexer.peekType() == TokenType::LCURLY
                 // TODO: Should we only allow this when 'templateTypingAllowed' is true? Idk. I don't think it matters. Also we might want to support 'keyword'

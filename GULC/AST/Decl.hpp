@@ -8,7 +8,7 @@
 namespace gulc {
     class Decl {
     public:
-        enum class DeclKind {
+        enum class Kind {
             Function,
             // TODO: Add 'MemberFunctionDecl' (a.k.a. MethodDecl) and 'MemberPropertyDecl' (which is why we call it 'MemberFunctionDecl' instead of 'MethodDecl')
             // TODO: Create 'Property'
@@ -19,7 +19,7 @@ namespace gulc {
             TemplateParameterDecl
         };
 
-        DeclKind getDeclKind() const { return _kind; }
+        Kind getDeclKind() const { return _kind; }
         std::string sourceFile() const { return _sourceFile; }
         TextPosition startPosition() const { return _startPosition; }
         TextPosition endPosition() const { return _endPosition; }
@@ -27,12 +27,12 @@ namespace gulc {
         virtual ~Decl() = default;
 
     protected:
-        Decl(DeclKind kind, std::string sourceFile, TextPosition startPosition, TextPosition endPosition)
+        Decl(Kind kind, std::string sourceFile, TextPosition startPosition, TextPosition endPosition)
                 : _kind(kind),
                   _sourceFile(std::move(sourceFile)), _startPosition(startPosition), _endPosition(endPosition) {}
 
     private:
-        const DeclKind _kind;
+        const Kind _kind;
         const std::string _sourceFile;
         const TextPosition _startPosition;
         const TextPosition _endPosition;

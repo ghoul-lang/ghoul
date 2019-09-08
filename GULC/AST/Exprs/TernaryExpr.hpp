@@ -6,27 +6,24 @@
 namespace gulc {
     class TernaryExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::Ternary; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::Ternary; }
 
         TernaryExpr(TextPosition startPosition, TextPosition endPosition,
                     Expr* condition, Expr* trueExpr, Expr* falseExpr)
-                : Expr(ExprKind::Ternary, startPosition, endPosition),
-                  _condition(condition), _trueExpr(trueExpr), _falseExpr(falseExpr) {}
+                : Expr(Kind::Ternary, startPosition, endPosition),
+                  condition(condition), trueExpr(trueExpr), falseExpr(falseExpr) {}
 
-        const Expr* condition() const { return _condition; }
-        const Expr* trueExpr() const { return _trueExpr; }
-        const Expr* falseExpr() const { return _falseExpr; }
+        Expr* condition;
+        Expr* trueExpr;
+        Expr* falseExpr;
 
         ~TernaryExpr() override {
-            delete _condition;
-            delete _trueExpr;
-            delete _falseExpr;
+            delete condition;
+            delete trueExpr;
+            delete falseExpr;
         }
 
     private:
-        Expr* _condition;
-        Expr* _trueExpr;
-        Expr* _falseExpr;
 
     };
 }

@@ -68,6 +68,7 @@ namespace gulc {
 		// Operator Tokens
 		EQUALS, // '='
 		EQUALEQUALS, // '=='
+		TEMPLATEEND, // '>' when right shift is disabled
 		GREATER, // '>'
 		GREATEREQUALS, // '>='
 		RIGHT, // '>>'

@@ -33,6 +33,8 @@
 #include <AST/Exprs/StringLiteralExpr.hpp>
 #include <AST/Exprs/MemberAccessCallExpr.hpp>
 #include <AST/Exprs/TernaryExpr.hpp>
+#include <AST/Exprs/LocalVariableDeclExpr.hpp>
+#include <AST/Exprs/ResolvedTypeRefExpr.hpp>
 
 namespace gulc {
     class ASTPrinter {
@@ -82,6 +84,8 @@ namespace gulc {
         static void printStringLiteralExpr(const StringLiteralExpr* stringLiteralExpr, const std::string& prefix = "");
         static void printMemberAccessCallExpr(const MemberAccessCallExpr* memberAccessCallExpr, const std::string& prefix = "");
         static void printTernaryExpr(const TernaryExpr* ternaryExpr, const std::string& prefix = "");
+        static void printLocalVariableDeclExpr(const LocalVariableDeclExpr* localVariableDeclExpr, const std::string& prefix = "");
+        static void printResolvedTypeRefExpr(const ResolvedTypeRefExpr* resolvedTypeRefExpr, const std::string& prefix = "");
 
     };
 }

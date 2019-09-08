@@ -7,28 +7,26 @@
 namespace gulc {
     class CaseStmt : public Stmt {
     public:
-        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == StmtKind::Case; }
+        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == Kind::Case; }
 
         CaseStmt(TextPosition startPosition, TextPosition endPosition,
                  Expr* condition, Stmt* trueStmt, bool isDefault)
-                : Stmt(StmtKind::Case, startPosition, endPosition),
-			      _isDefault(isDefault), _condition(condition), _trueStmt(trueStmt) {}
+                : Stmt(Kind::Case, startPosition, endPosition),
+			      condition(condition), trueStmt(trueStmt), _isDefault(isDefault) {}
 
         bool isDefault() const { return _isDefault; }
-        const Expr* condition() const { return _condition; }
-        const Stmt* trueStmt() const { return _trueStmt; }
-        bool hasCondition() const { return _condition != nullptr; }
+        // If condition is false then we treat the case as a normal statement.
+        Expr* condition;
+        Stmt* trueStmt;
+        bool hasCondition() const { return condition != nullptr; }
 
         ~CaseStmt() override {
-            delete _condition;
-            delete _trueStmt;
+            delete condition;
+            delete trueStmt;
         }
 
     private:
         bool _isDefault;
-        // If condition is false then we treat the case as a normal statement.
-        Expr* _condition;
-        Stmt* _trueStmt;
 
     };
 }

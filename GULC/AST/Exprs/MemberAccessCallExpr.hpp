@@ -7,26 +7,24 @@
 namespace gulc {
     class MemberAccessCallExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == ExprKind::MemberAccessCall; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::MemberAccessCall; }
 
         MemberAccessCallExpr(TextPosition startPosition, TextPosition endPosition,
                              bool isArrowCall, Expr* objectRef, IdentifierExpr* member)
-                : Expr(ExprKind::MemberAccessCall, startPosition, endPosition),
-                  _isArrowCall(isArrowCall), _objectRef(objectRef), _member(member) {}
+                : Expr(Kind::MemberAccessCall, startPosition, endPosition),
+                  objectRef(objectRef), member(member), _isArrowCall(isArrowCall) {}
 
         bool isArrowCall() const { return _isArrowCall; }
-        const Expr* objectRef() const { return _objectRef; }
-        const IdentifierExpr* member() const { return _member; }
+        Expr* objectRef;
+        IdentifierExpr* member;
 
         ~MemberAccessCallExpr() override {
-            delete _objectRef;
-            delete _member;
+            delete objectRef;
+            delete member;
         }
 
     private:
         bool _isArrowCall;
-        Expr* _objectRef;
-        IdentifierExpr* _member;
 
     };
 }

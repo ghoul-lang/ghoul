@@ -6,9 +6,9 @@
 namespace gulc {
     class Expr : public Stmt {
     public:
-        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == StmtKind::Expr; }
+        static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == Stmt::Kind::Expr; }
 
-        enum class ExprKind {
+        enum class Kind {
             BinaryOperator,
             PostfixOperator,
             PrefixOperator,
@@ -30,17 +30,22 @@ namespace gulc {
 
             PotentialExplicitCast,
 
-            LocalVariableDeclOrPrefixOperatorCallExpr
+            LocalVariableDeclOrPrefixOperatorCallExpr,
+
+            ResolvedTypeRef,
+            UnresolvedTypeRef,
+
+            LocalVariableDecl
         };
 
-        ExprKind getExprKind() const { return _kind; }
+        Kind getExprKind() const { return _kind; }
 
     protected:
-        Expr(ExprKind kind, TextPosition startPosition, TextPosition endPosition)
-                : Stmt(StmtKind::Expr, startPosition, endPosition), _kind(kind) {}
+        Expr(Kind kind, TextPosition startPosition, TextPosition endPosition)
+                : Stmt(Stmt::Kind::Expr, startPosition, endPosition), _kind(kind) {}
 
     private:
-        const ExprKind _kind;
+        const Kind _kind;
 
     };
 }
