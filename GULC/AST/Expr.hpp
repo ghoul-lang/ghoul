@@ -2,6 +2,7 @@
 #define GULC_EXPR_HPP
 
 #include "Stmt.hpp"
+#include "Type.hpp"
 
 namespace gulc {
     class Expr : public Stmt {
@@ -29,6 +30,8 @@ namespace gulc {
             CharacterLiteral,
 
             PotentialExplicitCast,
+            ExplicitCast,
+            ImplicitCast,
 
             LocalVariableDeclOrPrefixOperatorCallExpr,
 
@@ -40,9 +43,16 @@ namespace gulc {
 
         Kind getExprKind() const { return _kind; }
 
+        // This is the type of this expression. I.e `(float)i + 1` will make the resultType of the 'BinaryOperatorExpr' 'float'
+        Type* resultType;
+
+        ~Expr() override {
+            delete resultType;
+        }
+
     protected:
         Expr(Kind kind, TextPosition startPosition, TextPosition endPosition)
-                : Stmt(Stmt::Kind::Expr, startPosition, endPosition), _kind(kind) {}
+                : Stmt(Stmt::Kind::Expr, startPosition, endPosition), _kind(kind), resultType(nullptr) {}
 
     private:
         const Kind _kind;

@@ -20,6 +20,7 @@ namespace gulc {
         };
 
         Kind getDeclKind() const { return _kind; }
+        std::string name() const { return _name; }
         std::string sourceFile() const { return _sourceFile; }
         TextPosition startPosition() const { return _startPosition; }
         TextPosition endPosition() const { return _endPosition; }
@@ -27,12 +28,13 @@ namespace gulc {
         virtual ~Decl() = default;
 
     protected:
-        Decl(Kind kind, std::string sourceFile, TextPosition startPosition, TextPosition endPosition)
-                : _kind(kind),
+        Decl(Kind kind, std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition)
+                : _kind(kind), _name(std::move(name)),
                   _sourceFile(std::move(sourceFile)), _startPosition(startPosition), _endPosition(endPosition) {}
 
     private:
         const Kind _kind;
+        const std::string _name;
         const std::string _sourceFile;
         const TextPosition _startPosition;
         const TextPosition _endPosition;

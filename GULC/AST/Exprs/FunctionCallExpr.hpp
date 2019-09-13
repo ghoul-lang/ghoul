@@ -12,23 +12,19 @@ namespace gulc {
         FunctionCallExpr(TextPosition startPosition, TextPosition endPosition,
                          Expr* functionReference, std::vector<Expr*> arguments)
                 : Expr(Kind::FunctionCall, startPosition, endPosition),
-                  functionReference(functionReference), _arguments(std::move(arguments)) {}
+                  functionReference(functionReference), arguments(std::move(arguments)) {}
 
         Expr* functionReference;
-        std::vector<Expr*>& arguments() { return _arguments; }
-        const std::vector<Expr*>& arguments() const { return _arguments; }
-        bool hasArguments() const { return !_arguments.empty(); }
+        std::vector<Expr*> arguments;
+        bool hasArguments() const { return !arguments.empty(); }
 
         ~FunctionCallExpr() override {
             delete functionReference;
 
-            for (Expr* argument : _arguments) {
+            for (Expr* argument : arguments) {
                 delete argument;
             }
         }
-
-    private:
-        std::vector<Expr*> _arguments;
 
     };
 }

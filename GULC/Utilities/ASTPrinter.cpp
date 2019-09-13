@@ -216,7 +216,7 @@ void ASTPrinter::printFunctionDecl(const FunctionDecl *functionDecl, const std::
         std::cout << prefix << "<" << getTemplateParametersString(functionDecl->templateParameters) << ">";
     }
 
-    std::cout << "(" << getParametersString(functionDecl->parameters()) << ") "
+    std::cout << "(" << getParametersString(functionDecl->parameters) << ") "
                  "-> " << getTypeName(functionDecl->resultType)
               << std::endl;
     printCompoundStmt(functionDecl->body(), prefix + "  ");
@@ -408,7 +408,7 @@ void ASTPrinter::printFunctionCallExpr(const FunctionCallExpr *functionCallExpr,
     printExpr(functionCallExpr->functionReference, prefix + "  ");
     std::cout << prefix << "\\ Arguments: " << std::endl;
 
-    for (const Expr* argument : functionCallExpr->arguments()) {
+    for (const Expr* argument : functionCallExpr->arguments) {
         printExpr(argument, prefix + "  ");
     }
 }

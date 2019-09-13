@@ -14,6 +14,7 @@ namespace gulc {
                   _name(std::move(name)) {}
 
         std::string name() const { return _name; }
+        std::string getString() const override { return _name; }
 
     private:
         std::string _name;

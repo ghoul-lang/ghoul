@@ -2,6 +2,7 @@
 #define GULC_TYPE_HPP
 
 #include <MetaData/TextPosition.hpp>
+#include <string>
 
 namespace gulc {
     class Type {
@@ -10,12 +11,15 @@ namespace gulc {
             TemplateTypename,
             Unresolved,
             FunctionTemplateTypenameRef,
-            BuiltIn
+            BuiltIn,
+            Pointer,
+            FunctionPointer
         };
 
         Kind getTypeKind() const { return _kind; }
         TextPosition startPosition() const { return _startPosition; }
         TextPosition endPosition() const { return _endPosition; }
+        virtual std::string getString() const = 0;
 
         virtual ~Type() = default;
 

@@ -1,22 +1,3 @@
-int secondFunctionTest<T>(T val)
-{
-    return (val % +3.0);
-}
-
-// Test
-int Function<T, int max = (12)>(T left, int right = 1)
-{
-    T test;
-
-    try
-    {
-        secondFunction<int>(right);
-    }
-    catch (int exInt)
-    {
-        return exInt;
-    }
-
-    if (left == right) return 0;
-    else testLabel: return left + (int)++secondFunctionTest<secondFunctionTest<((i >> 2) > 3)>()>(right++);
+int main() {
+    return 12;
 }

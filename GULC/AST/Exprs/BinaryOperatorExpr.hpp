@@ -12,11 +12,19 @@ namespace gulc {
         BinaryOperatorExpr(TextPosition startPosition, TextPosition endPosition,
                            std::string operatorName, Expr* leftValue, Expr* rightValue)
                 : Expr(Kind::BinaryOperator, startPosition, endPosition),
-			      leftValue(leftValue), rightValue(rightValue), _operatorName(std::move(operatorName)) {}
+			      leftValue(leftValue), rightValue(rightValue), _operatorName(std::move(operatorName)),
+                  _isBuiltInAssignmentOperator(false) {
+            if (_operatorName == "=" || _operatorName == ">>=" || _operatorName == "<<=" || _operatorName == "+=" ||
+                _operatorName == "-=" || _operatorName == "*=" || _operatorName == "/=" || _operatorName == "%=" ||
+                _operatorName == "&=" || _operatorName == "|=" || _operatorName == "^=") {
+                _isBuiltInAssignmentOperator = true;
+            }
+        }
 
         std::string operatorName() const { return _operatorName; }
         Expr* leftValue;
         Expr* rightValue;
+        bool isBuiltInAssignmentOperator() const { return _isBuiltInAssignmentOperator; }
 
         ~BinaryOperatorExpr() override {
             delete leftValue;
@@ -25,6 +33,7 @@ namespace gulc {
 
     private:
         const std::string _operatorName;
+        bool _isBuiltInAssignmentOperator;
 
     };
 }

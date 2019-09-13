@@ -67,7 +67,7 @@ namespace gulc {
          * functionCall
          */
         // TODO: Is this a good name for what this is?
-        Expr* parseRValue(bool isStatement, bool templateTypingAllowed);
+        Expr* parseExpr(bool isStatement, bool templateTypingAllowed);
         Expr* parseAssignmentMisc(bool isStatement, bool templateTypingAllowed);
         Expr* parseLogicalOr(bool templateTypingAllowed);
         Expr* parseLogicalAnd(bool templateTypingAllowed);

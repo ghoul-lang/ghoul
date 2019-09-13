@@ -201,7 +201,7 @@ void TypeResolverPass::processTypeOrExpr(ResolveTypesContext &context, Expr*& ex
 void TypeResolverPass::processFunctionDecl(FileAST &fileAst, FunctionDecl *functionDecl) {
     ResolveTypesContext context(fileAst);
 
-    if (functionDecl->hasTemplateArguments()) {
+    if (functionDecl->hasTemplateParameters()) {
         context.functionTemplateParams = &functionDecl->templateParameters;
     }
 
@@ -222,7 +222,7 @@ void TypeResolverPass::processFunctionDecl(FileAST &fileAst, FunctionDecl *funct
     }
 
     // Resolve function parameters
-    for (ParameterDecl*& parameterDecl : functionDecl->parameters()) {
+    for (ParameterDecl*& parameterDecl : functionDecl->parameters) {
         if (parameterDecl->type->getTypeKind() == Type::Kind::Unresolved) {
             if (!resolveType(context, parameterDecl->type)) {
                 printError("could not find function parameter type!", fileAst,
@@ -326,7 +326,7 @@ void TypeResolverPass::processFunctionCallExpr(ResolveTypesContext &context, Fun
     processExpr(context, functionCallExpr->functionReference);
 
     if (functionCallExpr->hasArguments()) {
-        for (Expr*& argument : functionCallExpr->arguments()) {
+        for (Expr*& argument : functionCallExpr->arguments) {
             processExpr(context, argument);
         }
     }

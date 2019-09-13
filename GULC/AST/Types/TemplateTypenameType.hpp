@@ -12,6 +12,7 @@ namespace gulc {
         TemplateTypenameType(TextPosition startPosition, TextPosition endPosition)
                 : Type(Kind::TemplateTypename, startPosition, endPosition) {}
 
+        std::string getString() const override { return "typename"; }
     };
 }
 

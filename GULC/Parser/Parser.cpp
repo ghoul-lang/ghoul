@@ -39,6 +39,11 @@ Parser::Parser(std::string filePath)
     }
 }
 
+/**
+ * Parse the source code file into a `FileAST` object
+ *
+ * @return parsed in file AST with information on the file
+ */
 FileAST Parser::parseFile() {
     FileAST result(_filePath);
 
@@ -49,6 +54,14 @@ FileAST Parser::parseFile() {
     return result;
 }
 
+/**
+ * Print an error to the console with the position in the source code file that we are erroring out for
+ * After print the error message out we exit the application with exit code `1`
+ *
+ * @param errorMessage - message to print to the console
+ * @param startPosition - start position of the section of code that caused the error
+ * @param endPosition - end position of the section of code that caused the error
+ */
 // TODO: Support adding the error to a list and continuing? Or just cancelling the compilation of this file?
 void Parser::printError(const std::string& errorMessage, TextPosition startPosition, TextPosition endPosition) {
     std::cout << "gulc parser error[" << _filePath << ", "
@@ -60,6 +73,13 @@ void Parser::printError(const std::string& errorMessage, TextPosition startPosit
     std::exit(1);
 }
 
+/**
+ * Print a warning to the console with the position in the source code file that we are warning about
+ *
+ * @param warningMessage - message to print to the console
+ * @param startPosition - start position of the section of code to warn about
+ * @param endPosition - end position of the section of code to warn about
+ */
 // TODO: Support adding the warning to a list
 void Parser::printWarning(const std::string &warningMessage, TextPosition startPosition, TextPosition endPosition) {
     std::cout << "gulc parser warning[" << _filePath << ", "
@@ -69,11 +89,27 @@ void Parser::printWarning(const std::string &warningMessage, TextPosition startP
               << std::endl;
 }
 
+/**
+ * This parses a 'top-level' declaration which is a non-member function, non-member variable, namespace,
+ * class, struct, enum, interface, union, etc.
+ *
+ * @return Based on source any of {
+ *     FunctionDecl,
+ *     NamespaceDecl,
+ *     VariableDecl,
+ *     ClassDecl,
+ *     StructDecl,
+ *     EnumDecl,
+ *     InterfaceDecl,
+ *     UnionDecl
+ * }
+ */
 Decl *Parser::parseTopLevelDecl() {
     Token peekedToken = _lexer.peekToken();
     TextPosition startPosition = peekedToken.startPosition;
     TextPosition endPosition = peekedToken.endPosition;
 
+    // TODO: We need to remove `isConst` from here. We don't parse types this way.
     bool isConst = false;
     bool isExtern = false;
     bool isVolatile = false;
@@ -199,14 +235,14 @@ Decl *Parser::parseTopLevelDecl() {
                     // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
                     CompoundStmt* compoundStmt = parseCompoundStmt();
 
-                    return new FunctionDecl(_filePath, startPosition, endPosition, resultType, name, templateParameters, parameters, compoundStmt);
+                    return new FunctionDecl(name, _filePath, startPosition, endPosition, resultType, templateParameters, parameters, compoundStmt);
                 }
                 case TokenType::LPAREN: { // Function
                     std::vector<ParameterDecl*> parameters = parseParameterDecls(startPosition);
                     // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
                     CompoundStmt* compoundStmt = parseCompoundStmt();
 
-                    return new FunctionDecl(_filePath, startPosition, endPosition, resultType, name, {}, parameters, compoundStmt);
+                    return new FunctionDecl(name, _filePath, startPosition, endPosition, resultType, {}, parameters, compoundStmt);
                 }
                 case TokenType::EQUALS:
                 case TokenType::SEMICOLON:
@@ -224,6 +260,17 @@ Decl *Parser::parseTopLevelDecl() {
     }
 }
 
+/**
+ * Generic function to parse template parameters
+ *
+ * Can parse templates from:
+ * `int funcEx<typename T, int i, lifetime a>(){}`
+ * `class box<T>`
+ * `struct fixed_array<typename T, size_t length>`
+ *
+ * @param startPosition - TODO: This probably isn't needed
+ * @return `std::vector` of parsed `TemplateParameterDecl`s
+ */
 std::vector<TemplateParameterDecl *> Parser::parseTemplateParameterDecls(TextPosition startPosition) {
     std::vector<TemplateParameterDecl*> result{};
 
@@ -287,8 +334,8 @@ std::vector<TemplateParameterDecl *> Parser::parseTemplateParameterDecls(TextPos
         }
 
         // Add new 'ParameterDecl' to the result list
-        result.push_back(new TemplateParameterDecl(_filePath, paramType->startPosition(), endPosition,
-                                                   paramType, paramName, defaultArgument));
+        result.push_back(new TemplateParameterDecl(paramName, _filePath, paramType->startPosition(), endPosition,
+                                                   paramType, defaultArgument));
 
         if (!_lexer.consumeType(TokenType::COMMA)) {
             // If there isn't a comma then we expect there to be a closing parenthesis
@@ -307,6 +354,12 @@ std::vector<TemplateParameterDecl *> Parser::parseTemplateParameterDecls(TextPos
     return result;
 }
 
+/**
+ * Generic function to parse the parameter list of a function. This can be used for both normal functions and member functions
+ *
+ * @param startPosition
+ * @return `std::vector` of parsed `ParameterDecl`s
+ */
 std::vector<ParameterDecl*> Parser::parseParameterDecls(TextPosition startPosition) {
     std::vector<ParameterDecl*> result{};
 
@@ -338,13 +391,13 @@ std::vector<ParameterDecl*> Parser::parseParameterDecls(TextPosition startPositi
 
         if (peekedToken.tokenType == TokenType::EQUALS) {
             _lexer.consumeType(TokenType::EQUALS);
-            defaultArgument = parseRValue(false, false);
+            defaultArgument = parseExpr(false, false);
             endPosition = defaultArgument->endPosition();
         }
 
         // Add new 'ParameterDecl' to the result list
-        result.push_back(new ParameterDecl(_filePath, paramType->startPosition(), endPosition,
-                                           paramType, paramName, defaultArgument));
+        result.push_back(new ParameterDecl(paramName, _filePath, paramType->startPosition(), endPosition,
+                                           paramType, defaultArgument));
 
         if (!_lexer.consumeType(TokenType::COMMA)) {
             // If there isn't a comma then we expect there to be a closing parenthesis
@@ -361,6 +414,11 @@ std::vector<ParameterDecl*> Parser::parseParameterDecls(TextPosition startPositi
     return result;
 }
 
+/**
+ * Parse a type declaration. Handles `int const`, `const int`, `box<T>`, `const int*const`, `int const *const *`, etc.
+ *
+ * @return - can be any child of the `Type` class
+ */
 Type* Parser::parseType() {
     Token peekedToken = _lexer.peekToken();
 
@@ -374,12 +432,17 @@ Type* Parser::parseType() {
             if (_lexer.peekType() == TokenType::LESS) {
                 _lexer.consumeType(TokenType::LESS);
 
+                // We tell the lexer to NOT combine two `>` operators into a single `>>` token.
+                // this also tells the lexer to return `TEMPLATEEND` instead of `GREATER` for `>`
+                // We back up the old state so we can return to it later. Allowing nested states for whether this is on or off
                 bool oldRightShiftEnabledValue = _lexer.getRightShiftState();
                 _lexer.setRightShiftState(false);
 
+                // Parse until we find the closing `>` or until we hit the end of the file
                 while (_lexer.peekType() != TokenType::TEMPLATEEND && _lexer.peekType() != TokenType::ENDOFFILE) {
-                    templateArguments.push_back(parseRValue(true, true));
+                    templateArguments.push_back(parseExpr(true, true));
 
+                    // If consuming a comma failed then break, this is a quick an easy operation.
                     if (!_lexer.consumeType(TokenType::COMMA)) break;
                 }
 
@@ -388,6 +451,7 @@ Type* Parser::parseType() {
                                _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                 }
 
+                // Return to the old state for whether the lexer should combine two `>` into a `>>` Token
                 _lexer.setRightShiftState(oldRightShiftEnabledValue);
             }
 
@@ -400,6 +464,11 @@ Type* Parser::parseType() {
     }
 }
 
+/**
+ * Parses a single line statement based on the lexer input
+ *
+ * @return any child of the class `Stmt` or `Expr` (a child of `Stmt`)
+ */
 Stmt *Parser::parseStmt() {
     Token peekedToken = _lexer.peekToken();
     TextPosition startPosition = peekedToken.startPosition;
@@ -427,13 +496,17 @@ Stmt *Parser::parseStmt() {
         case TokenType::GOTO:
             return parseGotoStmt();
         case TokenType::ASM:
+            // TODO: Support `asm`
+            // I would like to support something better than the GCC syntax for this
+            // What would be amazing would be to allow inline assembly for this but that is probably a far off
+            // goal that will only happen once I implement my own assemblers.
             printError("'asm' statements not yet supported!",
                        _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
             return nullptr;
         case TokenType::TRY:
             return parseTryStmt();
         default: {
-            Expr* result = parseRValue(true, true);
+            Expr* result = parseExpr(true, true);
 
             // If the next token is a ':' and the result is basically a symbol then we assume this is a label
             if (_lexer.peekType() == TokenType::COLON && llvm::isa<IdentifierExpr>(result)) {
@@ -461,6 +534,10 @@ Stmt *Parser::parseStmt() {
                 }
             }
 
+            // TODO: At some point we should support expressions with attached blocks. e.g. `expr { compound-stmt }`
+            // the default support for this should be for classes `object(args) { set properties }`
+            // and arrays `int[] { 1, 2, 3, 4 }`
+            // but we should also maybe allow custom expressions (or constexpr?) to support having their own blocks
             if (!_lexer.consumeType(TokenType::SEMICOLON)) {
                 printError("expected ';' after expression! (found '" + _lexer.peekToken().currentSymbol + "')",
                            _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
@@ -471,6 +548,11 @@ Stmt *Parser::parseStmt() {
     }
 }
 
+/**
+ * Parse multiple lines of `Stmt` within two `{` and `}` tokens
+ *
+ * @return parsed `CompoundStmt`
+ */
 CompoundStmt *Parser::parseCompoundStmt() {
     std::vector<Stmt*> result{};
 
@@ -500,6 +582,11 @@ CompoundStmt *Parser::parseCompoundStmt() {
     return new CompoundStmt(startPosition, endPosition, std::move(result));
 }
 
+/**
+ * Parse the return statement, this can either have a return value or not
+ *
+ * @return parsed `ReturnStmt`
+ */
 ReturnStmt *Parser::parseReturnStmt() {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -513,7 +600,7 @@ ReturnStmt *Parser::parseReturnStmt() {
     Expr* returnValue = nullptr;
 
     if (_lexer.peekType() != TokenType::SEMICOLON) {
-        returnValue = parseRValue(false, false);
+        returnValue = parseExpr(false, false);
     }
 
     endPosition = _lexer.peekToken().endPosition;
@@ -527,6 +614,12 @@ ReturnStmt *Parser::parseReturnStmt() {
     return new ReturnStmt(startPosition, endPosition, returnValue);
 }
 
+/**
+ * Parse an if statement and its else statement if it exists
+ * If statements are NOT required to have `CompoundStmt`, just `Stmt` can work
+ *
+ * @return parsed `IfStmt`
+ */
 IfStmt *Parser::parseIfStmt() {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -543,7 +636,7 @@ IfStmt *Parser::parseIfStmt() {
         return nullptr;
     }
 
-    Expr* condition = parseRValue(false, false);
+    Expr* condition = parseExpr(false, false);
 
     if (!_lexer.consumeType(TokenType::RPAREN)) {
         printError("expected closing ')' after 'if' statement condition! (found '" + _lexer.peekToken().currentSymbol + "')",
@@ -580,7 +673,7 @@ WhileStmt *Parser::parseWhileStmt() {
         return nullptr;
     }
 
-    Expr* condition = parseRValue(false, false);
+    Expr* condition = parseExpr(false, false);
 
     if (!_lexer.consumeType(TokenType::RPAREN)) {
         printError("expected closing ')' after 'while' statement condition! (found '" + _lexer.peekToken().currentSymbol + "')",
@@ -624,7 +717,7 @@ ForStmt *Parser::parseForStmt() {
             return nullptr;
         }
 
-        preLoop = parseRValue(true, true);
+        preLoop = parseExpr(true, true);
     }
 
     // Try to consume the semicolon
@@ -645,7 +738,7 @@ ForStmt *Parser::parseForStmt() {
             return nullptr;
         }
 
-        condition = parseRValue(false, false);
+        condition = parseExpr(false, false);
     }
 
     // Try to consume the semicolon
@@ -659,7 +752,7 @@ ForStmt *Parser::parseForStmt() {
 
     if (_lexer.peekType() != TokenType::RPAREN) {
         // TODO: Support comma
-        iterationExpr = parseRValue(false, false);
+        iterationExpr = parseExpr(false, false);
     }
 
     if (!_lexer.consumeType(TokenType::RPAREN)) {
@@ -702,7 +795,7 @@ DoStmt *Parser::parseDoStmt() {
         return nullptr;
     }
 
-    Expr* condition = parseRValue(false, false);
+    Expr* condition = parseExpr(false, false);
 
     if (!_lexer.consumeType(TokenType::RPAREN)) {
         printError("expected closing ')' after 'while' statement condition! (found '" + _lexer.peekToken().currentSymbol + "')",
@@ -738,7 +831,7 @@ SwitchStmt *Parser::parseSwitchStmt() {
         return nullptr;
     }
 
-    Expr* condition = parseRValue(false, false);
+    Expr* condition = parseExpr(false, false);
 
     if (!_lexer.consumeType(TokenType::RPAREN)) {
         printError("expected closing ')' after 'while' statement condition! (found '" + _lexer.peekToken().currentSymbol + "')",
@@ -765,7 +858,7 @@ SwitchStmt *Parser::parseSwitchStmt() {
         if (_lexer.peekType() == TokenType::CASE) {
             _lexer.consumeType(TokenType::CASE);
 
-            caseCondition = parseRValue(true, true);
+            caseCondition = parseExpr(true, true);
 
             caseEndPosition = _lexer.peekToken().endPosition;
             if (!_lexer.consumeType(TokenType::COLON)) {
@@ -811,6 +904,12 @@ SwitchStmt *Parser::parseSwitchStmt() {
     return new SwitchStmt(startPosition, endPosition, condition, cases);
 }
 
+/**
+ * Parse a break statement with an option label to break from
+ * With this we can label specific statements and `break` to the end of them.
+ *
+ * @return parsed `BreakStmt`
+ */
 BreakStmt *Parser::parseBreakStmt() {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -845,6 +944,12 @@ BreakStmt *Parser::parseBreakStmt() {
     return new BreakStmt(startPosition, endPosition, labelName);
 }
 
+/**
+ * Parse a continue statement with an option label to continue
+ * With this we can label specific statements and `continue` it
+ *
+ * @return parsed `ContinueStmt`
+ */
 ContinueStmt *Parser::parseContinueStmt() {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -879,6 +984,12 @@ ContinueStmt *Parser::parseContinueStmt() {
     return new ContinueStmt(startPosition, endPosition, labelName);
 }
 
+/**
+ * Parse a goto statement with a label to `goto`
+ * With this we can label specific statements and `goto` it
+ *
+ * @return parsed `GotoStmt`
+ */
 GotoStmt *Parser::parseGotoStmt() {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -981,10 +1092,29 @@ TryStmt *Parser::parseTryStmt() {
     return new TryStmt(startPosition, endPosition, encapsulatedStmt, catchStmts, finallyStmt);
 }
 
-Expr *Parser::parseRValue(bool isStatement, bool templateTypingAllowed) {
+/**
+ * Parse a generic expression
+ *
+ * @param isStatement - tells the parser that the expression is a statement and can be a local variable declaration
+ * @param templateTypingAllowed - tells the parser that template typing is allowed
+ * @return generic parsed `Expr`
+ */
+Expr *Parser::parseExpr(bool isStatement, bool templateTypingAllowed) {
     return parseAssignmentMisc(isStatement, templateTypingAllowed);
 }
 
+/**
+ * First call `parseLogicalOr` then check for any assignment operators.
+ * If an assignment operator is found it then recursively calls back to itsself to parse the right hand side of the assignment
+ * This implicitly converts:
+ *     i = j = k = 12;
+ * To:
+ *     i = (j = (k = 12));
+ *
+ * @param isStatement - tells the parser that the expression is a statement and can be a local variable declaration
+ * @param templateTypingAllowed - tells the parser that template typing is allowed
+ * @return generic `BinaryOperatorExpr` or assignment `BinaryOperatorExpr`
+ */
 Expr *Parser::parseAssignmentMisc(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1094,6 +1224,17 @@ Expr *Parser::parseAssignmentMisc(bool isStatement, bool templateTypingAllowed) 
     }
 }
 
+/**
+ * First call `parseLogicalAnd` then check for the logical or operator `||`.
+ * If a logical or operator is found it then loops to keep checking for more `||` operators
+ * This implicitly converts:
+ *     i || j || k
+ * To:
+ *     (i || j) || k;
+ *
+ * @param templateTypingAllowed - tells the parser that template typing is allowed
+ * @return generic `BinaryOperatorExpr` or logical or `BinaryOperatorExpr`
+ */
 Expr *Parser::parseLogicalOr(bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1118,6 +1259,17 @@ Expr *Parser::parseLogicalOr(bool templateTypingAllowed) {
     return nullptr;
 }
 
+/**
+ * First call `parseBitwiseOr` then check for the logical and operator `&&`.
+ * If a logical and operator is found it then loops to keep checking for more `&&` operators
+ * This implicitly converts:
+ *     i && j && k
+ * To:
+ *     (i && j) && k;
+ *
+ * @param templateTypingAllowed - tells the parser that template typing is allowed
+ * @return generic `BinaryOperatorExpr` or logical and `BinaryOperatorExpr`
+ */
 Expr *Parser::parseLogicalAnd(bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1142,6 +1294,17 @@ Expr *Parser::parseLogicalAnd(bool templateTypingAllowed) {
     return nullptr;
 }
 
+/**
+ * First call `parseBitwiseXor` then check for the bitwise or operator `|`.
+ * If a bitwise or operator is found it then loops to keep checking for more `|` operators
+ * This implicitly converts:
+ *     i | j | k
+ * To:
+ *     (i | j) | k;
+ *
+ * @param templateTypingAllowed - tells the parser that template typing is allowed
+ * @return generic `BinaryOperatorExpr` or bitwise or `BinaryOperatorExpr`
+ */
 Expr *Parser::parseBitwiseOr(bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1166,6 +1329,17 @@ Expr *Parser::parseBitwiseOr(bool templateTypingAllowed) {
     return nullptr;
 }
 
+/**
+ * First call `parseBitwiseAnd` then check for the bitwise xor operator `^`.
+ * If a bitwise xor operator is found it then loops to keep checking for more `^` operators
+ * This implicitly converts:
+ *     i ^ j ^ k
+ * To:
+ *     (i ^ j) ^ k;
+ *
+ * @param templateTypingAllowed - tells the parser that template typing is allowed
+ * @return generic `BinaryOperatorExpr` or bitwise xor `BinaryOperatorExpr`
+ */
 Expr *Parser::parseBitwiseXor(bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1190,6 +1364,17 @@ Expr *Parser::parseBitwiseXor(bool templateTypingAllowed) {
     return nullptr;
 }
 
+/**
+ * First call `parseEqualToNotEqualTo` then check for the bitwise and operator `&`.
+ * If a bitwise and operator is found it then loops to keep checking for more `&` operators
+ * This implicitly converts:
+ *     i & j & k
+ * To:
+ *     (i & j) & k;
+ *
+ * @param templateTypingAllowed - tells the parser that template typing is allowed
+ * @return generic `BinaryOperatorExpr` or bitwise and `BinaryOperatorExpr`
+ */
 Expr *Parser::parseBitwiseAnd(bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1214,6 +1399,17 @@ Expr *Parser::parseBitwiseAnd(bool templateTypingAllowed) {
     return nullptr;
 }
 
+/**
+ * First call `parseGreaterThanLessThan` then check for `==` and `!=`.
+ * If either are found it then loops to keep checking for more `==` or `!=` operators
+ * This implicitly converts:
+ *     i == j != k
+ * To:
+ *     (i == j) != k;
+ *
+ * @param templateTypingAllowed - tells the parser that template typing is allowed
+ * @return generic `BinaryOperatorExpr` or an equal or not equal to `BinaryOperatorExpr`
+ */
 Expr *Parser::parseEqualToNotEqualTo(bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1246,6 +1442,17 @@ Expr *Parser::parseEqualToNotEqualTo(bool templateTypingAllowed) {
     return nullptr;
 }
 
+/**
+ * First call `parseBitwiseShifts` then check for `>`, `<`, `>=`, and `<=`.
+ * If either are found it then loops to keep checking for more `>`, `<`, `>=`, or `<=` operators
+ * This implicitly converts:
+ *     i < j > k
+ * To:
+ *     (i < j) > k;
+ *
+ * @param templateTypingAllowed - tells the parser that template typing is allowed
+ * @return generic `BinaryOperatorExpr` or a greater or less than `BinaryOperatorExpr`
+ */
 Expr *Parser::parseGreaterThanLessThan(bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1294,6 +1501,17 @@ Expr *Parser::parseGreaterThanLessThan(bool templateTypingAllowed) {
     return nullptr;
 }
 
+/**
+ * First call `parseAdditionSubtraction` then check for `>>` and `<<`.
+ * If either are found it then loops to keep checking for more `>>` or `<<` operators
+ * This implicitly converts:
+ *     i << j >> k
+ * To:
+ *     (i << j) >> k;
+ *
+ * @param templateTypingAllowed - tells the parser that template typing is allowed
+ * @return generic `BinaryOperatorExpr` or a bit shift left or right `BinaryOperatorExpr`
+ */
 Expr *Parser::parseBitwiseShifts(bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1326,6 +1544,17 @@ Expr *Parser::parseBitwiseShifts(bool templateTypingAllowed) {
     return nullptr;
 }
 
+/**
+ * First call `parseMultiplicationDivisionOrRemainder` then check for `+` and `-`.
+ * If either are found it then loops to keep checking for more `+` or `-` operators
+ * This implicitly converts:
+ *     i + j - k
+ * To:
+ *     (i + j) - k;
+ *
+ * @param templateTypingAllowed - tells the parser that template typing is allowed
+ * @return generic `BinaryOperatorExpr` or a addition or subtraction `BinaryOperatorExpr`
+ */
 Expr *Parser::parseAdditionSubtraction(bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1358,6 +1587,17 @@ Expr *Parser::parseAdditionSubtraction(bool templateTypingAllowed) {
     return nullptr;
 }
 
+/**
+ * First call `parsePrefixes` then check for `*`, `/` and `%`. // TODO: Should we support the VB `\` integer division?
+ * If either are found it then loops to keep checking for more `*`, `/`, or `%` operators
+ * This implicitly converts:
+ *     i * j % k
+ * To:
+ *     (i * j) % k;
+ *
+ * @param templateTypingAllowed - tells the parser that template typing is allowed
+ * @return generic `BinaryOperatorExpr` or a addition or subtraction `BinaryOperatorExpr`
+ */
 Expr *Parser::parseMultiplicationDivisionOrRemainder(bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1398,6 +1638,15 @@ Expr *Parser::parseMultiplicationDivisionOrRemainder(bool templateTypingAllowed)
     return nullptr;
 }
 
+/**
+ * First we check for any prefix operators:
+ * (`++`, `--`, `+`, `-`, `!`, `~`, `*`, `&`, `sizeof`, `alignof`, offsetof`, `nameof`, and `(` for `ParenExpr`)
+ * It then calls back on itself until there is no other prefix operator detected
+ * If no prefix operator is detected we then call `parseCallPostfixOrMemberAccess`
+ *
+ * @param templateTypingAllowed
+ * @return
+ */
 Expr *Parser::parsePrefixes(bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1480,7 +1729,7 @@ Expr *Parser::parsePrefixes(bool templateTypingAllowed) {
             _lexer.setRightShiftState(true);
             _lexer.consumeType(TokenType::LPAREN);
 
-            Expr* nestedExpr = parseRValue(false, false);
+            Expr* nestedExpr = parseExpr(false, false);
 
             endPosition = _lexer.peekToken().endPosition;
 
@@ -1567,6 +1816,14 @@ Expr *Parser::parsePrefixes(bool templateTypingAllowed) {
     }
 }
 
+/**
+ * First we call `parseVariableLiteralOrParen` then we check for any postfix operator
+ * (`++`, `--`, `(` for function calls`, `[` for array indexing, `.` for member access, or `->` for dereference then member access)
+ * Then we loop to keep looking for more postfix operators, if none are found we return the result
+ *
+ * @param templateTypingAllowed
+ * @return
+ */
 Expr *Parser::parseCallPostfixOrMemberAccess(bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
@@ -1590,7 +1847,7 @@ Expr *Parser::parseCallPostfixOrMemberAccess(bool templateTypingAllowed) {
                 std::vector<Expr*> arguments{};
 
                 while (_lexer.peekType() != TokenType::RPAREN && _lexer.peekType() != TokenType::ENDOFFILE) {
-                    arguments.push_back(parseRValue(false, false));
+                    arguments.push_back(parseExpr(false, false));
 
                     if (!_lexer.consumeType(TokenType::COMMA)) break;
                 }
@@ -1612,7 +1869,7 @@ Expr *Parser::parseCallPostfixOrMemberAccess(bool templateTypingAllowed) {
                 std::vector<Expr*> arguments{};
 
                 while (_lexer.peekType() != TokenType::RSQUARE && _lexer.peekType() != TokenType::ENDOFFILE) {
-                    arguments.push_back(parseRValue(false, false));
+                    arguments.push_back(parseExpr(false, false));
 
                     if (!_lexer.consumeType(TokenType::COMMA)) break;
                 }
@@ -1653,6 +1910,14 @@ Expr *Parser::parseCallPostfixOrMemberAccess(bool templateTypingAllowed) {
     return nullptr;
 }
 
+/**
+ * Parses `IdentifierExpr`s (`varName`, `functionName<T>`), number literals (`12`, `1.234`, `0b010`, `0xff`, `07`), string literals (`"string literal"`), and character literals (`'C'`)
+ * It then immediately returns the result
+ * If nothing is found we then return null
+ *
+ * @param templateTypingAllowed
+ * @return
+ */
 Expr *Parser::parseVariableLiteralOrParen(bool templateTypingAllowed) {
     Token peekedToken = _lexer.peekToken();
     TextPosition startPosition = peekedToken.startPosition;
@@ -1675,7 +1940,7 @@ Expr *Parser::parseVariableLiteralOrParen(bool templateTypingAllowed) {
 //            _lexer.setRightShiftState(true);
 //            _lexer.consumeType(TokenType::LPAREN);
 //
-//            Expr* nestedExpr = parseRValue(false);
+//            Expr* nestedExpr = parseExpr(false);
 //
 //            endPosition = _lexer.peekToken().endPosition;
 //

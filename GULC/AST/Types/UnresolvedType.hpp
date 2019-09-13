@@ -23,6 +23,22 @@ namespace gulc {
         const std::vector<Expr*>& templateArguments() const { return _templateArguments; }
         bool hasTemplateArguments() const { return !_templateArguments.empty(); }
 
+        std::string getString() const override {
+            std::string result = "[unresolved] ";
+
+            for (const std::string& namespacePathItem : namespacePath()) {
+                result += namespacePathItem + ".";
+            }
+
+            result += _name;
+
+            if (hasTemplateArguments()) {
+                result += "<?>";
+            }
+
+            return result;
+        }
+
         ~UnresolvedType() override {
             for (Expr* templateArgument : _templateArguments) {
                 delete templateArgument;
