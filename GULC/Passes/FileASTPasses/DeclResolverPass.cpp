@@ -36,6 +36,28 @@ bool DeclResolverPass::getTypesAreSame(const Type* type1, const Type* type2) {
 
                 return getTypesAreSame(pointerType1->pointToType, pointerType2->pointToType);
             }
+			case Type::Kind::FunctionPointer: {
+				auto funcPointerType1 = llvm::dyn_cast<FunctionPointerType>(type1);
+				auto funcPointerType2 = llvm::dyn_cast<FunctionPointerType>(type2);
+
+				if (!getTypesAreSame(funcPointerType1->resultType, funcPointerType2->resultType)) {
+					return false;
+				}
+
+				if (funcPointerType1->paramTypes.empty() != funcPointerType2->paramTypes.empty()) {
+					return false;
+				}
+
+				if (!funcPointerType1->paramTypes.empty()) {
+					for (std::size_t i = 0; i < funcPointerType1->paramTypes.size(); ++i) {
+						if (!getTypesAreSame(funcPointerType1->paramTypes[i], funcPointerType2->paramTypes[i])) {
+							return false;
+						}
+					}
+				}
+
+				return true;
+			}
             case Type::Kind::TemplateTypename: {
                 return true;
             }
@@ -69,6 +91,21 @@ Type *DeclResolverPass::deepCopyAndSimplifyType(const Type *type) {
             auto pointerType = llvm::dyn_cast<PointerType>(type);
             return new PointerType(pointerType->startPosition(), pointerType->endPosition(), deepCopyAndSimplifyType(pointerType->pointToType));
         }
+		case Type::Kind::FunctionPointer: {
+			auto functionPointer = llvm::dyn_cast<FunctionPointerType>(type);
+			Type* resultType = deepCopyAndSimplifyType(functionPointer->resultType);
+			std::vector<Type*> paramTypes{};
+
+			if (!functionPointer->paramTypes.empty()) {
+				paramTypes.reserve(functionPointer->paramTypes.size());
+
+				for (const Type* paramType : functionPointer->paramTypes) {
+					paramTypes.emplace_back(deepCopyAndSimplifyType(paramType));
+				}
+			}
+
+			return new FunctionPointerType(functionPointer->startPosition(), functionPointer->endPosition(), resultType, paramTypes);
+		}
         case Type::Kind::TemplateTypename: {
             auto templateTypenameType = llvm::dyn_cast<TemplateTypenameType>(type);
             return new TemplateTypenameType(templateTypenameType->startPosition(), templateTypenameType->endPosition());
@@ -77,6 +114,9 @@ Type *DeclResolverPass::deepCopyAndSimplifyType(const Type *type) {
             std::cout << "gulc [INTERNAL] resolver error: attempted to deep copy unresolved type, operation not supported!" << std::endl;
             std::exit(1);
         }
+		default:
+			std::cout << "gulc [INTERNAL] resolver error: attempted to deep copy an unsupported type!" << std::endl;
+			std::exit(1);
     }
     // MSVC apparently doesn't take 'std::exit' into account and thinks we don't return on all code paths...
     return nullptr;

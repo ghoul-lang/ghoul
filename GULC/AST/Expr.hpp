@@ -52,7 +52,7 @@ namespace gulc {
 
     protected:
         Expr(Kind kind, TextPosition startPosition, TextPosition endPosition)
-                : Stmt(Stmt::Kind::Expr, startPosition, endPosition), _kind(kind), resultType(nullptr) {}
+                : Stmt(Stmt::Kind::Expr, startPosition, endPosition), resultType(nullptr), _kind(kind) {}
 
     private:
         const Kind _kind;

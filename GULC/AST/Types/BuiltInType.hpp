@@ -11,11 +11,15 @@ namespace gulc {
 
         BuiltInType(TextPosition startPosition, TextPosition endPosition, std::string name)
                 : Type(Kind::BuiltIn, startPosition, endPosition),
-                  _name(std::move(name)), _isFloating(false), _isSigned(true) {
+                  _name(std::move(name)), _isBool(false), _isFloating(false), _isSigned(true) {
+            if (name == "bool") {
+                _isBool = true;
+            }
+
             // TODO: Remove the names that aren't `int#` and `float32`/`float64`
             if (name == "int8" || name == "uint8" || name == "char" || name == "byte" || name == "sbyte") {
                 _sizeInBytes = 1;
-            } else if (name == "int16" || name == "uint16" || name == "short" || name == "ushort") {
+            } else if (name == "int16" || name == "uint16" || name == "float16" || name == "short" || name == "ushort") {
                 _sizeInBytes = 2;
             } else if (name == "int32" || name == "uint32" || name == "float32" || name == "int" || name == "uint" || name == "float") {
                 _sizeInBytes = 4;
@@ -27,7 +31,7 @@ namespace gulc {
             }
 
             // TODO: Remove the `float` and `double`
-            if (name == "float" || name == "double") {
+            if (name == "float" || name == "double" || name == "float32" || name == "float64") {
                 _isFloating = true;
             }
 
@@ -45,10 +49,12 @@ namespace gulc {
         unsigned short size() const { return _sizeInBytes; }
         bool isFloating() const { return _isFloating; }
         bool isSigned() const { return _isSigned; }
+        bool isBool() const { return _isBool; }
 
     private:
         std::string _name;
         unsigned short _sizeInBytes;
+        bool _isBool;
         bool _isFloating;
         bool _isSigned;
 

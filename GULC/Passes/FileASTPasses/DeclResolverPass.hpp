@@ -49,8 +49,8 @@ namespace gulc {
         std::map<std::string, bool> labelNames;
 
         explicit ResolveDeclsContext(FileAST& fileAst)
-                : fileAst(fileAst), functionTemplateParams(nullptr), functionParams(nullptr),
-                  returnType(nullptr), functionCallArgs(nullptr), labelNames() {}
+                : fileAst(fileAst), returnType(nullptr), functionTemplateParams(nullptr),
+			      functionParams(nullptr), functionCallArgs(nullptr), labelNames() {}
 
         void labelResolved(const std::string& labelName) {
             if (labelNames.find(labelName) != labelNames.end()) {
