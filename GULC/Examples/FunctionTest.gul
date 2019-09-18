@@ -1,5 +1,20 @@
-int main() {
-    goto labelTest;
-labelTest:
+int testFunc() {
     return 12;
+}
+
+int main() {
+    int result = 3;
+
+outerLoop:
+    while (result > 14) {
+        while (result > 12) {
+            ++result;
+
+            if (result == 6) {
+                break outerLoop;
+            }
+        }
+    }
+
+    return result;
 }

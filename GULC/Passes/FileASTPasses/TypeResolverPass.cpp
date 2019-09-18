@@ -3,6 +3,7 @@
 #include <AST/Exprs/ResolvedTypeRefExpr.hpp>
 #include <AST/Exprs/LocalVariableDeclExpr.hpp>
 #include <AST/Types/BuiltInType.hpp>
+#include <AST/Exprs/IntegerLiteralExpr.hpp>
 #include "TypeResolverPass.hpp"
 
 using namespace gulc;

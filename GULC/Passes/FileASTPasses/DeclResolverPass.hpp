@@ -37,6 +37,7 @@
 #include <AST/Exprs/LocalVariableDeclExpr.hpp>
 #include <AST/Exprs/ResolvedTypeRefExpr.hpp>
 #include <AST/Exprs/StringLiteralExpr.hpp>
+#include <AST/Exprs/LocalVariableDeclExpr.hpp>
 
 namespace gulc {
     struct ResolveDeclsContext {
@@ -47,10 +48,13 @@ namespace gulc {
         const std::vector<Expr*>* functionCallArgs;
         // List of resolved and unresolved labels (if the boolean is true then it is resolved, else it isn't found)
         std::map<std::string, bool> labelNames;
+        unsigned int functionLocalVariablesCount;
+        std::vector<LocalVariableDeclExpr*> functionLocalVariables;
 
         explicit ResolveDeclsContext(FileAST& fileAst)
                 : fileAst(fileAst), returnType(nullptr), functionTemplateParams(nullptr),
-			      functionParams(nullptr), functionCallArgs(nullptr), labelNames() {}
+			      functionParams(nullptr), functionCallArgs(nullptr), labelNames(), functionLocalVariables(),
+                  functionLocalVariablesCount(0) {}
 
         void labelResolved(const std::string& labelName) {
             if (labelNames.find(labelName) != labelNames.end()) {
@@ -63,6 +67,42 @@ namespace gulc {
         void addUnresolvedLabel(const std::string& labelName) {
             if (labelNames.find(labelName) == labelNames.end()) {
                 labelNames.insert({ labelName, false });
+            }
+        }
+
+        bool localVariableNameTaken(const std::string& varName) const {
+            for (std::size_t i = 0; i < functionLocalVariablesCount; ++i) {
+                if (functionLocalVariables[i]->name() == varName) {
+                    return true;
+                }
+            }
+
+            if (functionParams != nullptr) {
+                for (const ParameterDecl *param : *functionParams) {
+                    if (param->name() == varName) {
+                        return true;
+                    }
+                }
+            }
+
+            if (functionTemplateParams != nullptr) {
+                for (const TemplateParameterDecl *templateParam : *functionTemplateParams) {
+                    if (templateParam->name() == varName) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        void addLocalVariable(LocalVariableDeclExpr* localVariableDeclExpr) {
+            ++functionLocalVariablesCount;
+
+            if (functionLocalVariablesCount >= functionLocalVariables.size()) {
+                functionLocalVariables.push_back(localVariableDeclExpr);
+            } else {
+                functionLocalVariables[functionLocalVariablesCount - 1] = localVariableDeclExpr;
             }
         }
     };
@@ -123,6 +163,8 @@ namespace gulc {
         void processStringLiteralExpr(ResolveDeclsContext& context, StringLiteralExpr* stringLiteralExpr);
         void processTernaryExpr(ResolveDeclsContext& context, TernaryExpr* ternaryExpr);
         void processUnresolvedTypeRefExpr(ResolveDeclsContext& context, Expr*& expr);
+
+        void convertLValueToRValue(Expr*& potentialLValue);
 
     };
 }

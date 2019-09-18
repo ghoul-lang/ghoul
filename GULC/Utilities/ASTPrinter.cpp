@@ -126,6 +126,9 @@ void ASTPrinter::printExpr(const Expr *expr, const std::string& prefix) {
         case Expr::Kind::ResolvedTypeRef:
             printResolvedTypeRefExpr(llvm::dyn_cast<ResolvedTypeRefExpr>(expr), prefix);
             break;
+        case Expr::Kind::LValueToRValue:
+            printLValueToRValueExpr(llvm::dyn_cast<LValueToRValueExpr>(expr), prefix);
+            break;
         default:
             std::cout << prefix << "[UNSUPPORTED EXPR]" << std::endl;
             break;
@@ -493,4 +496,10 @@ void ASTPrinter::printLocalVariableDeclExpr(const LocalVariableDeclExpr *localVa
 
 void ASTPrinter::printResolvedTypeRefExpr(const ResolvedTypeRefExpr *resolvedTypeRefExpr, const std::string &prefix) {
     std::cout << prefix << "| ResolvedTypeRefExpr (type: " << getTypeName(resolvedTypeRefExpr->resolvedType()) << ")" << std::endl;
+}
+
+void ASTPrinter::printLValueToRValueExpr(const LValueToRValueExpr *lValueToRValueExpr, const std::string &prefix) {
+    std::cout << prefix << "| LValue to RValue" << std::endl;
+    std::cout << prefix << "\\ LValue: " << std::endl;
+    printExpr(lValueToRValueExpr->lvalue, prefix + "  ");
 }

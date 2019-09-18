@@ -32,6 +32,7 @@ namespace gulc {
             PotentialExplicitCast,
             ExplicitCast,
             ImplicitCast,
+            LValueToRValue,
 
             LocalVariableDeclOrPrefixOperatorCallExpr,
 

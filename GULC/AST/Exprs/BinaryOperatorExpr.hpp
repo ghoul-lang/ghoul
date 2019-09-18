@@ -26,13 +26,22 @@ namespace gulc {
         Expr* rightValue;
         bool isBuiltInAssignmentOperator() const { return _isBuiltInAssignmentOperator; }
 
+        void setOperatorName(const std::string& operatorName) {
+            _operatorName = operatorName;
+
+            _isBuiltInAssignmentOperator =
+                    _operatorName == "=" || _operatorName == ">>=" || _operatorName == "<<=" || _operatorName == "+=" ||
+                    _operatorName == "-=" || _operatorName == "*=" || _operatorName == "/=" || _operatorName == "%=" ||
+                    _operatorName == "&=" || _operatorName == "|=" || _operatorName == "^=";
+        }
+
         ~BinaryOperatorExpr() override {
             delete leftValue;
             delete rightValue;
         }
 
     private:
-        const std::string _operatorName;
+        std::string _operatorName;
         bool _isBuiltInAssignmentOperator;
 
     };

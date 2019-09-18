@@ -35,6 +35,7 @@
 #include <AST/Exprs/TernaryExpr.hpp>
 #include <AST/Exprs/LocalVariableDeclExpr.hpp>
 #include <AST/Exprs/ResolvedTypeRefExpr.hpp>
+#include <AST/Exprs/LValueToRValueExpr.hpp>
 
 namespace gulc {
     class ASTPrinter {
@@ -86,6 +87,7 @@ namespace gulc {
         static void printTernaryExpr(const TernaryExpr* ternaryExpr, const std::string& prefix = "");
         static void printLocalVariableDeclExpr(const LocalVariableDeclExpr* localVariableDeclExpr, const std::string& prefix = "");
         static void printResolvedTypeRefExpr(const ResolvedTypeRefExpr* resolvedTypeRefExpr, const std::string& prefix = "");
+        static void printLValueToRValueExpr(const LValueToRValueExpr* lValueToRValueExpr, const std::string& prefix = "");
 
     };
 }

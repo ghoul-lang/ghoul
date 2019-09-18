@@ -4,6 +4,7 @@
 #include <AST/Types/TemplateTypenameType.hpp>
 #include <AST/Types/UnresolvedType.hpp>
 #include <AST/Types/FunctionPointerType.hpp>
+#include <AST/Exprs/LValueToRValueExpr.hpp>
 #include "DeclResolverPass.hpp"
 
 using namespace gulc;
@@ -313,7 +314,10 @@ void DeclResolverPass::processFunctionDecl(FileAST &fileAst, FunctionDecl *funct
 
     context.returnType = functionDecl->resultType;
 
+    // We reset to zero just in case.
+    context.functionLocalVariablesCount = 0;
     processCompoundStmt(context, functionDecl->body());
+    context.functionLocalVariablesCount = 0;
 
     context.returnType = nullptr;
     context.functionParams = nullptr;
@@ -336,9 +340,13 @@ void DeclResolverPass::processCaseStmt(ResolveDeclsContext &context, CaseStmt *c
 }
 
 void DeclResolverPass::processCompoundStmt(ResolveDeclsContext &context, CompoundStmt *compoundStmt) {
+    unsigned int oldLocalVariableCount = context.functionLocalVariablesCount;
+
     for (Stmt*& stmt : compoundStmt->statements()) {
         processStmt(context, stmt);
     }
+
+    context.functionLocalVariablesCount = oldLocalVariableCount;
 }
 
 void DeclResolverPass::processContinueStmt(ResolveDeclsContext &context, ContinueStmt *continueStmt) {
@@ -437,6 +445,8 @@ void DeclResolverPass::processBinaryOperatorExpr(ResolveDeclsContext &context, B
     processExpr(context, binaryOperatorExpr->leftValue);
     processExpr(context, binaryOperatorExpr->rightValue);
 
+    convertLValueToRValue(binaryOperatorExpr->rightValue);
+
     Type* leftType = binaryOperatorExpr->leftValue->resultType;
     Type* rightType = binaryOperatorExpr->rightValue->resultType;
 
@@ -446,10 +456,58 @@ void DeclResolverPass::processBinaryOperatorExpr(ResolveDeclsContext &context, B
                                                                   binaryOperatorExpr->rightValue->endPosition(),
                                                                   deepCopyAndSimplifyType(leftType),
                                                                   binaryOperatorExpr->rightValue);
-            binaryOperatorExpr->resultType = deepCopyAndSimplifyType(leftType);
-            return;
         }
+
+        binaryOperatorExpr->resultType = deepCopyAndSimplifyType(leftType);
+
+        if (binaryOperatorExpr->operatorName() != "=") {
+            std::string rightOperatorName;
+
+            if (binaryOperatorExpr->operatorName() == ">>=") {
+                rightOperatorName = ">>";
+            } else if (binaryOperatorExpr->operatorName() == "<<=") {
+                rightOperatorName = "<<";
+            } else if (binaryOperatorExpr->operatorName() == "+=") {
+                rightOperatorName = "+";
+            } else if (binaryOperatorExpr->operatorName() == "-=") {
+                rightOperatorName = "-";
+            } else if (binaryOperatorExpr->operatorName() == "*=") {
+                rightOperatorName = "*";
+            } else if (binaryOperatorExpr->operatorName() == "/=") {
+                rightOperatorName = "/";
+            } else if (binaryOperatorExpr->operatorName() == "%=") {
+                rightOperatorName = "%";
+            } else if (binaryOperatorExpr->operatorName() == "&=") {
+                rightOperatorName = "&";
+            } else if (binaryOperatorExpr->operatorName() == "|=") {
+                rightOperatorName = "|";
+            } else if (binaryOperatorExpr->operatorName() == "^=") {
+                rightOperatorName = "^";
+            } else {
+                printError(
+                        "[INTERNAL] unknown built in assignment operator '" + binaryOperatorExpr->operatorName() + "'!",
+                        context.fileAst, binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+                return;
+            }
+
+            // We set a new right value with an `LValueToRValueExpr` that doesn't own the pointer. Making it so the left L2R expression doesn't delete the pointer since the binary operator owns it.
+            auto newRightValue = new BinaryOperatorExpr(binaryOperatorExpr->startPosition(),
+                                                        binaryOperatorExpr->endPosition(),
+                                                        rightOperatorName,
+                                                        new LValueToRValueExpr({}, {}, binaryOperatorExpr->leftValue, false),
+                                                        binaryOperatorExpr->rightValue);
+
+            newRightValue->resultType = deepCopyAndSimplifyType(leftType);
+
+            // Set the new right value and change the operator name to '='
+            binaryOperatorExpr->setOperatorName("=");
+            binaryOperatorExpr->rightValue = newRightValue;
+        }
+
+        return;
     } else {
+        convertLValueToRValue(binaryOperatorExpr->leftValue);
+
         if (llvm::isa<BuiltInType>(leftType) && llvm::isa<BuiltInType>(rightType)) {
             auto leftBuiltInType = llvm::dyn_cast<BuiltInType>(leftType);
             auto rightBuiltInType = llvm::dyn_cast<BuiltInType>(rightType);
@@ -543,6 +601,8 @@ void DeclResolverPass::processFunctionCallExpr(ResolveDeclsContext &context, Fun
     // TODO: Support overloading the operator ()
     for (Expr*& arg : functionCallExpr->arguments) {
         processExpr(context, arg);
+
+        convertLValueToRValue(arg);
     }
 
     if (functionCallExpr->hasArguments()) {
@@ -578,7 +638,14 @@ void DeclResolverPass::processIdentifierExpr(ResolveDeclsContext &context, Ident
         return;
     }
 
-    // TODO: We should check local variables
+    // We check local variables first
+    for (std::size_t i = 0; i < context.functionLocalVariablesCount; ++i) {
+        if (context.functionLocalVariables[i]->name() == identifierExpr->name()) {
+            identifierExpr->resultType = deepCopyAndSimplifyType(context.functionLocalVariables[i]->resultType);
+            return;
+        }
+    }
+
     // then params
     if (context.functionParams != nullptr) {
         for (const ParameterDecl* param : *context.functionParams) {
@@ -718,7 +785,18 @@ void DeclResolverPass::processIntegerLiteralExpr(ResolveDeclsContext &context, I
 }
 
 void DeclResolverPass::processLocalVariableDeclExpr(ResolveDeclsContext &context, LocalVariableDeclExpr *localVariableDeclExpr) {
-    // We don't have anything to do here...
+    if (llvm::isa<ResolvedTypeRefExpr>(localVariableDeclExpr->type())) {
+        if (context.localVariableNameTaken(localVariableDeclExpr->name())) {
+            printError("redefinition of variable '" + localVariableDeclExpr->name() + "' not allowed!",
+                       context.fileAst, localVariableDeclExpr->startPosition(),
+                       localVariableDeclExpr->endPosition());
+        }
+
+        auto resolvedTypeRefExpr = llvm::dyn_cast<ResolvedTypeRefExpr>(localVariableDeclExpr->type());
+        localVariableDeclExpr->resultType = deepCopyAndSimplifyType(resolvedTypeRefExpr->resolvedType());
+
+        context.addLocalVariable(localVariableDeclExpr);
+    }
 }
 
 void DeclResolverPass::processLocalVariableDeclOrPrefixOperatorCallExpr(ResolveDeclsContext &context, Expr *&expr) {
@@ -735,11 +813,15 @@ void DeclResolverPass::processParenExpr(ResolveDeclsContext &context, ParenExpr 
     processExpr(context, parenExpr->containedExpr);
 
     parenExpr->resultType = deepCopyAndSimplifyType(parenExpr->containedExpr->resultType);
+
+    convertLValueToRValue(parenExpr->containedExpr);
 }
 
 void DeclResolverPass::processPostfixOperatorExpr(ResolveDeclsContext &context, PostfixOperatorExpr *postfixOperatorExpr) {
     // TODO: Support operator overloading type resolution
-    postfixOperatorExpr->resultType = (deepCopyAndSimplifyType(postfixOperatorExpr->expr->resultType));
+    processExpr(context, postfixOperatorExpr->expr);
+
+    postfixOperatorExpr->resultType = deepCopyAndSimplifyType(postfixOperatorExpr->expr->resultType);
 }
 
 void DeclResolverPass::processPotentialExplicitCastExpr(ResolveDeclsContext &context, PotentialExplicitCastExpr *potentialExplicitCastExpr) {
@@ -784,4 +866,13 @@ void DeclResolverPass::processTernaryExpr(ResolveDeclsContext &context, TernaryE
 
 void DeclResolverPass::processUnresolvedTypeRefExpr(ResolveDeclsContext &context, Expr *&expr) {
     printError("type not found!", context.fileAst, expr->startPosition(), expr->endPosition());
+}
+
+void DeclResolverPass::convertLValueToRValue(Expr*& potentialLValue) {
+    // TODO: IdentifierExpr isn't the only thing we will have to do this for, right?
+    if (llvm::isa<IdentifierExpr>(potentialLValue)) {
+        Expr* newRValue = new LValueToRValueExpr(potentialLValue->startPosition(), potentialLValue->endPosition(), potentialLValue);
+        newRValue->resultType = deepCopyAndSimplifyType(potentialLValue->resultType);
+        potentialLValue = newRValue;
+    }
 }

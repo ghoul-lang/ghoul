@@ -13,9 +13,9 @@ int main() {
 
     middlewareEngine.process(fileAst);
 
-    for (const Decl* topLevelDecl : fileAst.topLevelDecls()) {
-        ASTPrinter::printDecl(topLevelDecl);
-    }
+//    for (const Decl* topLevelDecl : fileAst.topLevelDecls()) {
+//        ASTPrinter::printDecl(topLevelDecl);
+//    }
 
     CodeGen codeGen = CodeGen();
     codeGen.generate(fileAst);
