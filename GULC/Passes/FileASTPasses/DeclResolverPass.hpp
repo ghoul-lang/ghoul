@@ -53,8 +53,8 @@ namespace gulc {
 
         explicit ResolveDeclsContext(FileAST& fileAst)
                 : fileAst(fileAst), returnType(nullptr), functionTemplateParams(nullptr),
-			      functionParams(nullptr), functionCallArgs(nullptr), labelNames(), functionLocalVariables(),
-                  functionLocalVariablesCount(0) {}
+			      functionParams(nullptr), functionCallArgs(nullptr), labelNames(),
+                  functionLocalVariablesCount(0), functionLocalVariables() {}
 
         void labelResolved(const std::string& labelName) {
             if (labelNames.find(labelName) != labelNames.end()) {

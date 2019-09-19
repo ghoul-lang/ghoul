@@ -1,7 +1,7 @@
 ﻿#include <Parser/Parser.hpp>
-#include <Utilities/ASTPrinter.hpp>
 #include <Middleware/MiddlewareEngine.hpp>
 #include <CodeGen/CodeGen.hpp>
+#include <ObjGen/ObjGen.hpp>
 
 using namespace gulc;
 
@@ -13,12 +13,12 @@ int main() {
 
     middlewareEngine.process(fileAst);
 
-//    for (const Decl* topLevelDecl : fileAst.topLevelDecls()) {
-//        ASTPrinter::printDecl(topLevelDecl);
-//    }
-
     CodeGen codeGen = CodeGen();
-    codeGen.generate(fileAst);
+    gulc::Module module = codeGen.generate(fileAst);
+
+    ObjGen::init();
+    ObjGen objGen = ObjGen();
+    objGen.generate(module);
 
 	return 0;
 }

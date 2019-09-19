@@ -18,7 +18,7 @@
 #include <AST/Exprs/ParenExpr.hpp>
 #include "CodeGen.hpp"
 
-void gulc::CodeGen::generate(gulc::FileAST& file) {
+gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
     llvm::LLVMContext llvmContext;
     llvm::IRBuilder<> irBuilder(llvmContext);
     // TODO: Should we remove the ending file extension?
@@ -47,10 +47,12 @@ void gulc::CodeGen::generate(gulc::FileAST& file) {
         //globalObject.print()
     }
 
-    genModule->print(llvm::errs(), nullptr);
+    //genModule->print(llvm::errs(), nullptr);
 
     funcPassManager->doFinalization();
     delete funcPassManager;
+
+    return Module(file.filePath(), genModule);
 }
 
 void gulc::CodeGen::printError(const std::string &message, gulc::FileAST &fileAst, TextPosition startPosition, TextPosition endPosition) {

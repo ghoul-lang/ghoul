@@ -25,6 +25,7 @@
 #include <AST/Exprs/PostfixOperatorExpr.hpp>
 #include <AST/Stmts/BreakStmt.hpp>
 #include <AST/Stmts/ContinueStmt.hpp>
+#include "Module.hpp"
 
 namespace gulc {
     // TODO: This doesn't really need to exist. Not sure why I've been doing it this way. We can really just make all of this apart of `CodeGen`
@@ -53,8 +54,8 @@ namespace gulc {
                        llvm::Module* module, llvm::legacy::FunctionPassManager* funcPass)
                 : fileAst(fileAst), llvmContext(llvmContext), irBuilder(irBuilder), module(module), funcPass(funcPass),
                   loopNameNumber(0),
-                  currentFunction(nullptr), currentFunctionLabels(), entryBlockBuilder(nullptr),
-                  currentFunctionLocalVariables(), currentFunctionLocalVariablesCount(0),
+                  currentFunction(nullptr), entryBlockBuilder(nullptr), currentFunctionLabels(),
+				  currentFunctionLocalVariablesCount(0),  currentFunctionLocalVariables(),
                   currentLoopBlockContinue(nullptr), currentLoopBlockBreak(nullptr),
                   nestedLoopCount(0), nestedLoopContinues(), nestedLoopBreaks() {}
 
@@ -149,7 +150,7 @@ namespace gulc {
 
     class CodeGen {
     public:
-        void generate(FileAST& file);
+        gulc::Module generate(FileAST& file);
 
     private:
         void printError(const std::string& message, FileAST &fileAst, TextPosition startPosition, TextPosition endPosition);
