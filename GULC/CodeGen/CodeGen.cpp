@@ -8,7 +8,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
-#include "llvm/Transforms/Utils.h"
+//#include "llvm/Transforms/Utils.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
@@ -19,10 +19,10 @@
 #include "CodeGen.hpp"
 
 gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
-    llvm::LLVMContext llvmContext;
-    llvm::IRBuilder<> irBuilder(llvmContext);
+    llvm::LLVMContext* llvmContext = new llvm::LLVMContext();
+    llvm::IRBuilder<> irBuilder(*llvmContext);
     // TODO: Should we remove the ending file extension?
-    llvm::Module* genModule = new llvm::Module(file.filePath(), llvmContext);
+    llvm::Module* genModule = new llvm::Module(file.filePath(), *llvmContext);
     //llvm::PassManager<llvm::Function>* funcPassManager = new llvm::PassManager<llvm::Function>();
     llvm::legacy::FunctionPassManager* funcPassManager = new llvm::legacy::FunctionPassManager(genModule);
 
@@ -39,7 +39,7 @@ gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
 
     funcPassManager->doInitialization();
 
-    gulc::CodeGenContext codeGenContext = CodeGenContext(file, llvmContext, irBuilder, genModule, funcPassManager);
+    gulc::CodeGenContext codeGenContext = CodeGenContext(file, *llvmContext, irBuilder, genModule, funcPassManager);
 
     for (const gulc::Decl* decl : file.topLevelDecls()) {
         generateDecl(codeGenContext, decl);
@@ -52,7 +52,7 @@ gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
     funcPassManager->doFinalization();
     delete funcPassManager;
 
-    return Module(file.filePath(), genModule);
+    return Module(file.filePath(), llvmContext, genModule);
 }
 
 void gulc::CodeGen::printError(const std::string &message, gulc::FileAST &fileAst, TextPosition startPosition, TextPosition endPosition) {

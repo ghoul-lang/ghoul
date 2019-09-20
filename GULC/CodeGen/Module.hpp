@@ -6,10 +6,11 @@
 namespace gulc {
     struct Module {
         std::string filePath;
+        llvm::LLVMContext* llvmContext;
         llvm::Module* llvmModule;
 
-        Module(std::string filePath, llvm::Module* llvmModule)
-                : filePath(std::move(filePath)), llvmModule(llvmModule) {}
+        Module(std::string filePath, llvm::LLVMContext* llvmContext, llvm::Module* llvmModule)
+                : filePath(std::move(filePath)), llvmContext(llvmContext), llvmModule(llvmModule) {}
 
     };
 }
