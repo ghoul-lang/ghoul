@@ -1,4 +1,9 @@
 #include <iostream>
+#ifdef __GNUC__
+#include <experimental/filesystem>
+#else
+#include <filesystem>
+#endif
 #include <llvm/IR/LegacyPassManager.h>
 #include "ObjGen.hpp"
 
@@ -8,6 +13,12 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
+
+#ifdef __GNUC__
+namespace std_fs = std::experimental::filesystem;
+#else
+namespace std_fs = std::filesystem;
+#endif
 
 void gulc::ObjGen::init() {
     // Maybe one day but this KILLS our build time having to wait for the linker to load and link megabytes of libraries we don't really need...
@@ -24,7 +35,17 @@ void gulc::ObjGen::init() {
 void gulc::ObjGen::generate(gulc::Module module) {
     std::string filename = "build/objs/" + module.filePath + ".o";
 
-    llvm::StringRef targetTriple = llvm::StringRef(LLVM_DEFAULT_TARGET_TRIPLE);
+    // Check to see if the filename's directory exists, if it doesn't we create the directories...
+    {
+        std_fs::path objFilePath = filename;
+        std_fs::path parentDir = objFilePath.parent_path();
+
+        if (!std_fs::exists(parentDir)) {
+            std_fs::create_directories(parentDir);
+        }
+    }
+
+    std::string targetTriple = llvm::sys::getDefaultTargetTriple();
     module.llvmModule->setTargetTriple(targetTriple);
 
     std::string Error;
@@ -42,7 +63,7 @@ void gulc::ObjGen::generate(gulc::Module module) {
     module.llvmModule->setDataLayout(objTargetMachine->createDataLayout());
 
     std::error_code errorCode;
-    llvm::raw_fd_ostream dest(filename, errorCode, llvm::sys::fs::OpenFlags::OF_None);
+    llvm::raw_fd_ostream dest(filename, errorCode, llvm::sys::fs::OpenFlags::F_None);
 
     if (errorCode) {
         std::cerr << "Could not open file: " << errorCode.message() << std::endl;
@@ -51,7 +72,7 @@ void gulc::ObjGen::generate(gulc::Module module) {
 
     llvm::legacy::PassManager pass;
 
-    if (objTargetMachine->addPassesToEmitFile(pass, dest, nullptr, llvm::TargetMachine::CGFT_ObjectFile)) {
+    if (objTargetMachine->addPassesToEmitFile(pass, dest, llvm::TargetMachine::CGFT_ObjectFile)) {
         std::cerr << "Target Machine can't emit a file of this type" << std::endl;
         std::exit(1);
     }
