@@ -7,7 +7,7 @@ GUL borrows a lot of ideas from other languages. The current planned stand out f
  * Template support (C++) but with C# syntax (`public class Example<int i> {}` instead of `template<int i> class Example {}`)
  * Lifetime support (Rust) (`public class Example<lifetime a> {}`)
  * Structs/classes destruct when scope is lost (C++)
- * Structs/classes are move-only by default, must be explicitly marked `copyable` for copying to work (this is to prevent large, unneeded copies that can slow down a program and encourages the user of references)
+ * Structs/classes are move-only by default, must be explicitly marked `copyable` for copying to work (this is to prevent unneeded copies that can slow down a program and encourages the use of references)
  * Glass UI (inspired by old .NET project I worked on)
  * Interfaces can be added to any already defined type (interfaces are similar to Rust traits) (Rust?)
  * TODO: Add the rest of the features...
