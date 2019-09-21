@@ -32,7 +32,7 @@ void gulc::ObjGen::init() {
     llvm::InitializeNativeTargetAsmPrinter();
 }
 
-void gulc::ObjGen::generate(gulc::Module module) {
+gulc::ObjFile gulc::ObjGen::generate(gulc::Module module) {
     std::string filename = "build/objs/" + module.filePath + ".o";
 
     // Check to see if the filename's directory exists, if it doesn't we create the directories...
@@ -79,4 +79,6 @@ void gulc::ObjGen::generate(gulc::Module module) {
 
     pass.run(*module.llvmModule);
     dest.flush();
+
+    return gulc::ObjFile(filename);
 }

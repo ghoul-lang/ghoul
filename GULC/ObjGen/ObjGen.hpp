@@ -2,13 +2,14 @@
 #define GULC_OBJGEN_HPP
 
 #include <CodeGen/Module.hpp>
+#include "ObjFile.hpp"
 
 namespace gulc {
     class ObjGen {
     public:
         static void init();
 
-        void generate(gulc::Module module);
+        ObjFile generate(gulc::Module module);
     };
 }
 

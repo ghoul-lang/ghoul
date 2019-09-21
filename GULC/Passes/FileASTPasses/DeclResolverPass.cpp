@@ -390,6 +390,8 @@ void DeclResolverPass::processReturnStmt(ResolveDeclsContext &context, ReturnStm
     if (returnStmt->hasReturnValue()) {
         processExpr(context, returnStmt->returnValue);
 
+        convertLValueToRValue(returnStmt->returnValue);
+
         if (!getTypesAreSame(returnStmt->returnValue->resultType, context.returnType)) {
             // TODO: Check if `returnValueType` can be implicitly casted to the `returnType`
             printError("return value type does not match the function return type!", context.fileAst,

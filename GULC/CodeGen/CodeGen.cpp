@@ -69,6 +69,11 @@ llvm::Type *gulc::CodeGen::generateLlvmType(gulc::CodeGenContext& context, const
         case gulc::Type::Kind::BuiltIn: {
             auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(type);
 
+            // Void is special...
+            if (builtInType->size() == 0) {
+                return llvm::Type::getVoidTy(context.llvmContext);
+            }
+
             // Bool is special...
             if (builtInType->isBool()) {
                 return llvm::Type::getInt1Ty(context.llvmContext);
@@ -260,7 +265,7 @@ llvm::Function* gulc::CodeGen::generateFunctionDecl(gulc::CodeGenContext& contex
     std::vector<llvm::Type*> paramTypes = generateParamTypes(context, functionDecl->parameters);
     llvm::Type* returnType = generateLlvmType(context, functionDecl->resultType);
     llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
-    llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::PrivateLinkage, functionDecl->name(), context.module);
+    llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::CommonLinkage, functionDecl->name(), context.module);
 
     llvm::BasicBlock* funcBody = llvm::BasicBlock::Create(context.llvmContext, "entry", function);
     context.irBuilder.SetInsertPoint(funcBody);

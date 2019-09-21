@@ -2,6 +2,7 @@
 #include <Middleware/MiddlewareEngine.hpp>
 #include <CodeGen/CodeGen.hpp>
 #include <ObjGen/ObjGen.hpp>
+#include <Linker/Linker.hpp>
 
 using namespace gulc;
 
@@ -18,7 +19,9 @@ int main() {
 
     ObjGen::init();
     ObjGen objGen = ObjGen();
-    objGen.generate(module);
+
+    ObjFile objFile = objGen.generate(module);
+    gulc::Linker::link(objFile);
 
 	return 0;
 }

@@ -19,7 +19,7 @@ bool TypeResolverPass::resolveType(ResolveTypesContext& context, Type*& type) {
         // TODO: Take 'namespacePath' into consideration. If there is a namespace path we obviously don't have to worry about the template params
         auto unresolvedType = llvm::dyn_cast<UnresolvedType>(type);
 
-        if (unresolvedType->name() == "int") {
+        if (BuiltInType::isBuiltInType(unresolvedType->name())) {
             // TODO: Support template overloading. Allow someone to implement `struct int<T> {}` that will be found if there are template arguments
             if (unresolvedType->hasTemplateArguments()) {
                 printError("built in types do not support templating!",
