@@ -564,7 +564,14 @@ Token Lexer::parseToken(std::string &tokenText, TextPosition startPosition) {
         result.metaType = TokenMetaType::MODIFIER;
         result.tokenType = TokenType::CONST;
         result.currentSymbol = "const";
-        result.currentSymbol = "readonly";
+    } else if (tokenText == "mut") {
+        result.metaType = TokenMetaType::MODIFIER;
+        result.tokenType = TokenType::MUT;
+        result.currentSymbol = "mut";
+    } else if (tokenText == "immut") {
+        result.metaType = TokenMetaType::MODIFIER;
+        result.tokenType = TokenType::IMMUT;
+        result.currentSymbol = "immut";
     } else if (tokenText == "extern") {
         result.metaType = TokenMetaType::MODIFIER;
         result.tokenType = TokenType::EXTERN;

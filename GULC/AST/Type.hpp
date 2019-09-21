@@ -13,7 +13,10 @@ namespace gulc {
             FunctionTemplateTypenameRef,
             BuiltIn,
             Pointer,
-            FunctionPointer
+            FunctionPointer,
+            Const,
+            Mut,
+            Immut
         };
 
         Kind getTypeKind() const { return _kind; }

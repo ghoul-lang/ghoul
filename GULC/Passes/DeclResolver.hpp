@@ -54,18 +54,17 @@ namespace gulc {
         bool resolveType(Type*& type);
 
         bool getTypesAreSame(const Type* type1, const Type* type2);
-        bool getTypeGreaterThan(const Type* left, const Type* right);
 
         Type* deepCopyAndSimplifyType(const Type* type);
 
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
         void printDebugWarning(const std::string& message);
 
-        void processDecl(FileAST &fileAst, Decl* decl);
+        void processDecl(Decl* decl);
         void processStmt(Stmt*& stmt);
         void processExpr(Expr*& expr);
 
-        void processFunctionDecl(FileAST &fileAst, FunctionDecl* functionDecl);
+        void processFunctionDecl(FunctionDecl* functionDecl);
 
         void processBreakStmt(BreakStmt* breakStmt);
         void processCaseStmt(CaseStmt* caseStmt);

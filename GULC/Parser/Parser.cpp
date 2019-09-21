@@ -20,6 +20,11 @@
 #include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
 #include <AST/Stmts/LabeledStmt.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
+#include <AST/Types/ConstType.hpp>
+#include <AST/Types/MutType.hpp>
+#include <AST/Types/ImmutType.hpp>
+#include <AST/Exprs/LocalVariableDeclExpr.hpp>
+#include <AST/Types/PointerType.hpp>
 #include "Parser.hpp"
 
 using namespace gulc;
@@ -419,10 +424,71 @@ std::vector<ParameterDecl*> Parser::parseParameterDecls(TextPosition startPositi
  *
  * @return - can be any child of the `Type` class
  */
-Type* Parser::parseType() {
+Type* Parser::parseType(bool parseSuffix) {
     Token peekedToken = _lexer.peekToken();
+    Type* result = nullptr;
 
     switch (peekedToken.tokenType) {
+        case TokenType::CONST: {
+            _lexer.consumeType(TokenType::CONST);
+
+            Type* nestedType;
+
+            if (_lexer.peekType() == TokenType::LPAREN) {
+                // Type constructor?...
+                _lexer.consumeType(TokenType::LPAREN);
+                nestedType = parseType();
+                if (!_lexer.consumeType(TokenType::RPAREN)) {
+                    printError("expected closing ')' to `const` type constructor!",
+                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                }
+            } else {
+                nestedType = parseType(false);
+            }
+
+            result = new ConstType(peekedToken.startPosition, peekedToken.endPosition, nestedType);
+            break;
+        }
+        case TokenType::MUT: {
+            _lexer.consumeType(TokenType::MUT);
+
+            Type* nestedType;
+
+            if (_lexer.peekType() == TokenType::LPAREN) {
+                // Type constructor?...
+                _lexer.consumeType(TokenType::LPAREN);
+                nestedType = parseType();
+                if (!_lexer.consumeType(TokenType::RPAREN)) {
+                    printError("expected closing ')' to `const` type constructor!",
+                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                }
+            } else {
+                nestedType = parseType(false);
+            }
+
+            result = new MutType(peekedToken.startPosition, peekedToken.endPosition, nestedType);
+            break;
+        }
+        case TokenType::IMMUT: {
+            _lexer.consumeType(TokenType::MUT);
+
+            Type* nestedType;
+
+            if (_lexer.peekType() == TokenType::LPAREN) {
+                // Type constructor?...
+                _lexer.consumeType(TokenType::LPAREN);
+                nestedType = parseType();
+                if (!_lexer.consumeType(TokenType::RPAREN)) {
+                    printError("expected closing ')' to `const` type constructor!",
+                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                }
+            } else {
+                nestedType = parseType(false);
+            }
+
+            result = new ImmutType(peekedToken.startPosition, peekedToken.endPosition, nestedType);
+            break;
+        }
         case TokenType::SYMBOL: {
             std::string typeName = peekedToken.currentSymbol;
             _lexer.consumeType(TokenType::SYMBOL);
@@ -455,13 +521,56 @@ Type* Parser::parseType() {
                 _lexer.setRightShiftState(oldRightShiftEnabledValue);
             }
 
-            return new UnresolvedType(peekedToken.startPosition, peekedToken. endPosition, {}, typeName, templateArguments);
+            result = new UnresolvedType(peekedToken.startPosition, peekedToken. endPosition, {}, typeName, templateArguments);
+            break;
         }
         default:
             printError("unexpected token where type was expected! (found '" + _lexer.peekToken().currentSymbol + "')",
                        peekedToken.startPosition, peekedToken.endPosition);
             return nullptr;
     }
+
+    if (parseSuffix) {
+        for (peekedToken = _lexer.peekToken();
+             peekedToken.tokenType != TokenType::ENDOFFILE &&
+             (peekedToken.tokenType == TokenType::CONST ||
+              peekedToken.tokenType == TokenType::MUT ||
+              peekedToken.tokenType == TokenType::IMMUT ||
+              peekedToken.tokenType == TokenType::STAR ||
+              peekedToken.tokenType == TokenType::AMPERSAND ||
+              peekedToken.tokenType == TokenType::CARET ||
+              peekedToken.tokenType == TokenType::PERCENT ||
+              peekedToken.tokenType == TokenType::QUESTION);
+             peekedToken = _lexer.peekToken()) {
+            switch (peekedToken.tokenType) {
+                case TokenType::CONST:
+                    _lexer.consumeType(TokenType::CONST);
+                    result = new ConstType(peekedToken.startPosition, peekedToken.endPosition, result);
+                    break;
+                case TokenType::MUT:
+                    _lexer.consumeType(TokenType::MUT);
+                    result = new MutType(peekedToken.startPosition, peekedToken.endPosition, result);
+                    break;
+                case TokenType::IMMUT:
+                    _lexer.consumeType(TokenType::IMMUT);
+                    result = new ImmutType(peekedToken.startPosition, peekedToken.endPosition, result);
+                    break;
+                case TokenType::STAR:
+                    _lexer.consumeType(TokenType::STAR);
+                    result = new PointerType(peekedToken.startPosition, peekedToken.endPosition, result);
+                    break;
+                case TokenType::AMPERSAND:
+                    printError("references not yet supported!", peekedToken.startPosition, peekedToken.endPosition);
+                    return nullptr;
+                default:
+                    printError("custom type suffixes not yet supported!", peekedToken.startPosition,
+                               peekedToken.endPosition);
+                    return nullptr;
+            }
+        }
+    }
+
+    return result;
 }
 
 /**
@@ -470,6 +579,11 @@ Type* Parser::parseType() {
  * @return any child of the class `Stmt` or `Expr` (a child of `Stmt`)
  */
 Stmt *Parser::parseStmt() {
+    // Remove unneeded semicolons...
+    while (_lexer.peekType() == TokenType::SEMICOLON) {
+        _lexer.consumeType(TokenType::SEMICOLON);
+    }
+
     Token peekedToken = _lexer.peekToken();
     TextPosition startPosition = peekedToken.startPosition;
     TextPosition endPosition;
@@ -1934,6 +2048,25 @@ Expr *Parser::parseVariableLiteralOrParen(bool templateTypingAllowed) {
             unsigned int characterValue = peekedToken.currentChar;
             _lexer.consumeType(TokenType::CHARACTER);
             return new CharacterLiteralExpr(startPosition, endPosition, characterValue);
+        }
+        case TokenType::MUT:
+        case TokenType::IMMUT:
+        case TokenType::CONST: {
+            Type* refType = parseType();
+
+            Expr* potentialResult = new UnresolvedTypeRefExpr(refType->startPosition(), refType->endPosition(), refType);
+
+            // If there is a symbol after then we immediately know it is a variable declaration
+            if (_lexer.peekType() == TokenType::SYMBOL) {
+                std::string varName = _lexer.peekToken().currentSymbol;
+                endPosition = _lexer.peekToken().endPosition;
+
+                _lexer.consumeType(TokenType::SYMBOL);
+
+                return new LocalVariableDeclExpr(startPosition, endPosition, potentialResult, varName);
+            } else {
+                return potentialResult;
+            }
         }
 //        case TokenType::LPAREN: {
 //            bool oldRightShiftEnabledValue = _lexer.getRightShiftState();

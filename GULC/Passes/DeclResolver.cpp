@@ -7,6 +7,9 @@
 #include <AST/Exprs/LValueToRValueExpr.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
 #include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
+#include <AST/Types/ConstType.hpp>
+#include <AST/Types/MutType.hpp>
+#include <AST/Types/ImmutType.hpp>
 #include "DeclResolver.hpp"
 
 using namespace gulc;
@@ -15,7 +18,7 @@ void DeclResolver::processFile(FileAST &fileAst) {
     currentFileAst = &fileAst;
 
     for (Decl* decl : fileAst.topLevelDecls()) {
-        processDecl(fileAst, decl);
+        processDecl(decl);
     }
 }
 
@@ -52,6 +55,18 @@ bool DeclResolver::resolveType(Type *&type) {
                 }
             }
         }
+    } else if (type->getTypeKind() == Type::Kind::Const) {
+        auto constType = llvm::dyn_cast<ConstType>(type);
+        return resolveType(constType->pointToType);
+    } else if (type->getTypeKind() == Type::Kind::Mut) {
+        auto mutType = llvm::dyn_cast<MutType>(type);
+        return resolveType(mutType->pointToType);
+    } else if (type->getTypeKind() == Type::Kind::Immut) {
+        auto immutType = llvm::dyn_cast<ImmutType>(type);
+        return resolveType(immutType->pointToType);
+    } else if (type->getTypeKind() == Type::Kind::Pointer) {
+        auto pointerType = llvm::dyn_cast<PointerType>(type);
+        return resolveType(pointerType->pointToType);
     }
 
     return false;
@@ -61,6 +76,24 @@ bool DeclResolver::resolveType(Type *&type) {
 bool DeclResolver::getTypesAreSame(const Type* type1, const Type* type2) {
     if (type1->getTypeKind() == type2->getTypeKind()) {
         switch (type1->getTypeKind()) {
+            case Type::Kind::Const: {
+                auto constType1 = llvm::dyn_cast<ConstType>(type1);
+                auto constType2 = llvm::dyn_cast<ConstType>(type2);
+
+                return getTypesAreSame(constType1->pointToType, constType2->pointToType);
+            }
+            case Type::Kind::Mut: {
+                auto mutType1 = llvm::dyn_cast<MutType>(type1);
+                auto mutType2 = llvm::dyn_cast<MutType>(type2);
+
+                return getTypesAreSame(mutType1->pointToType, mutType2->pointToType);
+            }
+            case Type::Kind::Immut: {
+                auto immutType1 = llvm::dyn_cast<ImmutType>(type1);
+                auto immutType2 = llvm::dyn_cast<ImmutType>(type2);
+
+                return getTypesAreSame(immutType1->pointToType, immutType2->pointToType);
+            }
             case Type::Kind::BuiltIn: {
                 auto builtInType1 = llvm::dyn_cast<BuiltInType>(type1);
                 auto builtInType2 = llvm::dyn_cast<BuiltInType>(type2);
@@ -114,10 +147,6 @@ bool DeclResolver::getTypesAreSame(const Type* type1, const Type* type2) {
     return false;
 }
 
-bool DeclResolver::getTypeGreaterThan(const Type* left, const Type* right) {
-    return false;
-}
-
 Type *DeclResolver::deepCopyAndSimplifyType(const Type *type) {
     switch (type->getTypeKind()) {
         case Type::Kind::BuiltIn: {
@@ -129,6 +158,18 @@ Type *DeclResolver::deepCopyAndSimplifyType(const Type *type) {
             return new FunctionTemplateTypenameRefType(functionTemplateTypenameRef->startPosition(),
                                                        functionTemplateTypenameRef->endPosition(),
                                                        functionTemplateTypenameRef->name());
+        }
+        case Type::Kind::Const: {
+            auto constType = llvm::dyn_cast<ConstType>(type);
+            return new ConstType(constType->startPosition(), constType->endPosition(), deepCopyAndSimplifyType(constType->pointToType));
+        }
+        case Type::Kind::Mut: {
+            auto mutType = llvm::dyn_cast<MutType>(type);
+            return new MutType(mutType->startPosition(), mutType->endPosition(), deepCopyAndSimplifyType(mutType->pointToType));
+        }
+        case Type::Kind::Immut: {
+            auto immutType = llvm::dyn_cast<ImmutType>(type);
+            return new ImmutType(immutType->startPosition(), immutType->endPosition(), deepCopyAndSimplifyType(immutType->pointToType));
         }
         case Type::Kind::Pointer: {
             auto pointerType = llvm::dyn_cast<PointerType>(type);
@@ -176,14 +217,14 @@ void DeclResolver::printError(const std::string &message, TextPosition startPosi
 
 void DeclResolver::printDebugWarning(const std::string &message) {
 #ifndef NDEBUG
-    std::cout << "gulc qualify type pass [DEBUG WARNING](" << currentFileAst->filePath() << "): " << message << std::endl;
+    std::cout << "gulc resolver [DEBUG WARNING](" << currentFileAst->filePath() << "): " << message << std::endl;
 #endif
 }
 
-void DeclResolver::processDecl(FileAST &fileAst, Decl *decl) {
+void DeclResolver::processDecl(Decl *decl) {
     switch (decl->getDeclKind()) {
         case Decl::Kind::Function:
-            processFunctionDecl(fileAst, llvm::dyn_cast<FunctionDecl>(decl));
+            processFunctionDecl(llvm::dyn_cast<FunctionDecl>(decl));
             break;
         case Decl::Kind::Parameter:
         case Decl::Kind::TemplateParameterDecl:
@@ -315,7 +356,7 @@ void DeclResolver::processExpr(Expr *&expr) {
 }
 
 // Decls
-void DeclResolver::processFunctionDecl(FileAST &fileAst, FunctionDecl *functionDecl) {
+void DeclResolver::processFunctionDecl(FunctionDecl *functionDecl) {
     if (functionDecl->hasTemplateParameters()) {
         bool shouldHaveDefaultArgument = false;
 
@@ -451,14 +492,19 @@ void DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
     if (returnStmt->hasReturnValue()) {
         processExpr(returnStmt->returnValue);
 
-        convertLValueToRValue(returnStmt->returnValue);
-
         if (!getTypesAreSame(returnStmt->returnValue->resultType, returnType)) {
-            // TODO: Check if `returnValueType` can be implicitly casted to the `returnType`
-            printError("return value type does not match the function return type!",
-                       returnStmt->returnValue->startPosition(), returnStmt->returnValue->endPosition());
-            return;
+            // We will handle this in the verifier.
+            auto implicitCastExpr = new ImplicitCastExpr(returnStmt->returnValue->startPosition(),
+                                                         returnStmt->returnValue->endPosition(),
+                                                         deepCopyAndSimplifyType(returnType),
+                                                         returnStmt->returnValue);
+
+            processImplicitCastExpr(implicitCastExpr);
+
+            returnStmt->returnValue = implicitCastExpr;
         }
+
+        convertLValueToRValue(returnStmt->returnValue);
     }
 }
 
@@ -872,14 +918,17 @@ void DeclResolver::processIntegerLiteralExpr(IntegerLiteralExpr *integerLiteralE
 }
 
 void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVariableDeclExpr) {
-    if (llvm::isa<ResolvedTypeRefExpr>(localVariableDeclExpr->type())) {
+    // We process the type as an Expr so that we can resolve any potentially unresolved types...
+    processExpr(localVariableDeclExpr->type);
+
+    if (llvm::isa<ResolvedTypeRefExpr>(localVariableDeclExpr->type)) {
         if (localVariableNameTaken(localVariableDeclExpr->name())) {
             printError("redefinition of variable '" + localVariableDeclExpr->name() + "' not allowed!",
                        localVariableDeclExpr->startPosition(),
                        localVariableDeclExpr->endPosition());
         }
 
-        auto resolvedTypeRefExpr = llvm::dyn_cast<ResolvedTypeRefExpr>(localVariableDeclExpr->type());
+        auto resolvedTypeRefExpr = llvm::dyn_cast<ResolvedTypeRefExpr>(localVariableDeclExpr->type);
         localVariableDeclExpr->resultType = deepCopyAndSimplifyType(resolvedTypeRefExpr->resolvedType());
 
         addLocalVariable(localVariableDeclExpr);

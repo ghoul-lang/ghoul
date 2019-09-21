@@ -491,7 +491,7 @@ void ASTPrinter::printTernaryExpr(const TernaryExpr *ternaryExpr, const std::str
 void ASTPrinter::printLocalVariableDeclExpr(const LocalVariableDeclExpr *localVariableDeclExpr, const std::string &prefix) {
     std::cout << prefix << "| LocalVariableDeclExpr `" << localVariableDeclExpr->name() << "` " << std::endl;
     std::cout << prefix << "\\ TypeRefExpr: " << std::endl;
-    printExpr(localVariableDeclExpr->type(), prefix + "  ");
+    printExpr(localVariableDeclExpr->type, prefix + "  ");
 }
 
 void ASTPrinter::printResolvedTypeRefExpr(const ResolvedTypeRefExpr *resolvedTypeRefExpr, const std::string &prefix) {

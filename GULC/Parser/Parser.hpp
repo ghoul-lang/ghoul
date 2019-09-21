@@ -39,7 +39,7 @@ namespace gulc {
         std::vector<TemplateParameterDecl*> parseTemplateParameterDecls(TextPosition startPosition);
         std::vector<ParameterDecl*> parseParameterDecls(TextPosition startPosition);
 
-        Type* parseType();
+        Type* parseType(bool parseSuffix = true);
 
         Stmt* parseStmt();
         CompoundStmt* parseCompoundStmt();

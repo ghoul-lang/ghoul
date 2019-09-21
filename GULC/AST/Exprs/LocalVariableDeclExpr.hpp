@@ -12,17 +12,16 @@ namespace gulc {
         LocalVariableDeclExpr(TextPosition startPosition, TextPosition endPosition,
                               Expr* type, std::string name)
                 : Expr(Kind::LocalVariableDecl, startPosition, endPosition),
-                  _type(type), _name(std::move(name)) {}
+                  type(type), _name(std::move(name)) {}
 
-        Expr* type() const { return _type; }
+        Expr* type;
         std::string name() const { return _name; }
 
         ~LocalVariableDeclExpr() override {
-            delete _type;
+            delete type;
         }
 
     private:
-        Expr* _type;
         std::string _name;
 
     };
