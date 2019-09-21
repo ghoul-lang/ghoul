@@ -1,9 +1,8 @@
-#ifndef GULC_DECLRESOLVERPASS_HPP
-#define GULC_DECLRESOLVERPASS_HPP
+#ifndef GULC_DECLRESOLVER_HPP
+#define GULC_DECLRESOLVER_HPP
 
 #include <map>
 
-#include <Passes/FileASTPass.hpp>
 #include <AST/Decls/TemplateParameterDecl.hpp>
 #include <AST/Decls/FunctionDecl.hpp>
 #include <AST/Decls/ParameterDecl.hpp>
@@ -38,17 +37,18 @@
 #include <AST/Exprs/ResolvedTypeRefExpr.hpp>
 #include <AST/Exprs/StringLiteralExpr.hpp>
 #include <AST/Exprs/LocalVariableDeclExpr.hpp>
+#include <AST/FileAST.hpp>
 
 namespace gulc {
     // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
-    class DeclResolverPass : public FileASTPass {
+    class DeclResolver {
     public:
-        DeclResolverPass()
+        DeclResolver()
                 : currentFileAst(nullptr), returnType(nullptr), functionTemplateParams(nullptr),
                   functionParams(nullptr), functionCallArgs(nullptr), labelNames(),
                   functionLocalVariablesCount(0), functionLocalVariables() {}
 
-        void processFile(FileAST& fileAst) override;
+        void processFile(FileAST& fileAst);
 
     private:
         bool resolveType(Type*& type);
@@ -169,4 +169,4 @@ namespace gulc {
     };
 }
 
-#endif //GULC_DECLRESOLVERPASS_HPP
+#endif //GULC_DECLRESOLVER_HPP
