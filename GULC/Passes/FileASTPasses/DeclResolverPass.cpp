@@ -5,14 +5,56 @@
 #include <AST/Types/UnresolvedType.hpp>
 #include <AST/Types/FunctionPointerType.hpp>
 #include <AST/Exprs/LValueToRValueExpr.hpp>
+#include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
+#include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
 #include "DeclResolverPass.hpp"
 
 using namespace gulc;
 
 void DeclResolverPass::processFile(FileAST &fileAst) {
+    currentFileAst = &fileAst;
+
     for (Decl* decl : fileAst.topLevelDecls()) {
         processDecl(fileAst, decl);
     }
+}
+
+bool DeclResolverPass::resolveType(Type *&type) {
+    if (type->getTypeKind() == Type::Kind::Unresolved) {
+        // TODO: Take 'namespacePath' into consideration. If there is a namespace path we obviously don't have to worry about the template params
+        auto unresolvedType = llvm::dyn_cast<UnresolvedType>(type);
+
+        if (BuiltInType::isBuiltInType(unresolvedType->name())) {
+            // TODO: Support template overloading. Allow someone to implement `struct int<T> {}` that will be found if there are template arguments
+            if (unresolvedType->hasTemplateArguments()) {
+                printError("built in types do not support templating!",
+                           unresolvedType->startPosition(), unresolvedType->endPosition());
+            }
+
+            Type *oldType = type;
+            type = new BuiltInType(oldType->startPosition(), oldType->endPosition(), unresolvedType->name());
+            delete oldType;
+            return true;
+        }
+
+        // We check the function templates first...
+        // Function template params can't be templated themselves?
+        if (!unresolvedType->hasTemplateArguments() && functionTemplateParams) {
+            for (TemplateParameterDecl *templateParameterDecl : *functionTemplateParams) {
+                if (templateParameterDecl->type->getTypeKind() == Type::Kind::TemplateTypename) {
+                    if (templateParameterDecl->name() == unresolvedType->name()) {
+                        Type *oldType = type;
+                        type = new FunctionTemplateTypenameRefType(oldType->startPosition(), oldType->endPosition(),
+                                                                   templateParameterDecl->name());
+                        delete oldType;
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    return false;
 }
 
 // TODO: Should we just combine with `getTypeGreaterThan` as a `compareTypes`?
@@ -123,8 +165,8 @@ Type *DeclResolverPass::deepCopyAndSimplifyType(const Type *type) {
     return nullptr;
 }
 
-void DeclResolverPass::printError(const std::string &message, FileAST &fileAst, TextPosition startPosition, TextPosition endPosition) {
-    std::cout << "gulc resolver error[" << fileAst.filePath() << ", "
+void DeclResolverPass::printError(const std::string &message, TextPosition startPosition, TextPosition endPosition) {
+    std::cout << "gulc resolver error[" << currentFileAst->filePath() << ", "
                                      "{" << startPosition.line << ", " << startPosition.column << "} "
                                      "to {" << endPosition.line << ", " << endPosition.column << "}]: "
               << message
@@ -132,9 +174,9 @@ void DeclResolverPass::printError(const std::string &message, FileAST &fileAst, 
     std::exit(1);
 }
 
-void DeclResolverPass::printDebugWarning(const std::string &message, FileAST &fileAst) {
+void DeclResolverPass::printDebugWarning(const std::string &message) {
 #ifndef NDEBUG
-    std::cout << "gulc qualify type pass [DEBUG WARNING](" << fileAst.filePath() << "): " << message << std::endl;
+    std::cout << "gulc qualify type pass [DEBUG WARNING](" << currentFileAst->filePath() << "): " << message << std::endl;
 #endif
 }
 
@@ -146,136 +188,134 @@ void DeclResolverPass::processDecl(FileAST &fileAst, Decl *decl) {
         case Decl::Kind::Parameter:
         case Decl::Kind::TemplateParameterDecl:
         default:
-            printDebugWarning("unhandled Decl in 'processDecl'!", fileAst);
+            printDebugWarning("unhandled Decl in 'processDecl'!");
             break;
     }
 }
 
-void DeclResolverPass::processStmt(ResolveDeclsContext &context, Stmt *&stmt) {
+void DeclResolverPass::processStmt(Stmt *&stmt) {
     switch (stmt->getStmtKind()) {
         case Stmt::Kind::Break:
-            processBreakStmt(context, llvm::dyn_cast<BreakStmt>(stmt));
+            processBreakStmt(llvm::dyn_cast<BreakStmt>(stmt));
             break;
         case Stmt::Kind::Case:
-            processCaseStmt(context, llvm::dyn_cast<CaseStmt>(stmt));
+            processCaseStmt(llvm::dyn_cast<CaseStmt>(stmt));
             break;
         case Stmt::Kind::Compound:
-            processCompoundStmt(context, llvm::dyn_cast<CompoundStmt>(stmt));
+            processCompoundStmt(llvm::dyn_cast<CompoundStmt>(stmt));
             break;
         case Stmt::Kind::Continue:
-            processContinueStmt(context, llvm::dyn_cast<ContinueStmt>(stmt));
+            processContinueStmt(llvm::dyn_cast<ContinueStmt>(stmt));
             break;
         case Stmt::Kind::Do:
-            processDoStmt(context, llvm::dyn_cast<DoStmt>(stmt));
+            processDoStmt(llvm::dyn_cast<DoStmt>(stmt));
             break;
         case Stmt::Kind::For:
-            processForStmt(context, llvm::dyn_cast<ForStmt>(stmt));
+            processForStmt(llvm::dyn_cast<ForStmt>(stmt));
             break;
         case Stmt::Kind::Goto:
-            processGotoStmt(context, llvm::dyn_cast<GotoStmt>(stmt));
+            processGotoStmt(llvm::dyn_cast<GotoStmt>(stmt));
             break;
         case Stmt::Kind::If:
-            processIfStmt(context, llvm::dyn_cast<IfStmt>(stmt));
+            processIfStmt(llvm::dyn_cast<IfStmt>(stmt));
             break;
         case Stmt::Kind::Labeled:
-            processLabeledStmt(context, llvm::dyn_cast<LabeledStmt>(stmt));
+            processLabeledStmt(llvm::dyn_cast<LabeledStmt>(stmt));
             break;
         case Stmt::Kind::Return:
-            processReturnStmt(context, llvm::dyn_cast<ReturnStmt>(stmt));
+            processReturnStmt(llvm::dyn_cast<ReturnStmt>(stmt));
             break;
         case Stmt::Kind::Switch:
-            processSwitchStmt(context, llvm::dyn_cast<SwitchStmt>(stmt));
+            processSwitchStmt(llvm::dyn_cast<SwitchStmt>(stmt));
             break;
         case Stmt::Kind::Try:
-            processTryStmt(context, llvm::dyn_cast<TryStmt>(stmt));
+            processTryStmt(llvm::dyn_cast<TryStmt>(stmt));
             break;
         case Stmt::Kind::TryCatch:
-            processTryCatchStmt(context, llvm::dyn_cast<TryCatchStmt>(stmt));
+            processTryCatchStmt(llvm::dyn_cast<TryCatchStmt>(stmt));
             break;
         case Stmt::Kind::TryFinally:
-            processTryFinallyStmt(context, llvm::dyn_cast<TryFinallyStmt>(stmt));
+            processTryFinallyStmt(llvm::dyn_cast<TryFinallyStmt>(stmt));
             break;
         case Stmt::Kind::While:
-            processWhileStmt(context, llvm::dyn_cast<WhileStmt>(stmt));
+            processWhileStmt(llvm::dyn_cast<WhileStmt>(stmt));
             break;
         case Stmt::Kind::Expr: {
             auto expr = llvm::dyn_cast<Expr>(stmt);
-            processExpr(context, expr);
+            processExpr(expr);
             stmt = expr;
         }
     }
 }
 
-void DeclResolverPass::processExpr(ResolveDeclsContext &context, Expr *&expr) {
+void DeclResolverPass::processExpr(Expr *&expr) {
     switch (expr->getExprKind()) {
         case Expr::Kind::BinaryOperator:
-            processBinaryOperatorExpr(context, llvm::dyn_cast<BinaryOperatorExpr>(expr));
+            processBinaryOperatorExpr(llvm::dyn_cast<BinaryOperatorExpr>(expr));
             break;
         case Expr::Kind::CharacterLiteral:
-            processCharacterLiteralExpr(context, llvm::dyn_cast<CharacterLiteralExpr>(expr));
+            processCharacterLiteralExpr(llvm::dyn_cast<CharacterLiteralExpr>(expr));
             break;
         case Expr::Kind::ExplicitCast:
-            processExplicitCastExpr(context, llvm::dyn_cast<ExplicitCastExpr>(expr));
+            processExplicitCastExpr(llvm::dyn_cast<ExplicitCastExpr>(expr));
             break;
         case Expr::Kind::FloatLiteral:
-            processFloatLiteralExpr(context, llvm::dyn_cast<FloatLiteralExpr>(expr));
+            processFloatLiteralExpr(llvm::dyn_cast<FloatLiteralExpr>(expr));
             break;
         case Expr::Kind::FunctionCall:
-            processFunctionCallExpr(context, llvm::dyn_cast<FunctionCallExpr>(expr));
+            processFunctionCallExpr(llvm::dyn_cast<FunctionCallExpr>(expr));
             break;
         case Expr::Kind::Identifier:
-            processIdentifierExpr(context, llvm::dyn_cast<IdentifierExpr>(expr));
+            processIdentifierExpr(expr);
             break;
         case Expr::Kind::ImplicitCast:
-            processImplicitCastExpr(context, llvm::dyn_cast<ImplicitCastExpr>(expr));
+            processImplicitCastExpr(llvm::dyn_cast<ImplicitCastExpr>(expr));
             break;
         case Expr::Kind::IndexerCall:
-            processIndexerCallExpr(context, llvm::dyn_cast<IndexerCallExpr>(expr));
+            processIndexerCallExpr(llvm::dyn_cast<IndexerCallExpr>(expr));
             break;
         case Expr::Kind::IntegerLiteral:
-            processIntegerLiteralExpr(context, llvm::dyn_cast<IntegerLiteralExpr>(expr));
+            processIntegerLiteralExpr(llvm::dyn_cast<IntegerLiteralExpr>(expr));
             break;
         case Expr::Kind::LocalVariableDecl:
-            processLocalVariableDeclExpr(context, llvm::dyn_cast<LocalVariableDeclExpr>(expr));
+            processLocalVariableDeclExpr(llvm::dyn_cast<LocalVariableDeclExpr>(expr));
             break;
         case Expr::Kind::LocalVariableDeclOrPrefixOperatorCallExpr:
             // Casting isn't required for this function. It will handle the casting for us since this is a type we will be completely removing from the AST in this function
-            processLocalVariableDeclOrPrefixOperatorCallExpr(context, expr);
+            processLocalVariableDeclOrPrefixOperatorCallExpr(expr);
             break;
         case Expr::Kind::MemberAccessCall:
-            processMemberAccessCallExpr(context, llvm::dyn_cast<MemberAccessCallExpr>(expr));
+            processMemberAccessCallExpr(llvm::dyn_cast<MemberAccessCallExpr>(expr));
             break;
         case Expr::Kind::Paren:
-            processParenExpr(context, llvm::dyn_cast<ParenExpr>(expr));
+            processParenExpr(llvm::dyn_cast<ParenExpr>(expr));
             break;
         case Expr::Kind::PostfixOperator:
-            processPostfixOperatorExpr(context, llvm::dyn_cast<PostfixOperatorExpr>(expr));
+            processPostfixOperatorExpr(llvm::dyn_cast<PostfixOperatorExpr>(expr));
             break;
         case Expr::Kind::PotentialExplicitCast:
-            processPotentialExplicitCastExpr(context, llvm::dyn_cast<PotentialExplicitCastExpr>(expr));
+            processPotentialExplicitCastExpr(llvm::dyn_cast<PotentialExplicitCastExpr>(expr));
             break;
         case Expr::Kind::PrefixOperator:
-            processPrefixOperatorExpr(context, llvm::dyn_cast<PrefixOperatorExpr>(expr));
+            processPrefixOperatorExpr(llvm::dyn_cast<PrefixOperatorExpr>(expr));
             break;
         case Expr::Kind::ResolvedTypeRef:
-            processResolvedTypeRefExpr(context, llvm::dyn_cast<ResolvedTypeRefExpr>(expr));
+            processResolvedTypeRefExpr(llvm::dyn_cast<ResolvedTypeRefExpr>(expr));
             break;
         case Expr::Kind::StringLiteral:
-            processStringLiteralExpr(context, llvm::dyn_cast<StringLiteralExpr>(expr));
+            processStringLiteralExpr(llvm::dyn_cast<StringLiteralExpr>(expr));
             break;
         case Expr::Kind::Ternary:
-            processTernaryExpr(context, llvm::dyn_cast<TernaryExpr>(expr));
+            processTernaryExpr(llvm::dyn_cast<TernaryExpr>(expr));
             break;
         case Expr::Kind::UnresolvedTypeRef:
-            processUnresolvedTypeRefExpr(context, expr);
+            processUnresolvedTypeRefExpr(expr);
             break;
     }
 }
 
 // Decls
 void DeclResolverPass::processFunctionDecl(FileAST &fileAst, FunctionDecl *functionDecl) {
-    ResolveDeclsContext context(fileAst);
-
     if (functionDecl->hasTemplateParameters()) {
         bool shouldHaveDefaultArgument = false;
 
@@ -286,166 +326,187 @@ void DeclResolverPass::processFunctionDecl(FileAST &fileAst, FunctionDecl *funct
                     shouldHaveDefaultArgument = true;
                 } else {
                     printError("all template parameters after the first optional template parameter must also be optional!",
-                               context.fileAst, templateParameterDecl->startPosition(), templateParameterDecl->endPosition());
+                               templateParameterDecl->startPosition(), templateParameterDecl->endPosition());
                 }
             }
         }
 
-        context.functionTemplateParams = &functionDecl->templateParameters;
+        functionTemplateParams = &functionDecl->templateParameters;
+    }
+
+    // Resolve function return type...
+    if (!resolveType(functionDecl->resultType)) {
+        printError("could not find function return type!",
+                   functionDecl->resultType->startPosition(), functionDecl->resultType->endPosition());
+    }
+
+    // Resolve the template parameter types (we allow `void func<typename T, T value>()`)
+    for (TemplateParameterDecl*& templateParameterDecl : functionDecl->templateParameters) {
+        if (templateParameterDecl->type->getTypeKind() == Type::Kind::Unresolved) {
+            if (!resolveType(templateParameterDecl->type)) {
+                printError("could not find function template type!",
+                           templateParameterDecl->startPosition(), templateParameterDecl->endPosition());
+            }
+        }
     }
 
     if (functionDecl->hasParameters()) {
         bool shouldHaveDefaultArgument = false;
 
         // Make sure all parameters after the first optional parameter are also optional
-        for (const ParameterDecl* parameterDecl : functionDecl->parameters) {
+        for (ParameterDecl* parameterDecl : functionDecl->parameters) {
+            if (!resolveType(parameterDecl->type)) {
+                printError("could not find function parameter type!",
+                           parameterDecl->startPosition(), parameterDecl->endPosition());
+            }
+
             if (parameterDecl->hasDefaultArgument()) {
                 if (!shouldHaveDefaultArgument) {
                     shouldHaveDefaultArgument = true;
                 } else {
                     printError("all parameters after the first optional parameter must also be optional!",
-                               context.fileAst, parameterDecl->startPosition(), parameterDecl->endPosition());
+                               parameterDecl->startPosition(), parameterDecl->endPosition());
                 }
             }
         }
 
-        context.functionParams = &functionDecl->parameters;
+        functionParams = &functionDecl->parameters;
     }
 
-    context.returnType = functionDecl->resultType;
+    returnType = functionDecl->resultType;
 
     // We reset to zero just in case.
-    context.functionLocalVariablesCount = 0;
-    processCompoundStmt(context, functionDecl->body());
-    context.functionLocalVariablesCount = 0;
+    functionLocalVariablesCount = 0;
+    processCompoundStmt(functionDecl->body());
+    functionLocalVariablesCount = 0;
 
-    context.returnType = nullptr;
-    context.functionParams = nullptr;
-    context.functionTemplateParams = nullptr;
+    returnType = nullptr;
+    functionParams = nullptr;
+    functionTemplateParams = nullptr;
 }
 
 // Stmts
-void DeclResolverPass::processBreakStmt(ResolveDeclsContext &context, BreakStmt *breakStmt) {
+void DeclResolverPass::processBreakStmt(BreakStmt *breakStmt) {
     if (!breakStmt->label().empty()) {
-        context.addUnresolvedLabel(breakStmt->label());
+        addUnresolvedLabel(breakStmt->label());
     }
 }
 
-void DeclResolverPass::processCaseStmt(ResolveDeclsContext &context, CaseStmt *caseStmt) {
+void DeclResolverPass::processCaseStmt(CaseStmt *caseStmt) {
     if (caseStmt->hasCondition()) {
-        processExpr(context, caseStmt->condition);
+        processExpr(caseStmt->condition);
     }
 
-    processStmt(context, caseStmt->trueStmt);
+    processStmt(caseStmt->trueStmt);
 }
 
-void DeclResolverPass::processCompoundStmt(ResolveDeclsContext &context, CompoundStmt *compoundStmt) {
-    unsigned int oldLocalVariableCount = context.functionLocalVariablesCount;
+void DeclResolverPass::processCompoundStmt(CompoundStmt *compoundStmt) {
+    unsigned int oldLocalVariableCount = functionLocalVariablesCount;
 
     for (Stmt*& stmt : compoundStmt->statements()) {
-        processStmt(context, stmt);
+        processStmt(stmt);
     }
 
-    context.functionLocalVariablesCount = oldLocalVariableCount;
+    functionLocalVariablesCount = oldLocalVariableCount;
 }
 
-void DeclResolverPass::processContinueStmt(ResolveDeclsContext &context, ContinueStmt *continueStmt) {
+void DeclResolverPass::processContinueStmt(ContinueStmt *continueStmt) {
     if (!continueStmt->label().empty()) {
-        context.addUnresolvedLabel(continueStmt->label());
+        addUnresolvedLabel(continueStmt->label());
     }
 }
 
-void DeclResolverPass::processDoStmt(ResolveDeclsContext &context, DoStmt *doStmt) {
-    processStmt(context, doStmt->loopStmt);
-    processExpr(context, doStmt->condition);
+void DeclResolverPass::processDoStmt(DoStmt *doStmt) {
+    processStmt(doStmt->loopStmt);
+    processExpr(doStmt->condition);
 }
 
-void DeclResolverPass::processForStmt(ResolveDeclsContext &context, ForStmt *forStmt) {
-    if (forStmt->preLoop != nullptr) processExpr(context, forStmt->preLoop);
-    if (forStmt->condition != nullptr) processExpr(context, forStmt->condition);
-    if (forStmt->iterationExpr != nullptr) processExpr(context, forStmt->iterationExpr);
+void DeclResolverPass::processForStmt(ForStmt *forStmt) {
+    if (forStmt->preLoop != nullptr) processExpr(forStmt->preLoop);
+    if (forStmt->condition != nullptr) processExpr(forStmt->condition);
+    if (forStmt->iterationExpr != nullptr) processExpr(forStmt->iterationExpr);
 
-    processStmt(context, forStmt->loopStmt);
+    processStmt(forStmt->loopStmt);
 }
 
-void DeclResolverPass::processGotoStmt(ResolveDeclsContext &context, GotoStmt *gotoStmt) {
+void DeclResolverPass::processGotoStmt(GotoStmt *gotoStmt) {
     if (!gotoStmt->label().empty()) {
-        context.addUnresolvedLabel(gotoStmt->label());
+        addUnresolvedLabel(gotoStmt->label());
     }
 }
 
-void DeclResolverPass::processIfStmt(ResolveDeclsContext &context, IfStmt *ifStmt) {
-    processExpr(context, ifStmt->condition);
-    processStmt(context, ifStmt->trueStmt);
-    if (ifStmt->hasFalseStmt()) processStmt(context, ifStmt->falseStmt);
+void DeclResolverPass::processIfStmt(IfStmt *ifStmt) {
+    processExpr(ifStmt->condition);
+    processStmt(ifStmt->trueStmt);
+    if (ifStmt->hasFalseStmt()) processStmt(ifStmt->falseStmt);
 }
 
-void DeclResolverPass::processLabeledStmt(ResolveDeclsContext &context, LabeledStmt *labeledStmt) {
-    processStmt(context, labeledStmt->labeledStmt);
+void DeclResolverPass::processLabeledStmt(LabeledStmt *labeledStmt) {
+    processStmt(labeledStmt->labeledStmt);
 
-    context.labelResolved(labeledStmt->label());
+    labelResolved(labeledStmt->label());
 }
 
-void DeclResolverPass::processReturnStmt(ResolveDeclsContext &context, ReturnStmt *returnStmt) {
+void DeclResolverPass::processReturnStmt(ReturnStmt *returnStmt) {
     if (returnStmt->hasReturnValue()) {
-        processExpr(context, returnStmt->returnValue);
+        processExpr(returnStmt->returnValue);
 
         convertLValueToRValue(returnStmt->returnValue);
 
-        if (!getTypesAreSame(returnStmt->returnValue->resultType, context.returnType)) {
+        if (!getTypesAreSame(returnStmt->returnValue->resultType, returnType)) {
             // TODO: Check if `returnValueType` can be implicitly casted to the `returnType`
-            printError("return value type does not match the function return type!", context.fileAst,
+            printError("return value type does not match the function return type!",
                        returnStmt->returnValue->startPosition(), returnStmt->returnValue->endPosition());
             return;
         }
     }
 }
 
-void DeclResolverPass::processSwitchStmt(ResolveDeclsContext &context, SwitchStmt *switchStmt) {
+void DeclResolverPass::processSwitchStmt(SwitchStmt *switchStmt) {
     // TODO: Should we add the type of 'SwitchStmt::condition' to the context?
-    processExpr(context, switchStmt->condition);
+    processExpr(switchStmt->condition);
 
     for (CaseStmt* caseStmt : switchStmt->cases()) {
-        processCaseStmt(context, caseStmt);
+        processCaseStmt(caseStmt);
     }
 }
 
-void DeclResolverPass::processTryStmt(ResolveDeclsContext &context, TryStmt *tryStmt) {
-    processCompoundStmt(context, tryStmt->encapsulatedStmt);
+void DeclResolverPass::processTryStmt(TryStmt *tryStmt) {
+    processCompoundStmt(tryStmt->encapsulatedStmt);
 
     if (tryStmt->hasCatchStmts()) {
         for (TryCatchStmt*& catchStmt : tryStmt->catchStmts()) {
-            processTryCatchStmt(context, catchStmt);
+            processTryCatchStmt(catchStmt);
         }
     }
 
     if (tryStmt->hasFinallyStmt()) {
-        processTryFinallyStmt(context, tryStmt->finallyStmt);
+        processTryFinallyStmt(tryStmt->finallyStmt);
     }
 }
 
-void DeclResolverPass::processTryCatchStmt(ResolveDeclsContext &context, TryCatchStmt *tryCatchStmt) {
+void DeclResolverPass::processTryCatchStmt(TryCatchStmt *tryCatchStmt) {
     if (tryCatchStmt->hasExceptionDecl()) {
-        processExpr(context, tryCatchStmt->exceptionType);
+        processExpr(tryCatchStmt->exceptionType);
     }
 
-    processCompoundStmt(context, tryCatchStmt->handlerStmt);
+    processCompoundStmt(tryCatchStmt->handlerStmt);
 }
 
-void DeclResolverPass::processTryFinallyStmt(ResolveDeclsContext &context, TryFinallyStmt *tryFinallyStmt) {
-    processCompoundStmt(context, tryFinallyStmt->handlerStmt);
+void DeclResolverPass::processTryFinallyStmt(TryFinallyStmt *tryFinallyStmt) {
+    processCompoundStmt(tryFinallyStmt->handlerStmt);
 }
 
-void DeclResolverPass::processWhileStmt(ResolveDeclsContext &context, WhileStmt *whileStmt) {
-    processExpr(context, whileStmt->condition);
-    processStmt(context, whileStmt->loopStmt);
+void DeclResolverPass::processWhileStmt(WhileStmt *whileStmt) {
+    processExpr(whileStmt->condition);
+    processStmt(whileStmt->loopStmt);
 }
 
 // Exprs
-void DeclResolverPass::processBinaryOperatorExpr(ResolveDeclsContext &context, BinaryOperatorExpr *binaryOperatorExpr) {
+void DeclResolverPass::processBinaryOperatorExpr(BinaryOperatorExpr *binaryOperatorExpr) {
     // TODO: Support operator overloading type resolution
-    processExpr(context, binaryOperatorExpr->leftValue);
-    processExpr(context, binaryOperatorExpr->rightValue);
+    processExpr(binaryOperatorExpr->leftValue);
+    processExpr(binaryOperatorExpr->rightValue);
 
     convertLValueToRValue(binaryOperatorExpr->rightValue);
 
@@ -488,7 +549,7 @@ void DeclResolverPass::processBinaryOperatorExpr(ResolveDeclsContext &context, B
             } else {
                 printError(
                         "[INTERNAL] unknown built in assignment operator '" + binaryOperatorExpr->operatorName() + "'!",
-                        context.fileAst, binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+                        binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
                 return;
             }
 
@@ -585,34 +646,34 @@ void DeclResolverPass::processBinaryOperatorExpr(ResolveDeclsContext &context, B
     binaryOperatorExpr->resultType = deepCopyAndSimplifyType(binaryOperatorExpr->leftValue->resultType);
 }
 
-void DeclResolverPass::processCharacterLiteralExpr(ResolveDeclsContext &context, CharacterLiteralExpr *characterLiteralExpr) {
+void DeclResolverPass::processCharacterLiteralExpr(CharacterLiteralExpr *characterLiteralExpr) {
     // TODO: Type suffix support
     characterLiteralExpr->resultType = new BuiltInType({}, {}, "char");
 }
 
-void DeclResolverPass::processExplicitCastExpr(ResolveDeclsContext &context, ExplicitCastExpr *explicitCastExpr) {
+void DeclResolverPass::processExplicitCastExpr(ExplicitCastExpr *explicitCastExpr) {
     explicitCastExpr->resultType = deepCopyAndSimplifyType(explicitCastExpr->castType);
 }
 
-void DeclResolverPass::processFloatLiteralExpr(ResolveDeclsContext &context, FloatLiteralExpr *floatLiteralExpr) {
+void DeclResolverPass::processFloatLiteralExpr(FloatLiteralExpr *floatLiteralExpr) {
     // TODO: Type suffix support
     floatLiteralExpr->resultType = new BuiltInType({}, {}, "float");
 }
 
-void DeclResolverPass::processFunctionCallExpr(ResolveDeclsContext &context, FunctionCallExpr *functionCallExpr) {
+void DeclResolverPass::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
     // TODO: Support overloading the operator ()
     for (Expr*& arg : functionCallExpr->arguments) {
-        processExpr(context, arg);
+        processExpr(arg);
 
         convertLValueToRValue(arg);
     }
 
     if (functionCallExpr->hasArguments()) {
-        context.functionCallArgs = &functionCallExpr->arguments;
+        functionCallArgs = &functionCallExpr->arguments;
     }
 
     // We process the function reference expression to HOPEFULLY have `functionCallExpr->resultType` be a `FunctionPointerType` if it isn't then we error
-    processExpr(context, functionCallExpr->functionReference);
+    processExpr(functionCallExpr->functionReference);
 
     // TODO: Support `ConstType`, `MutType`, and `ImmutType` since they can all contain `FunctionPointerType`
     if (llvm::isa<FunctionPointerType>(functionCallExpr->functionReference->resultType)) {
@@ -622,35 +683,59 @@ void DeclResolverPass::processFunctionCallExpr(ResolveDeclsContext &context, Fun
         functionCallExpr->resultType = deepCopyAndSimplifyType(functionPointerType->resultType);
     } else {
         printError("expression is not a valid function reference!",
-                   context.fileAst,
                    functionCallExpr->functionReference->startPosition(),
                    functionCallExpr->functionReference->endPosition());
     }
 
-    context.functionCallArgs = nullptr;
+    functionCallArgs = nullptr;
 }
 
 /**
  * Try to find the `IdentifierExpr` within the current context by searching local variables, params, decls, etc.
  */
-void DeclResolverPass::processIdentifierExpr(ResolveDeclsContext &context, IdentifierExpr *identifierExpr) {
+void DeclResolverPass::processIdentifierExpr(Expr*& expr) {
+    auto identifierExpr = llvm::dyn_cast<IdentifierExpr>(expr);
+
+    // First we check if the identifier is a built in type
+    if (BuiltInType::isBuiltInType(identifierExpr->name())) {
+        // TODO: Support template overloading. Allow someone to implement `struct int<T> {}` that will be found if there are template arguments
+        if (identifierExpr->hasTemplateArguments()) {
+            printError("built in types do not support templating!",
+                       identifierExpr->startPosition(), identifierExpr->endPosition());
+        }
+
+        Type *resolvedType = new BuiltInType(expr->startPosition(), expr->endPosition(), identifierExpr->name());
+
+        delete identifierExpr;
+
+        expr = new ResolvedTypeRefExpr(expr->startPosition(), expr->endPosition(), resolvedType);
+        // TODO: Is this really even needed?
+        expr->resultType = deepCopyAndSimplifyType(resolvedType);
+        return;
+    }
+//    if (identifierExpr->hasTemplateArguments()) {
+//        for (Expr*& templateArgument : identifierExpr->templateArguments) {
+//            processExpr(templateArgument);
+//        }
+//    }
+
     if (identifierExpr->hasTemplateArguments()) {
         printError("templating support currently not finished!",
-                   context.fileAst, identifierExpr->startPosition(), identifierExpr->endPosition());
+                   identifierExpr->startPosition(), identifierExpr->endPosition());
         return;
     }
 
-    // We check local variables first
-    for (std::size_t i = 0; i < context.functionLocalVariablesCount; ++i) {
-        if (context.functionLocalVariables[i]->name() == identifierExpr->name()) {
-            identifierExpr->resultType = deepCopyAndSimplifyType(context.functionLocalVariables[i]->resultType);
+    // Then we check local variables
+    for (std::size_t i = 0; i < functionLocalVariablesCount; ++i) {
+        if (functionLocalVariables[i]->name() == identifierExpr->name()) {
+            identifierExpr->resultType = deepCopyAndSimplifyType(functionLocalVariables[i]->resultType);
             return;
         }
     }
 
     // then params
-    if (context.functionParams != nullptr) {
-        for (const ParameterDecl* param : *context.functionParams) {
+    if (functionParams != nullptr) {
+        for (const ParameterDecl* param : *functionParams) {
             if (param->name() == identifierExpr->name()) {
                 identifierExpr->resultType = deepCopyAndSimplifyType(param->type);
                 return;
@@ -659,8 +744,8 @@ void DeclResolverPass::processIdentifierExpr(ResolveDeclsContext &context, Ident
     }
 
     // then function template params
-    if (context.functionTemplateParams != nullptr) {
-        for (const TemplateParameterDecl* templateParam : *context.functionTemplateParams) {
+    if (functionTemplateParams != nullptr) {
+        for (const TemplateParameterDecl* templateParam : *functionTemplateParams) {
             // TODO: Check if the type of `templateParam` is `FunctionPointerType`
             if (templateParam->name() == identifierExpr->name()) {
                 identifierExpr->resultType = deepCopyAndSimplifyType(templateParam->type);
@@ -675,7 +760,7 @@ void DeclResolverPass::processIdentifierExpr(ResolveDeclsContext &context, Ident
     // then current file
     const FunctionDecl* foundFunction = nullptr;
 
-    for (const Decl* decl : context.fileAst.topLevelDecls()) {
+    for (const Decl* decl : currentFileAst->topLevelDecls()) {
         if (decl->name() == identifierExpr->name()) {
             // This is currently the only `Decl` we support at the top level
             if (llvm::isa<FunctionDecl>(decl)) {
@@ -685,7 +770,7 @@ void DeclResolverPass::processIdentifierExpr(ResolveDeclsContext &context, Ident
                 if (functionDecl->name() == identifierExpr->name()) {
                     if (!functionDecl->hasParameters()) {
                         // If the function doesn't have parameters and there aren't any arguments then we've found a perfect match...
-                        if ((context.functionCallArgs == nullptr || context.functionCallArgs->empty())) {
+                        if (functionCallArgs == nullptr || functionCallArgs->empty()) {
                             // It is a perfect match, set the foundFunction variable so we can create the `FunctionPointerType`
                             foundFunction = functionDecl;
                             goto functionWasFound; // This is why we support breaking from labeled loops...
@@ -695,7 +780,7 @@ void DeclResolverPass::processIdentifierExpr(ResolveDeclsContext &context, Ident
                         }
                     } else { // Else the function decl has parameters...
                         // If the function call doesn't have args then it doesn't match...
-                        if ((context.functionCallArgs == nullptr || context.functionCallArgs->empty())) {
+                        if (functionCallArgs == nullptr || functionCallArgs->empty()) {
                             // Keep looking...
                             continue;
                         }
@@ -708,14 +793,14 @@ void DeclResolverPass::processIdentifierExpr(ResolveDeclsContext &context, Ident
                         std::size_t i = 0;
                         bool argsMatch = true;
 
-                        for (; i < context.functionCallArgs->size(); ++i) {
+                        for (; i < functionCallArgs->size(); ++i) {
                             if (i >= functionDecl->parameters.size()) {
                                 argsMatch = false;
                                 break;
                             }
 
                             // TODO: Support checking if something can be implicitly casted properly.
-                            if (!getTypesAreSame((*(context.functionCallArgs))[i]->resultType, functionDecl->resultType)) {
+                            if (!getTypesAreSame((*(functionCallArgs))[i]->resultType, functionDecl->resultType)) {
                                 argsMatch = false;
                                 break;
                             }
@@ -767,71 +852,143 @@ functionWasFound:
 
     // if we've made it to this point the identifier cannot be found, error and tell the user.
     printError("identifier '" + identifierExpr->name() + "' was not found in the current context!",
-               context.fileAst, identifierExpr->startPosition(), identifierExpr->endPosition());
+               identifierExpr->startPosition(), identifierExpr->endPosition());
 }
 
-void DeclResolverPass::processImplicitCastExpr(ResolveDeclsContext &context, ImplicitCastExpr *implicitCastExpr) {
+void DeclResolverPass::processImplicitCastExpr(ImplicitCastExpr *implicitCastExpr) {
     if (implicitCastExpr->resultType == nullptr) {
         implicitCastExpr->resultType = (deepCopyAndSimplifyType(implicitCastExpr->castType));
     }
 }
 
-void DeclResolverPass::processIndexerCallExpr(ResolveDeclsContext &context, IndexerCallExpr *indexerCallExpr) {
+void DeclResolverPass::processIndexerCallExpr(IndexerCallExpr *indexerCallExpr) {
     // TODO: Support overloading the indexer operator []
-    printError("array indexer calls not yet supported!", context.fileAst, indexerCallExpr->startPosition(), indexerCallExpr->endPosition());
+    processExpr(indexerCallExpr->indexerReference);
+
+    for (Expr*& argument : indexerCallExpr->arguments()) {
+        processExpr(argument);
+    }
+    printError("array indexer calls not yet supported!", indexerCallExpr->startPosition(), indexerCallExpr->endPosition());
 }
 
-void DeclResolverPass::processIntegerLiteralExpr(ResolveDeclsContext &context, IntegerLiteralExpr *integerLiteralExpr) {
+void DeclResolverPass::processIntegerLiteralExpr(IntegerLiteralExpr *integerLiteralExpr) {
     // TODO: Type suffix support
     integerLiteralExpr->resultType = (new BuiltInType({}, {}, "int"));
 }
 
-void DeclResolverPass::processLocalVariableDeclExpr(ResolveDeclsContext &context, LocalVariableDeclExpr *localVariableDeclExpr) {
+void DeclResolverPass::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVariableDeclExpr) {
     if (llvm::isa<ResolvedTypeRefExpr>(localVariableDeclExpr->type())) {
-        if (context.localVariableNameTaken(localVariableDeclExpr->name())) {
+        if (localVariableNameTaken(localVariableDeclExpr->name())) {
             printError("redefinition of variable '" + localVariableDeclExpr->name() + "' not allowed!",
-                       context.fileAst, localVariableDeclExpr->startPosition(),
+                       localVariableDeclExpr->startPosition(),
                        localVariableDeclExpr->endPosition());
         }
 
         auto resolvedTypeRefExpr = llvm::dyn_cast<ResolvedTypeRefExpr>(localVariableDeclExpr->type());
         localVariableDeclExpr->resultType = deepCopyAndSimplifyType(resolvedTypeRefExpr->resolvedType());
 
-        context.addLocalVariable(localVariableDeclExpr);
+        addLocalVariable(localVariableDeclExpr);
     }
 }
 
-void DeclResolverPass::processLocalVariableDeclOrPrefixOperatorCallExpr(ResolveDeclsContext &context, Expr *&expr) {
-    // We don't have anything to do here...
+void DeclResolverPass::processLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr) {
+    auto localVariableDeclOrPrefixOperatorCallExpr = llvm::dyn_cast<LocalVariableDeclOrPrefixOperatorCallExpr>(expr);
+
+    // TODO: Currently we only support `Identifier` types.
+    if (localVariableDeclOrPrefixOperatorCallExpr->nameOrExpr->getExprKind() == Expr::Kind::Identifier) {
+        processExpr(localVariableDeclOrPrefixOperatorCallExpr->typeOrPrefixOperator);
+
+        // If the type of 'typeOrPrefixOperator is now 'ResolvedTypeRef' then that means this is a local variable. If not then it is a prefix operator OR the type just isn't in scope.
+        if (localVariableDeclOrPrefixOperatorCallExpr->typeOrPrefixOperator->getExprKind() == Expr::Kind::ResolvedTypeRef) {
+            Expr* type = localVariableDeclOrPrefixOperatorCallExpr->typeOrPrefixOperator;
+
+            if (localVariableDeclOrPrefixOperatorCallExpr->nameOrExpr->getExprKind() != Expr::Kind::Identifier) {
+                printError("unknown expression in local variable declaration, expected variable name!",
+                           localVariableDeclOrPrefixOperatorCallExpr->nameOrExpr->startPosition(),
+                           localVariableDeclOrPrefixOperatorCallExpr->nameOrExpr->endPosition());
+                return;
+            }
+
+            auto identifier = llvm::dyn_cast<IdentifierExpr>(localVariableDeclOrPrefixOperatorCallExpr->nameOrExpr);
+
+            // Local variable names cannot have template arguments in the name
+            if (identifier->hasTemplateArguments()) {
+                printError("unknown expression in local variable declaration, expected variable name!",
+                           localVariableDeclOrPrefixOperatorCallExpr->nameOrExpr->startPosition(),
+                           localVariableDeclOrPrefixOperatorCallExpr->nameOrExpr->endPosition());
+                return;
+            }
+
+            std::string variableName = identifier->name();
+
+            expr = new LocalVariableDeclExpr(localVariableDeclOrPrefixOperatorCallExpr->startPosition(),
+                                             localVariableDeclOrPrefixOperatorCallExpr->endPosition(),
+                                             type, variableName);
+
+            processLocalVariableDeclExpr(llvm::dyn_cast<LocalVariableDeclExpr>(expr));
+
+            // Set the 'typeOrPrefixOperator' to null since we are still using what it points to...
+            localVariableDeclOrPrefixOperatorCallExpr->typeOrPrefixOperator = nullptr;
+            // Then delete the old expression since we not longer use it
+            delete localVariableDeclOrPrefixOperatorCallExpr;
+            return;
+        }
+    }
+
+    // If we reach this point we can only assume it is a prefix operator call
+    if (llvm::isa<IdentifierExpr>(localVariableDeclOrPrefixOperatorCallExpr->typeOrPrefixOperator)) {
+        auto identifier = llvm::dyn_cast<IdentifierExpr>(localVariableDeclOrPrefixOperatorCallExpr->typeOrPrefixOperator);
+        std::string operatorName = identifier->name();
+        Expr* argument = localVariableDeclOrPrefixOperatorCallExpr->nameOrExpr;
+        localVariableDeclOrPrefixOperatorCallExpr->nameOrExpr = nullptr;
+
+        processExpr(argument);
+
+        expr = new PrefixOperatorExpr(localVariableDeclOrPrefixOperatorCallExpr->startPosition(),
+                                      localVariableDeclOrPrefixOperatorCallExpr->endPosition(),
+                                      operatorName, argument);
+
+        delete localVariableDeclOrPrefixOperatorCallExpr;
+        return;
+    } else {
+        printError("unknown expression where local variable declaration or prefix operator call was expected!",
+                   localVariableDeclOrPrefixOperatorCallExpr->typeOrPrefixOperator->startPosition(),
+                   localVariableDeclOrPrefixOperatorCallExpr->typeOrPrefixOperator->endPosition());
+        return;
+    }
 }
 
-void DeclResolverPass::processMemberAccessCallExpr(ResolveDeclsContext &context, MemberAccessCallExpr *memberAccessCallExpr) {
+void DeclResolverPass::processMemberAccessCallExpr(MemberAccessCallExpr *memberAccessCallExpr) {
     // TODO: Support operator overloading the `.` and `->` operators
     // TODO: `public override T operator.() => return this.whatever_T_is;` this can ONLY be supported when the implementing class/struct has NO public facing functions
-    printError("member access calls not yet supported!", context.fileAst, memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+    // TODO: MemberAccessCallExpr can ALSO be a namespace path to a type. We will need to take this into account at some point.
+//    processExpr(memberAccessCallExpr->objectRef);
+//    processIdentifierExpr(memberAccessCallExpr->member);
+    printError("member access calls not yet supported!", memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
 }
 
-void DeclResolverPass::processParenExpr(ResolveDeclsContext &context, ParenExpr *parenExpr) {
-    processExpr(context, parenExpr->containedExpr);
+void DeclResolverPass::processParenExpr(ParenExpr *parenExpr) {
+    processExpr(parenExpr->containedExpr);
 
     parenExpr->resultType = deepCopyAndSimplifyType(parenExpr->containedExpr->resultType);
 
     convertLValueToRValue(parenExpr->containedExpr);
 }
 
-void DeclResolverPass::processPostfixOperatorExpr(ResolveDeclsContext &context, PostfixOperatorExpr *postfixOperatorExpr) {
+void DeclResolverPass::processPostfixOperatorExpr(PostfixOperatorExpr *postfixOperatorExpr) {
     // TODO: Support operator overloading type resolution
-    processExpr(context, postfixOperatorExpr->expr);
+    processExpr(postfixOperatorExpr->expr);
 
     postfixOperatorExpr->resultType = deepCopyAndSimplifyType(postfixOperatorExpr->expr->resultType);
 }
 
-void DeclResolverPass::processPotentialExplicitCastExpr(ResolveDeclsContext &context, PotentialExplicitCastExpr *potentialExplicitCastExpr) {
-
+void DeclResolverPass::processPotentialExplicitCastExpr(PotentialExplicitCastExpr *potentialExplicitCastExpr) {
+    processExpr(potentialExplicitCastExpr->castType);
+    processExpr(potentialExplicitCastExpr->castee);
 }
 
-void DeclResolverPass::processPrefixOperatorExpr(ResolveDeclsContext &context, PrefixOperatorExpr *prefixOperatorExpr) {
-    processExpr(context, prefixOperatorExpr->expr);
+void DeclResolverPass::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorExpr) {
+    processExpr(prefixOperatorExpr->expr);
 
     // TODO: Support operator overloading type resolution
     if (prefixOperatorExpr->operatorName() == "&") { // Address
@@ -845,7 +1002,7 @@ void DeclResolverPass::processPrefixOperatorExpr(ResolveDeclsContext &context, P
             prefixOperatorExpr->resultType = dereferencedType;
         } else {
             printError("cannot dereference non-pointer type `" + prefixOperatorExpr->expr->resultType->getString() + "`!",
-                       context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+                       prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
             return;
         }
     } else {
@@ -853,21 +1010,35 @@ void DeclResolverPass::processPrefixOperatorExpr(ResolveDeclsContext &context, P
     }
 }
 
-void DeclResolverPass::processResolvedTypeRefExpr(ResolveDeclsContext &context, ResolvedTypeRefExpr *resolvedTypeRefExpr) {
+void DeclResolverPass::processResolvedTypeRefExpr(ResolvedTypeRefExpr *resolvedTypeRefExpr) {
 
 }
 
-void DeclResolverPass::processStringLiteralExpr(ResolveDeclsContext &context, StringLiteralExpr *stringLiteralExpr) {
+void DeclResolverPass::processStringLiteralExpr(StringLiteralExpr *stringLiteralExpr) {
     // TODO: Type suffix support
     stringLiteralExpr->resultType = (new PointerType({}, {}, new BuiltInType({}, {}, "char")));
 }
 
-void DeclResolverPass::processTernaryExpr(ResolveDeclsContext &context, TernaryExpr *ternaryExpr) {
-
+void DeclResolverPass::processTernaryExpr(TernaryExpr *ternaryExpr) {
+    processExpr(ternaryExpr->condition);
+    processExpr(ternaryExpr->trueExpr);
+    processExpr(ternaryExpr->falseExpr);
 }
 
-void DeclResolverPass::processUnresolvedTypeRefExpr(ResolveDeclsContext &context, Expr *&expr) {
-    printError("type not found!", context.fileAst, expr->startPosition(), expr->endPosition());
+void DeclResolverPass::processUnresolvedTypeRefExpr(Expr *&expr) {
+    auto unresolvedTypeRefExpr = llvm::dyn_cast<UnresolvedTypeRefExpr>(expr);
+    Type* resolvedType = unresolvedTypeRefExpr->unresolvedType;
+
+    if (!resolveType(resolvedType)) {
+        // TODO: Better error message
+        printError("could not resolve type!",
+                   resolvedType->startPosition(), resolvedType->endPosition());
+    }
+
+    unresolvedTypeRefExpr->unresolvedType = nullptr;
+
+    expr = new ResolvedTypeRefExpr(unresolvedTypeRefExpr->startPosition(), unresolvedTypeRefExpr->endPosition(), resolvedType);
+    delete unresolvedTypeRefExpr;
 }
 
 void DeclResolverPass::convertLValueToRValue(Expr*& potentialLValue) {

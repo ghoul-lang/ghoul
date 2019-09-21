@@ -40,8 +40,74 @@
 #include <AST/Exprs/LocalVariableDeclExpr.hpp>
 
 namespace gulc {
-    struct ResolveDeclsContext {
-        FileAST& fileAst;
+    // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
+    class DeclResolverPass : public FileASTPass {
+    public:
+        DeclResolverPass()
+                : currentFileAst(nullptr), returnType(nullptr), functionTemplateParams(nullptr),
+                  functionParams(nullptr), functionCallArgs(nullptr), labelNames(),
+                  functionLocalVariablesCount(0), functionLocalVariables() {}
+
+        void processFile(FileAST& fileAst) override;
+
+    private:
+        bool resolveType(Type*& type);
+
+        bool getTypesAreSame(const Type* type1, const Type* type2);
+        bool getTypeGreaterThan(const Type* left, const Type* right);
+
+        Type* deepCopyAndSimplifyType(const Type* type);
+
+        void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
+        void printDebugWarning(const std::string& message);
+
+        void processDecl(FileAST &fileAst, Decl* decl);
+        void processStmt(Stmt*& stmt);
+        void processExpr(Expr*& expr);
+
+        void processFunctionDecl(FileAST &fileAst, FunctionDecl* functionDecl);
+
+        void processBreakStmt(BreakStmt* breakStmt);
+        void processCaseStmt(CaseStmt* caseStmt);
+        void processCompoundStmt(CompoundStmt* compoundStmt);
+        void processContinueStmt(ContinueStmt* continueStmt);
+        void processDoStmt(DoStmt* doStmt);
+        void processForStmt(ForStmt* forStmt);
+        void processGotoStmt(GotoStmt* gotoStmt);
+        void processIfStmt(IfStmt* ifStmt);
+        void processLabeledStmt(LabeledStmt* labeledStmt);
+        void processReturnStmt(ReturnStmt* returnStmt);
+        void processSwitchStmt(SwitchStmt* switchStmt);
+        void processTryStmt(TryStmt* tryStmt);
+        void processTryCatchStmt(TryCatchStmt* tryCatchStmt);
+        void processTryFinallyStmt(TryFinallyStmt* tryFinallyStmt);
+        void processWhileStmt(WhileStmt* whileStmt);
+
+        void processBinaryOperatorExpr(BinaryOperatorExpr* binaryOperatorExpr);
+        void processCharacterLiteralExpr(CharacterLiteralExpr* characterLiteralExpr);
+        void processExplicitCastExpr(ExplicitCastExpr* explicitCastExpr);
+        void processFloatLiteralExpr(FloatLiteralExpr* floatLiteralExpr);
+        void processFunctionCallExpr(FunctionCallExpr* functionCallExpr);
+        void processIdentifierExpr(Expr*& identifierExpr);
+        void processImplicitCastExpr(ImplicitCastExpr* implicitCastExpr);
+        void processIndexerCallExpr(IndexerCallExpr* indexerCallExpr);
+        void processIntegerLiteralExpr(IntegerLiteralExpr* integerLiteralExpr);
+        void processLocalVariableDeclExpr(LocalVariableDeclExpr* localVariableDeclExpr);
+        void processLocalVariableDeclOrPrefixOperatorCallExpr(Expr*& expr);
+        void processMemberAccessCallExpr(MemberAccessCallExpr* memberAccessCallExpr);
+        void processParenExpr(ParenExpr* parenExpr);
+        void processPostfixOperatorExpr(PostfixOperatorExpr* postfixOperatorExpr);
+        void processPotentialExplicitCastExpr(PotentialExplicitCastExpr* potentialExplicitCastExpr);
+        void processPrefixOperatorExpr(PrefixOperatorExpr* prefixOperatorExpr);
+        void processResolvedTypeRefExpr(ResolvedTypeRefExpr* resolvedTypeRefExpr);
+        void processStringLiteralExpr(StringLiteralExpr* stringLiteralExpr);
+        void processTernaryExpr(TernaryExpr* ternaryExpr);
+        void processUnresolvedTypeRefExpr(Expr*& expr);
+
+        void convertLValueToRValue(Expr*& potentialLValue);
+
+        // Context management
+        FileAST* currentFileAst;
         Type* returnType;
         const std::vector<TemplateParameterDecl*>* functionTemplateParams;
         const std::vector<ParameterDecl*>* functionParams;
@@ -50,11 +116,6 @@ namespace gulc {
         std::map<std::string, bool> labelNames;
         unsigned int functionLocalVariablesCount;
         std::vector<LocalVariableDeclExpr*> functionLocalVariables;
-
-        explicit ResolveDeclsContext(FileAST& fileAst)
-                : fileAst(fileAst), returnType(nullptr), functionTemplateParams(nullptr),
-			      functionParams(nullptr), functionCallArgs(nullptr), labelNames(),
-                  functionLocalVariablesCount(0), functionLocalVariables() {}
 
         void labelResolved(const std::string& labelName) {
             if (labelNames.find(labelName) != labelNames.end()) {
@@ -105,67 +166,6 @@ namespace gulc {
                 functionLocalVariables[functionLocalVariablesCount - 1] = localVariableDeclExpr;
             }
         }
-    };
-
-    // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
-    class DeclResolverPass : public FileASTPass {
-    public:
-        void processFile(FileAST& fileAst) override;
-
-    private:
-        bool getTypesAreSame(const Type* type1, const Type* type2);
-        bool getTypeGreaterThan(const Type* left, const Type* right);
-
-        Type* deepCopyAndSimplifyType(const Type* type);
-
-        void printError(const std::string& message, FileAST &fileAst, TextPosition startPosition, TextPosition endPosition);
-        void printDebugWarning(const std::string& message, FileAST &fileAst);
-
-        void processDecl(FileAST &fileAst, Decl* decl);
-        void processStmt(ResolveDeclsContext& context, Stmt*& stmt);
-        void processExpr(ResolveDeclsContext& context, Expr*& expr);
-
-        void processFunctionDecl(FileAST &fileAst, FunctionDecl* functionDecl);
-
-        void processBreakStmt(ResolveDeclsContext& context, BreakStmt* breakStmt);
-        void processCaseStmt(ResolveDeclsContext& context, CaseStmt* caseStmt);
-        void processCompoundStmt(ResolveDeclsContext& context, CompoundStmt* compoundStmt);
-        void processContinueStmt(ResolveDeclsContext& context, ContinueStmt* continueStmt);
-        void processDoStmt(ResolveDeclsContext& context, DoStmt* doStmt);
-        void processForStmt(ResolveDeclsContext& context, ForStmt* forStmt);
-        void processGotoStmt(ResolveDeclsContext& context, GotoStmt* gotoStmt);
-        void processIfStmt(ResolveDeclsContext& context, IfStmt* ifStmt);
-        void processLabeledStmt(ResolveDeclsContext& context, LabeledStmt* labeledStmt);
-        void processReturnStmt(ResolveDeclsContext& context, ReturnStmt* returnStmt);
-        void processSwitchStmt(ResolveDeclsContext& context, SwitchStmt* switchStmt);
-        void processTryStmt(ResolveDeclsContext& context, TryStmt* tryStmt);
-        void processTryCatchStmt(ResolveDeclsContext& context, TryCatchStmt* tryCatchStmt);
-        void processTryFinallyStmt(ResolveDeclsContext& context, TryFinallyStmt* tryFinallyStmt);
-        void processWhileStmt(ResolveDeclsContext& context, WhileStmt* whileStmt);
-
-        void processBinaryOperatorExpr(ResolveDeclsContext& context, BinaryOperatorExpr* binaryOperatorExpr);
-        void processCharacterLiteralExpr(ResolveDeclsContext& context, CharacterLiteralExpr* characterLiteralExpr);
-        void processExplicitCastExpr(ResolveDeclsContext& context, ExplicitCastExpr* explicitCastExpr);
-        void processFloatLiteralExpr(ResolveDeclsContext& context, FloatLiteralExpr* floatLiteralExpr);
-        void processFunctionCallExpr(ResolveDeclsContext& context, FunctionCallExpr* functionCallExpr);
-        void processIdentifierExpr(ResolveDeclsContext& context, IdentifierExpr* identifierExpr);
-        void processImplicitCastExpr(ResolveDeclsContext& context, ImplicitCastExpr* implicitCastExpr);
-        void processIndexerCallExpr(ResolveDeclsContext& context, IndexerCallExpr* indexerCallExpr);
-        void processIntegerLiteralExpr(ResolveDeclsContext& context, IntegerLiteralExpr* integerLiteralExpr);
-        void processLocalVariableDeclExpr(ResolveDeclsContext& context, LocalVariableDeclExpr* localVariableDeclExpr);
-        void processLocalVariableDeclOrPrefixOperatorCallExpr(ResolveDeclsContext& context, Expr*& expr);
-        void processMemberAccessCallExpr(ResolveDeclsContext& context, MemberAccessCallExpr* memberAccessCallExpr);
-        void processParenExpr(ResolveDeclsContext& context, ParenExpr* parenExpr);
-        void processPostfixOperatorExpr(ResolveDeclsContext& context, PostfixOperatorExpr* postfixOperatorExpr);
-        void processPotentialExplicitCastExpr(ResolveDeclsContext& context, PotentialExplicitCastExpr* potentialExplicitCastExpr);
-        void processPrefixOperatorExpr(ResolveDeclsContext& context, PrefixOperatorExpr* prefixOperatorExpr);
-        void processResolvedTypeRefExpr(ResolveDeclsContext& context, ResolvedTypeRefExpr* resolvedTypeRefExpr);
-        void processStringLiteralExpr(ResolveDeclsContext& context, StringLiteralExpr* stringLiteralExpr);
-        void processTernaryExpr(ResolveDeclsContext& context, TernaryExpr* ternaryExpr);
-        void processUnresolvedTypeRefExpr(ResolveDeclsContext& context, Expr*& expr);
-
-        void convertLValueToRValue(Expr*& potentialLValue);
-
     };
 }
 
