@@ -3,6 +3,7 @@
 #include <CodeGen/CodeGen.hpp>
 #include <ObjGen/ObjGen.hpp>
 #include <Linker/Linker.hpp>
+#include <Passes/CodeVerifier.hpp>
 
 using namespace gulc;
 
@@ -14,6 +15,10 @@ int main() {
     // Resolve declarations
     DeclResolver declResolver;
     declResolver.processFile(fileAst);
+
+    // Translate operations and verify operations can be performed
+    CodeVerifier codeVerifier;
+    codeVerifier.verifyFile(fileAst);
 
     // Generate the LLVM IR
     CodeGen codeGen = CodeGen();

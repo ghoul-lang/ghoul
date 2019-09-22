@@ -40,6 +40,7 @@ namespace gulc {
         std::vector<ParameterDecl*> parseParameterDecls(TextPosition startPosition);
 
         Type* parseType(bool parseSuffix = true);
+        Type* parseTypeSuffix(Type* type);
 
         Stmt* parseStmt();
         CompoundStmt* parseCompoundStmt();
@@ -69,21 +70,21 @@ namespace gulc {
         // TODO: Is this a good name for what this is?
         Expr* parseExpr(bool isStatement, bool templateTypingAllowed);
         Expr* parseAssignmentMisc(bool isStatement, bool templateTypingAllowed);
-        Expr* parseLogicalOr(bool templateTypingAllowed);
-        Expr* parseLogicalAnd(bool templateTypingAllowed);
-        Expr* parseBitwiseOr(bool templateTypingAllowed);
-        Expr* parseBitwiseXor(bool templateTypingAllowed);
-        Expr* parseBitwiseAnd(bool templateTypingAllowed);
-        Expr* parseEqualToNotEqualTo(bool templateTypingAllowed);
-        Expr* parseGreaterThanLessThan(bool templateTypingAllowed);
-        Expr* parseBitwiseShifts(bool templateTypingAllowed);
+        Expr* parseLogicalOr(bool isStatement, bool templateTypingAllowed);
+        Expr* parseLogicalAnd(bool isStatement, bool templateTypingAllowed);
+        Expr* parseBitwiseOr(bool isStatement, bool templateTypingAllowed);
+        Expr* parseBitwiseXor(bool isStatement, bool templateTypingAllowed);
+        Expr* parseBitwiseAnd(bool isStatement, bool templateTypingAllowed);
+        Expr* parseEqualToNotEqualTo(bool isStatement, bool templateTypingAllowed);
+        Expr* parseGreaterThanLessThan(bool isStatement, bool templateTypingAllowed);
+        Expr* parseBitwiseShifts(bool isStatement, bool templateTypingAllowed);
         // TODO: Verify everything is parsed in the correct order (make sure it's ((12 / 2) / 2) instead of (12 / (2 / 2)))
-        Expr* parseAdditionSubtraction(bool templateTypingAllowed);
-        Expr* parseMultiplicationDivisionOrRemainder(bool templateTypingAllowed);
+        Expr* parseAdditionSubtraction(bool isStatement, bool templateTypingAllowed);
+        Expr* parseMultiplicationDivisionOrRemainder(bool isStatement, bool templateTypingAllowed);
         // TODO: We might want to add a function that is called before this one that will handle custom operators. It should use loop as long as PeekType is SYMBOL
-        Expr* parsePrefixes(bool templateTypingAllowed);
-        Expr* parseCallPostfixOrMemberAccess(bool templateTypingAllowed);
-        Expr* parseVariableLiteralOrParen(bool templateTypingAllowed);
+        Expr* parsePrefixes(bool isStatement, bool templateTypingAllowed);
+        Expr* parseCallPostfixOrMemberAccess(bool isStatement, bool templateTypingAllowed);
+        Expr* parseVariableLiteralOrParen(bool isStatement, bool templateTypingAllowed);
         Expr* parseNumberLiteral();
         Expr* parseStringLiteral();
         IdentifierExpr* parseIdentifier(bool templateTypingAllowed, bool ignoreGenerics = false);

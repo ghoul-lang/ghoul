@@ -13,16 +13,13 @@ namespace gulc {
         ResolvedTypeRefExpr(TextPosition startPosition, TextPosition endPosition,
                             Type* resolvedType)
                 : Expr(Kind::ResolvedTypeRef, startPosition, endPosition),
-                  _resolvedType(resolvedType) {}
+                  resolvedType(resolvedType) {}
 
-        Type* resolvedType() const { return _resolvedType; }
+        Type* resolvedType;
 
         ~ResolvedTypeRefExpr() override {
-            delete _resolvedType;
+            delete resolvedType;
         }
-
-    private:
-        Type* _resolvedType;
 
     };
 }

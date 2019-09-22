@@ -311,7 +311,8 @@ std::vector<TemplateParameterDecl *> Parser::parseTemplateParameterDecls(TextPos
 
                 if (_lexer.peekType() == TokenType::EQUALS) {
                     _lexer.consumeType(TokenType::EQUALS);
-                    defaultArgument = parsePrefixes(false);
+                    // TODO: Is the `isStatement = false` correct?
+                    defaultArgument = parsePrefixes(false, false);
                     endPosition = defaultArgument->endPosition();
                 }
             } else {
@@ -333,7 +334,8 @@ std::vector<TemplateParameterDecl *> Parser::parseTemplateParameterDecls(TextPos
 
             if (peekedToken.tokenType == TokenType::EQUALS) {
                 _lexer.consumeType(TokenType::EQUALS);
-                defaultArgument = parsePrefixes(false);
+                // TODO: Is the `isStatement = false` correct?
+                defaultArgument = parsePrefixes(false, false);
                 endPosition = defaultArgument->endPosition();
             }
         }
@@ -531,42 +533,51 @@ Type* Parser::parseType(bool parseSuffix) {
     }
 
     if (parseSuffix) {
-        for (peekedToken = _lexer.peekToken();
-             peekedToken.tokenType != TokenType::ENDOFFILE &&
-             (peekedToken.tokenType == TokenType::CONST ||
-              peekedToken.tokenType == TokenType::MUT ||
-              peekedToken.tokenType == TokenType::IMMUT ||
-              peekedToken.tokenType == TokenType::STAR ||
-              peekedToken.tokenType == TokenType::AMPERSAND ||
-              peekedToken.tokenType == TokenType::CARET ||
-              peekedToken.tokenType == TokenType::PERCENT ||
-              peekedToken.tokenType == TokenType::QUESTION);
-             peekedToken = _lexer.peekToken()) {
-            switch (peekedToken.tokenType) {
-                case TokenType::CONST:
-                    _lexer.consumeType(TokenType::CONST);
-                    result = new ConstType(peekedToken.startPosition, peekedToken.endPosition, result);
-                    break;
-                case TokenType::MUT:
-                    _lexer.consumeType(TokenType::MUT);
-                    result = new MutType(peekedToken.startPosition, peekedToken.endPosition, result);
-                    break;
-                case TokenType::IMMUT:
-                    _lexer.consumeType(TokenType::IMMUT);
-                    result = new ImmutType(peekedToken.startPosition, peekedToken.endPosition, result);
-                    break;
-                case TokenType::STAR:
-                    _lexer.consumeType(TokenType::STAR);
-                    result = new PointerType(peekedToken.startPosition, peekedToken.endPosition, result);
-                    break;
-                case TokenType::AMPERSAND:
-                    printError("references not yet supported!", peekedToken.startPosition, peekedToken.endPosition);
-                    return nullptr;
-                default:
-                    printError("custom type suffixes not yet supported!", peekedToken.startPosition,
-                               peekedToken.endPosition);
-                    return nullptr;
-            }
+        return parseTypeSuffix(result);
+    }
+
+    return result;
+}
+
+Type* Parser::parseTypeSuffix(Type* type) {
+    Token peekedToken = _lexer.peekToken();
+    Type* result = type;
+
+    for (peekedToken = _lexer.peekToken();
+         peekedToken.tokenType != TokenType::ENDOFFILE &&
+         (peekedToken.tokenType == TokenType::CONST ||
+          peekedToken.tokenType == TokenType::MUT ||
+          peekedToken.tokenType == TokenType::IMMUT ||
+          peekedToken.tokenType == TokenType::STAR ||
+          peekedToken.tokenType == TokenType::AMPERSAND ||
+          peekedToken.tokenType == TokenType::CARET ||
+          peekedToken.tokenType == TokenType::PERCENT ||
+          peekedToken.tokenType == TokenType::QUESTION);
+         peekedToken = _lexer.peekToken()) {
+        switch (peekedToken.tokenType) {
+            case TokenType::CONST:
+                _lexer.consumeType(TokenType::CONST);
+                result = new ConstType(peekedToken.startPosition, peekedToken.endPosition, result);
+                break;
+            case TokenType::MUT:
+                _lexer.consumeType(TokenType::MUT);
+                result = new MutType(peekedToken.startPosition, peekedToken.endPosition, result);
+                break;
+            case TokenType::IMMUT:
+                _lexer.consumeType(TokenType::IMMUT);
+                result = new ImmutType(peekedToken.startPosition, peekedToken.endPosition, result);
+                break;
+            case TokenType::STAR:
+                _lexer.consumeType(TokenType::STAR);
+                result = new PointerType(peekedToken.startPosition, peekedToken.endPosition, result);
+                break;
+            case TokenType::AMPERSAND:
+                printError("references not yet supported!", peekedToken.startPosition, peekedToken.endPosition);
+                return nullptr;
+            default:
+                printError("custom type suffixes not yet supported!", peekedToken.startPosition,
+                           peekedToken.endPosition);
+                return nullptr;
         }
     }
 
@@ -1232,7 +1243,7 @@ Expr *Parser::parseExpr(bool isStatement, bool templateTypingAllowed) {
 Expr *Parser::parseAssignmentMisc(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
-    Expr* result = parseLogicalOr(templateTypingAllowed);
+    Expr* result = parseLogicalOr(isStatement, templateTypingAllowed);
 
     if (isStatement && _lexer.peekType() == TokenType::SYMBOL) {
         // Variable names cannot have generics so we ignore generics
@@ -1349,16 +1360,16 @@ Expr *Parser::parseAssignmentMisc(bool isStatement, bool templateTypingAllowed) 
  * @param templateTypingAllowed - tells the parser that template typing is allowed
  * @return generic `BinaryOperatorExpr` or logical or `BinaryOperatorExpr`
  */
-Expr *Parser::parseLogicalOr(bool templateTypingAllowed) {
+Expr *Parser::parseLogicalOr(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
-    Expr* result = parseLogicalAnd(templateTypingAllowed);
+    Expr* result = parseLogicalAnd(isStatement, templateTypingAllowed);
 
     while (_lexer.peekType() != TokenType::ENDOFFILE) {
         switch (_lexer.peekType()) {
             case TokenType::PIPEPIPE: {
                 _lexer.consumeType(TokenType::PIPEPIPE);
-                Expr* rvalue = parseLogicalAnd(false);
+                Expr* rvalue = parseLogicalAnd(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "||", result, rvalue);
@@ -1384,16 +1395,16 @@ Expr *Parser::parseLogicalOr(bool templateTypingAllowed) {
  * @param templateTypingAllowed - tells the parser that template typing is allowed
  * @return generic `BinaryOperatorExpr` or logical and `BinaryOperatorExpr`
  */
-Expr *Parser::parseLogicalAnd(bool templateTypingAllowed) {
+Expr *Parser::parseLogicalAnd(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
-    Expr* result = parseBitwiseOr(templateTypingAllowed);
+    Expr* result = parseBitwiseOr(isStatement, templateTypingAllowed);
 
     while (_lexer.peekType() != TokenType::ENDOFFILE) {
         switch (_lexer.peekType()) {
             case TokenType::AMPERSANDAMPERSAND: {
                 _lexer.consumeType(TokenType::AMPERSANDAMPERSAND);
-                Expr* rvalue = parseBitwiseOr(false);
+                Expr* rvalue = parseBitwiseOr(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "&&", result, rvalue);
@@ -1419,16 +1430,16 @@ Expr *Parser::parseLogicalAnd(bool templateTypingAllowed) {
  * @param templateTypingAllowed - tells the parser that template typing is allowed
  * @return generic `BinaryOperatorExpr` or bitwise or `BinaryOperatorExpr`
  */
-Expr *Parser::parseBitwiseOr(bool templateTypingAllowed) {
+Expr *Parser::parseBitwiseOr(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
-    Expr* result = parseBitwiseXor(templateTypingAllowed);
+    Expr* result = parseBitwiseXor(isStatement, templateTypingAllowed);
 
     while (_lexer.peekType() != TokenType::ENDOFFILE) {
         switch (_lexer.peekType()) {
             case TokenType::PIPE: {
                 _lexer.consumeType(TokenType::PIPE);
-                Expr* rvalue = parseBitwiseXor(false);
+                Expr* rvalue = parseBitwiseXor(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "|", result, rvalue);
@@ -1454,16 +1465,16 @@ Expr *Parser::parseBitwiseOr(bool templateTypingAllowed) {
  * @param templateTypingAllowed - tells the parser that template typing is allowed
  * @return generic `BinaryOperatorExpr` or bitwise xor `BinaryOperatorExpr`
  */
-Expr *Parser::parseBitwiseXor(bool templateTypingAllowed) {
+Expr *Parser::parseBitwiseXor(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
-    Expr* result = parseBitwiseAnd(templateTypingAllowed);
+    Expr* result = parseBitwiseAnd(isStatement, templateTypingAllowed);
 
     while (_lexer.peekType() != TokenType::ENDOFFILE) {
         switch (_lexer.peekType()) {
             case TokenType::CARET: {
                 _lexer.consumeType(TokenType::CARET);
-                Expr* rvalue = parseBitwiseAnd(false);
+                Expr* rvalue = parseBitwiseAnd(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "^", result, rvalue);
@@ -1489,16 +1500,16 @@ Expr *Parser::parseBitwiseXor(bool templateTypingAllowed) {
  * @param templateTypingAllowed - tells the parser that template typing is allowed
  * @return generic `BinaryOperatorExpr` or bitwise and `BinaryOperatorExpr`
  */
-Expr *Parser::parseBitwiseAnd(bool templateTypingAllowed) {
+Expr *Parser::parseBitwiseAnd(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
-    Expr* result = parseEqualToNotEqualTo(templateTypingAllowed);
+    Expr* result = parseEqualToNotEqualTo(isStatement, templateTypingAllowed);
 
     while (_lexer.peekType() != TokenType::ENDOFFILE) {
         switch (_lexer.peekType()) {
             case TokenType::AMPERSAND: {
                 _lexer.consumeType(TokenType::AMPERSAND);
-                Expr* rvalue = parseEqualToNotEqualTo(false);
+                Expr* rvalue = parseEqualToNotEqualTo(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "&", result, rvalue);
@@ -1524,16 +1535,16 @@ Expr *Parser::parseBitwiseAnd(bool templateTypingAllowed) {
  * @param templateTypingAllowed - tells the parser that template typing is allowed
  * @return generic `BinaryOperatorExpr` or an equal or not equal to `BinaryOperatorExpr`
  */
-Expr *Parser::parseEqualToNotEqualTo(bool templateTypingAllowed) {
+Expr *Parser::parseEqualToNotEqualTo(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
-    Expr* result = parseGreaterThanLessThan(templateTypingAllowed);
+    Expr* result = parseGreaterThanLessThan(isStatement, templateTypingAllowed);
 
     while (_lexer.peekType() != TokenType::ENDOFFILE) {
         switch (_lexer.peekType()) {
             case TokenType::EQUALEQUALS: {
                 _lexer.consumeType(TokenType::EQUALEQUALS);
-                Expr* rvalue = parseGreaterThanLessThan(false);
+                Expr* rvalue = parseGreaterThanLessThan(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "==", result, rvalue);
@@ -1541,7 +1552,7 @@ Expr *Parser::parseEqualToNotEqualTo(bool templateTypingAllowed) {
             }
             case TokenType::NOTEQUALS: {
                 _lexer.consumeType(TokenType::NOTEQUALS);
-                Expr* rvalue = parseGreaterThanLessThan(false);
+                Expr* rvalue = parseGreaterThanLessThan(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "!=", result, rvalue);
@@ -1567,16 +1578,16 @@ Expr *Parser::parseEqualToNotEqualTo(bool templateTypingAllowed) {
  * @param templateTypingAllowed - tells the parser that template typing is allowed
  * @return generic `BinaryOperatorExpr` or a greater or less than `BinaryOperatorExpr`
  */
-Expr *Parser::parseGreaterThanLessThan(bool templateTypingAllowed) {
+Expr *Parser::parseGreaterThanLessThan(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
-    Expr* result = parseBitwiseShifts(templateTypingAllowed);
+    Expr* result = parseBitwiseShifts(isStatement, templateTypingAllowed);
 
     while (_lexer.peekType() != TokenType::ENDOFFILE) {
         switch (_lexer.peekType()) {
             case TokenType::GREATER: {
                 _lexer.consumeType(TokenType::GREATER);
-                Expr* rvalue = parseBitwiseShifts(false);
+                Expr* rvalue = parseBitwiseShifts(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, ">", result, rvalue);
@@ -1584,7 +1595,7 @@ Expr *Parser::parseGreaterThanLessThan(bool templateTypingAllowed) {
             }
             case TokenType::GREATEREQUALS: {
                 _lexer.consumeType(TokenType::GREATEREQUALS);
-                Expr* rvalue = parseBitwiseShifts(false);
+                Expr* rvalue = parseBitwiseShifts(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, ">=", result, rvalue);
@@ -1592,7 +1603,7 @@ Expr *Parser::parseGreaterThanLessThan(bool templateTypingAllowed) {
             }
             case TokenType::LESS: {
                 _lexer.consumeType(TokenType::LESS);
-                Expr* rvalue = parseBitwiseShifts(false);
+                Expr* rvalue = parseBitwiseShifts(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "<", result, rvalue);
@@ -1600,7 +1611,7 @@ Expr *Parser::parseGreaterThanLessThan(bool templateTypingAllowed) {
             }
             case TokenType::LESSEQUALS: {
                 _lexer.consumeType(TokenType::LESSEQUALS);
-                Expr* rvalue = parseBitwiseShifts(false);
+                Expr* rvalue = parseBitwiseShifts(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "<=", result, rvalue);
@@ -1626,16 +1637,16 @@ Expr *Parser::parseGreaterThanLessThan(bool templateTypingAllowed) {
  * @param templateTypingAllowed - tells the parser that template typing is allowed
  * @return generic `BinaryOperatorExpr` or a bit shift left or right `BinaryOperatorExpr`
  */
-Expr *Parser::parseBitwiseShifts(bool templateTypingAllowed) {
+Expr *Parser::parseBitwiseShifts(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
-    Expr* result = parseAdditionSubtraction(templateTypingAllowed);
+    Expr* result = parseAdditionSubtraction(isStatement, templateTypingAllowed);
 
     while (_lexer.peekType() != TokenType::ENDOFFILE) {
         switch (_lexer.peekType()) {
             case TokenType::LEFT: {
                 _lexer.consumeType(TokenType::LEFT);
-                Expr* rvalue = parseAdditionSubtraction(false);
+                Expr* rvalue = parseAdditionSubtraction(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "<<", result, rvalue);
@@ -1643,7 +1654,7 @@ Expr *Parser::parseBitwiseShifts(bool templateTypingAllowed) {
             }
             case TokenType::RIGHT: {
                 _lexer.consumeType(TokenType::RIGHT);
-                Expr* rvalue = parseAdditionSubtraction(false);
+                Expr* rvalue = parseAdditionSubtraction(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, ">>", result, rvalue);
@@ -1669,16 +1680,16 @@ Expr *Parser::parseBitwiseShifts(bool templateTypingAllowed) {
  * @param templateTypingAllowed - tells the parser that template typing is allowed
  * @return generic `BinaryOperatorExpr` or a addition or subtraction `BinaryOperatorExpr`
  */
-Expr *Parser::parseAdditionSubtraction(bool templateTypingAllowed) {
+Expr *Parser::parseAdditionSubtraction(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
-    Expr* result = parseMultiplicationDivisionOrRemainder(templateTypingAllowed);
+    Expr* result = parseMultiplicationDivisionOrRemainder(isStatement, templateTypingAllowed);
 
     while (_lexer.peekType() != TokenType::ENDOFFILE) {
         switch (_lexer.peekType()) {
             case TokenType::PLUS: {
                 _lexer.consumeType(TokenType::PLUS);
-                Expr* rvalue = parseMultiplicationDivisionOrRemainder(false);
+                Expr* rvalue = parseMultiplicationDivisionOrRemainder(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "+", result, rvalue);
@@ -1686,7 +1697,7 @@ Expr *Parser::parseAdditionSubtraction(bool templateTypingAllowed) {
             }
             case TokenType::MINUS: {
                 _lexer.consumeType(TokenType::MINUS);
-                Expr* rvalue = parseMultiplicationDivisionOrRemainder(false);
+                Expr* rvalue = parseMultiplicationDivisionOrRemainder(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "-", result, rvalue);
@@ -1712,16 +1723,16 @@ Expr *Parser::parseAdditionSubtraction(bool templateTypingAllowed) {
  * @param templateTypingAllowed - tells the parser that template typing is allowed
  * @return generic `BinaryOperatorExpr` or a addition or subtraction `BinaryOperatorExpr`
  */
-Expr *Parser::parseMultiplicationDivisionOrRemainder(bool templateTypingAllowed) {
+Expr *Parser::parseMultiplicationDivisionOrRemainder(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
-    Expr* result = parsePrefixes(templateTypingAllowed);
+    Expr* result = parsePrefixes(isStatement, templateTypingAllowed);
 
     while (_lexer.peekType() != TokenType::ENDOFFILE) {
         switch (_lexer.peekType()) {
             case TokenType::STAR: {
                 _lexer.consumeType(TokenType::STAR);
-                Expr* rvalue = parsePrefixes(false);
+                Expr* rvalue = parsePrefixes(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "*", result, rvalue);
@@ -1729,7 +1740,7 @@ Expr *Parser::parseMultiplicationDivisionOrRemainder(bool templateTypingAllowed)
             }
             case TokenType::SLASH: {
                 _lexer.consumeType(TokenType::SLASH);
-                Expr* rvalue = parsePrefixes(false);
+                Expr* rvalue = parsePrefixes(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "/", result, rvalue);
@@ -1737,7 +1748,7 @@ Expr *Parser::parseMultiplicationDivisionOrRemainder(bool templateTypingAllowed)
             }
             case TokenType::PERCENT: {
                 _lexer.consumeType(TokenType::PERCENT);
-                Expr* rvalue = parsePrefixes(false);
+                Expr* rvalue = parsePrefixes(false, false);
                 endPosition = rvalue->endPosition();
 
                 result = new BinaryOperatorExpr(startPosition, endPosition, "%", result, rvalue);
@@ -1761,80 +1772,80 @@ Expr *Parser::parseMultiplicationDivisionOrRemainder(bool templateTypingAllowed)
  * @param templateTypingAllowed
  * @return
  */
-Expr *Parser::parsePrefixes(bool templateTypingAllowed) {
+Expr *Parser::parsePrefixes(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
 
     switch (_lexer.peekType()) {
         case TokenType::PLUSPLUS: {
             _lexer.consumeType(TokenType::PLUSPLUS);
-            Expr* expr = parsePrefixes(false);
+            Expr* expr = parsePrefixes(false, false);
             endPosition = expr->endPosition();
             return new PrefixOperatorExpr(startPosition, endPosition, "++", expr);
         }
         case TokenType::MINUSMINUS: {
             _lexer.consumeType(TokenType::MINUSMINUS);
-            Expr* expr = parsePrefixes(false);
+            Expr* expr = parsePrefixes(false, false);
             endPosition = expr->endPosition();
             return new PrefixOperatorExpr(startPosition, endPosition, "--", expr);
         }
         case TokenType::PLUS: {
             _lexer.consumeType(TokenType::PLUS);
-            Expr* expr = parsePrefixes(false);
+            Expr* expr = parsePrefixes(false, false);
             endPosition = expr->endPosition();
             return new PrefixOperatorExpr(startPosition, endPosition, "+", expr);
         }
         case TokenType::MINUS: {
             _lexer.consumeType(TokenType::MINUS);
-            Expr* expr = parsePrefixes(false);
+            Expr* expr = parsePrefixes(false, false);
             endPosition = expr->endPosition();
             return new PrefixOperatorExpr(startPosition, endPosition, "-", expr);
         }
         case TokenType::NOT: {
             _lexer.consumeType(TokenType::NOT);
-            Expr* expr = parsePrefixes(false);
+            Expr* expr = parsePrefixes(false, false);
             endPosition = expr->endPosition();
             return new PrefixOperatorExpr(startPosition, endPosition, "!", expr);
         }
         case TokenType::TILDE: {
             _lexer.consumeType(TokenType::TILDE);
-            Expr* expr = parsePrefixes(false);
+            Expr* expr = parsePrefixes(false, false);
             endPosition = expr->endPosition();
             return new PrefixOperatorExpr(startPosition, endPosition, "~", expr);
         }
         case TokenType::STAR: {
             _lexer.consumeType(TokenType::STAR);
-            Expr* expr = parsePrefixes(false);
+            Expr* expr = parsePrefixes(false, false);
             endPosition = expr->endPosition();
             return new PrefixOperatorExpr(startPosition, endPosition, "*", expr);
         }
         case TokenType::AMPERSAND: {
             _lexer.consumeType(TokenType::AMPERSAND);
-            Expr* expr = parsePrefixes(false);
+            Expr* expr = parsePrefixes(false, false);
             endPosition = expr->endPosition();
             return new PrefixOperatorExpr(startPosition, endPosition, "&", expr);
         }
         case TokenType::SIZEOF: {
             _lexer.consumeType(TokenType::SIZEOF);
-            Expr* expr = parsePrefixes(false);
+            Expr* expr = parsePrefixes(false, false);
             endPosition = expr->endPosition();
             return new PrefixOperatorExpr(startPosition, endPosition, "sizeof", expr);
         }
         case TokenType::ALIGNOF: {
             _lexer.consumeType(TokenType::ALIGNOF);
-            Expr* expr = parsePrefixes(false);
+            Expr* expr = parsePrefixes(false, false);
             endPosition = expr->endPosition();
             return new PrefixOperatorExpr(startPosition, endPosition, "alignof", expr);
         }
         case TokenType::OFFSETOF: {
             _lexer.consumeType(TokenType::OFFSETOF);
-            Expr* expr = parsePrefixes(false);
+            Expr* expr = parsePrefixes(false, false);
             endPosition = expr->endPosition();
             return new PrefixOperatorExpr(startPosition, endPosition, "offsetof", expr);
         }
         case TokenType::NAMEOF: {
             _lexer.consumeType(TokenType::NAMEOF);
-            Expr* expr = parsePrefixes(false);
+            Expr* expr = parsePrefixes(false, false);
             endPosition = expr->endPosition();
             return new PrefixOperatorExpr(startPosition, endPosition, "nameof", expr);
         }
@@ -1843,7 +1854,7 @@ Expr *Parser::parsePrefixes(bool templateTypingAllowed) {
             _lexer.setRightShiftState(true);
             _lexer.consumeType(TokenType::LPAREN);
 
-            Expr* nestedExpr = parseExpr(false, false);
+            Expr* nestedExpr = parseExpr(true, false);
 
             endPosition = _lexer.peekToken().endPosition;
 
@@ -1865,7 +1876,7 @@ Expr *Parser::parsePrefixes(bool templateTypingAllowed) {
                 _lexer.peekType() == TokenType::ALIGNOF ||
                 _lexer.peekType() == TokenType::OFFSETOF ||
                 _lexer.peekType() == TokenType::NAMEOF) {
-                Expr* castee = parsePrefixes(false);
+                Expr* castee = parsePrefixes(false, false);
                 endPosition = castee->endPosition();
                 return new PotentialExplicitCastExpr(startPosition, endPosition, nestedExpr, castee);
             } else {
@@ -1926,7 +1937,7 @@ Expr *Parser::parsePrefixes(bool templateTypingAllowed) {
 //                return parsedSymbol1;
 //            }
         default:
-            return parseCallPostfixOrMemberAccess(templateTypingAllowed);
+            return parseCallPostfixOrMemberAccess(isStatement, templateTypingAllowed);
     }
 }
 
@@ -1938,10 +1949,10 @@ Expr *Parser::parsePrefixes(bool templateTypingAllowed) {
  * @param templateTypingAllowed
  * @return
  */
-Expr *Parser::parseCallPostfixOrMemberAccess(bool templateTypingAllowed) {
+Expr *Parser::parseCallPostfixOrMemberAccess(bool isStatement, bool templateTypingAllowed) {
     TextPosition startPosition = _lexer.peekToken().startPosition;
     TextPosition endPosition;
-    Expr* result = parseVariableLiteralOrParen(templateTypingAllowed);
+    Expr* result = parseVariableLiteralOrParen(isStatement, templateTypingAllowed);
 
     while (_lexer.peekType() != TokenType::ENDOFFILE) {
         switch (_lexer.peekType()) {
@@ -2032,14 +2043,86 @@ Expr *Parser::parseCallPostfixOrMemberAccess(bool templateTypingAllowed) {
  * @param templateTypingAllowed
  * @return
  */
-Expr *Parser::parseVariableLiteralOrParen(bool templateTypingAllowed) {
+Expr *Parser::parseVariableLiteralOrParen(bool isStatement, bool templateTypingAllowed) {
     Token peekedToken = _lexer.peekToken();
     TextPosition startPosition = peekedToken.startPosition;
     TextPosition endPosition = peekedToken.endPosition;
 
     switch (peekedToken.tokenType) {
-        case TokenType::SYMBOL:
-            return parseIdentifier(templateTypingAllowed, false);
+        case TokenType::SYMBOL: {
+            IdentifierExpr* result = parseIdentifier(templateTypingAllowed, false);
+
+            // TODO: Support `&`, `^`, `%`, `$`, `?'
+            // For this point what we do is: if there is a `*` after the symbol we check the token after the `*` to
+            //  see if it is another `*`, `)` (for casting), `>` (for templates)`, `mut`, `const`, `immut`, etc.
+            // If there is one of the above Tokens then we parse the type suffix and the check for a symbol after the
+            //  type for local variable declarations
+            if (isStatement && _lexer.peekType() == TokenType::STAR) {
+                LexerCheckpoint checkpoint = _lexer.createCheckpoint();
+
+                _lexer.consumeType(TokenType::STAR);
+
+                if (_lexer.peekType() == TokenType::STAR ||
+                    _lexer.peekType() == TokenType::RPAREN ||
+                    _lexer.peekType() == TokenType::TEMPLATEEND ||
+                    _lexer.peekType() == TokenType::MUT ||
+                    _lexer.peekType() == TokenType::IMMUT ||
+                    _lexer.peekType() == TokenType::CONST) {
+                    auto unresolvedType = new UnresolvedType(result->startPosition(), result->endPosition(),
+                                                             {}, result->name(), std::move(result->templateArguments));
+                    delete result;
+
+                    auto unresolvedPointerType = new PointerType(unresolvedType->startPosition(),
+                                                                 unresolvedType->endPosition(),
+                                                                 unresolvedType);
+
+                    Expr* potentialResult =  new UnresolvedTypeRefExpr(unresolvedPointerType->startPosition(),
+                                                                       unresolvedPointerType->endPosition(),
+                                                                       parseTypeSuffix(unresolvedPointerType));
+
+                    // If there is a symbol after then we immediately know it is a variable declaration
+                    if (_lexer.peekType() == TokenType::SYMBOL) {
+                        std::string varName = _lexer.peekToken().currentSymbol;
+                        endPosition = _lexer.peekToken().endPosition;
+
+                        _lexer.consumeType(TokenType::SYMBOL);
+
+                        return new LocalVariableDeclExpr(startPosition, endPosition, potentialResult, varName);
+                    } else {
+                        return potentialResult;
+                    }
+                } else {
+                    _lexer.returnToCheckpoint(checkpoint);
+                }
+            }
+
+            if (_lexer.peekType() == TokenType::MUT ||
+                _lexer.peekType() == TokenType::IMMUT ||
+                _lexer.peekType() == TokenType::CONST) {
+                auto unresolvedType = new UnresolvedType(result->startPosition(), result->endPosition(),
+                                                         {}, result->name(), std::move(result->templateArguments));
+
+                delete result;
+
+                Expr* potentialResult =  new UnresolvedTypeRefExpr(unresolvedType->startPosition(),
+                                                                   unresolvedType->endPosition(),
+                                                                   parseTypeSuffix(unresolvedType));
+
+                // If there is a symbol after then we immediately know it is a variable declaration
+                if (_lexer.peekType() == TokenType::SYMBOL) {
+                    std::string varName = _lexer.peekToken().currentSymbol;
+                    endPosition = _lexer.peekToken().endPosition;
+
+                    _lexer.consumeType(TokenType::SYMBOL);
+
+                    return new LocalVariableDeclExpr(startPosition, endPosition, potentialResult, varName);
+                } else {
+                    return potentialResult;
+                }
+            }
+
+            return result;
+        }
         case TokenType::NUMBER:
             return parseNumberLiteral();
         case TokenType::STRING:
@@ -2052,7 +2135,10 @@ Expr *Parser::parseVariableLiteralOrParen(bool templateTypingAllowed) {
         case TokenType::MUT:
         case TokenType::IMMUT:
         case TokenType::CONST: {
-            Type* refType = parseType();
+            // NOTE: We parse the type without parsing the type suffix (`*`, `&`, etc.) because this is adopted from C.
+            // In C `const int *` is `const(int)*` or `int const*` NOT `const(int*)` or `int *const`
+            Type* refType = parseType(false);
+            refType = parseTypeSuffix(refType);
 
             Expr* potentialResult = new UnresolvedTypeRefExpr(refType->startPosition(), refType->endPosition(), refType);
 
@@ -2243,7 +2329,8 @@ IdentifierExpr *Parser::parseIdentifier(bool templateTypingAllowed, bool ignoreG
         _lexer.consumeType(TokenType::LESS);
 
         while (_lexer.peekType() != TokenType::TEMPLATEEND) {
-            templateData.push_back(parsePrefixes(true));
+            // Is setting it to true correct?
+            templateData.push_back(parsePrefixes(true, true));
 
             if (_lexer.peekType() != TokenType::COMMA) break;
             _lexer.consumeType(TokenType::COMMA);

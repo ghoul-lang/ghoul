@@ -43,5 +43,22 @@ void CodeVerifier::verifyDecl(Decl *decl) {
 }
 
 void CodeVerifier::verifyFunctionDecl(FunctionDecl *functionDecl) {
+    currentFunctionReturnType = functionDecl->resultType;
+    currentFunctionTemplateParameters = &functionDecl->templateParameters;
+    currentFunctionParameters = &functionDecl->parameters;
+
+    currentFunctionLocalVariablesCount = 0;
+
+    // TODO: Make sure the function name isn't already taken
+    verifyCompoundStmt(functionDecl->body());
+
+    currentFunctionLocalVariablesCount = 0;
+
+    currentFunctionReturnType = nullptr;
+    currentFunctionTemplateParameters = nullptr;
+    currentFunctionParameters = nullptr;
+}
+
+void CodeVerifier::verifyCompoundStmt(CompoundStmt *compoundStmt) {
 
 }

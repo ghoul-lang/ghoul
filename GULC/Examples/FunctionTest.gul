@@ -3,6 +3,6 @@ int testFunc() {
 }
 
 int main() {
-    mut(int*) result = 3;
+    int* result = 2;
     return result;
 }

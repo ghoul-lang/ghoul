@@ -82,7 +82,7 @@ namespace gulc {
         void processTryFinallyStmt(TryFinallyStmt* tryFinallyStmt);
         void processWhileStmt(WhileStmt* whileStmt);
 
-        void processBinaryOperatorExpr(BinaryOperatorExpr* binaryOperatorExpr);
+        void processBinaryOperatorExpr(Expr*& expr);
         void processCharacterLiteralExpr(CharacterLiteralExpr* characterLiteralExpr);
         void processExplicitCastExpr(ExplicitCastExpr* explicitCastExpr);
         void processFloatLiteralExpr(FloatLiteralExpr* floatLiteralExpr);

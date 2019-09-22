@@ -292,7 +292,7 @@ void DeclResolver::processStmt(Stmt *&stmt) {
 void DeclResolver::processExpr(Expr *&expr) {
     switch (expr->getExprKind()) {
         case Expr::Kind::BinaryOperator:
-            processBinaryOperatorExpr(llvm::dyn_cast<BinaryOperatorExpr>(expr));
+            processBinaryOperatorExpr(expr);
             break;
         case Expr::Kind::CharacterLiteral:
             processCharacterLiteralExpr(llvm::dyn_cast<CharacterLiteralExpr>(expr));
@@ -549,9 +549,57 @@ void DeclResolver::processWhileStmt(WhileStmt *whileStmt) {
 }
 
 // Exprs
-void DeclResolver::processBinaryOperatorExpr(BinaryOperatorExpr *binaryOperatorExpr) {
+void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
+    auto binaryOperatorExpr = llvm::dyn_cast<BinaryOperatorExpr>(expr);
+
     // TODO: Support operator overloading type resolution
     processExpr(binaryOperatorExpr->leftValue);
+
+    if (llvm::isa<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue)) {
+        // TODO: Support the other type suffixes
+        if (binaryOperatorExpr->operatorName() == "*") {
+            if (!llvm::isa<IdentifierExpr>(binaryOperatorExpr->rightValue)) {
+                printError("expected local variable name after pointer type!",
+                           binaryOperatorExpr->rightValue->startPosition(),
+                           binaryOperatorExpr->rightValue->endPosition());
+                return;
+            }
+
+            auto localVarTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue);
+            auto varNameExpr = llvm::dyn_cast<IdentifierExpr>(binaryOperatorExpr->rightValue);
+
+            if (varNameExpr->hasTemplateArguments()) {
+                printError("local variable name cannot have template arguments!",
+                           varNameExpr->startPosition(),
+                           varNameExpr->endPosition());
+                return;
+            }
+
+            binaryOperatorExpr->leftValue = nullptr;
+
+            std::string varName = varNameExpr->name();
+
+            localVarTypeRef->resolvedType = new PointerType(localVarTypeRef->startPosition(),
+                                                            localVarTypeRef->endPosition(),
+                                                            localVarTypeRef->resolvedType);
+
+            auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition(), localVarTypeRef, varName);
+
+            processLocalVariableDeclExpr(localVarDeclExpr);
+            expr = localVarDeclExpr;
+
+            // Delete the binary operator expression (this will delete the left and right expressions)
+            delete binaryOperatorExpr;
+
+            return;
+        } else {
+            printError("unsupported binary operator expression with a type as an lvalue!",
+                       binaryOperatorExpr->startPosition(),
+                       binaryOperatorExpr->endPosition());
+            return;
+        }
+    }
+
     processExpr(binaryOperatorExpr->rightValue);
 
     convertLValueToRValue(binaryOperatorExpr->rightValue);
@@ -929,7 +977,7 @@ void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVari
         }
 
         auto resolvedTypeRefExpr = llvm::dyn_cast<ResolvedTypeRefExpr>(localVariableDeclExpr->type);
-        localVariableDeclExpr->resultType = deepCopyAndSimplifyType(resolvedTypeRefExpr->resolvedType());
+        localVariableDeclExpr->resultType = deepCopyAndSimplifyType(resolvedTypeRefExpr->resolvedType);
 
         addLocalVariable(localVariableDeclExpr);
     }

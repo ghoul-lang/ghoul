@@ -495,7 +495,7 @@ void ASTPrinter::printLocalVariableDeclExpr(const LocalVariableDeclExpr *localVa
 }
 
 void ASTPrinter::printResolvedTypeRefExpr(const ResolvedTypeRefExpr *resolvedTypeRefExpr, const std::string &prefix) {
-    std::cout << prefix << "| ResolvedTypeRefExpr (type: " << getTypeName(resolvedTypeRefExpr->resolvedType()) << ")" << std::endl;
+    std::cout << prefix << "| ResolvedTypeRefExpr (type: " << getTypeName(resolvedTypeRefExpr->resolvedType) << ")" << std::endl;
 }
 
 void ASTPrinter::printLValueToRValueExpr(const LValueToRValueExpr *lValueToRValueExpr, const std::string &prefix) {
