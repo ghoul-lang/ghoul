@@ -1875,7 +1875,8 @@ Expr *Parser::parsePrefixes(bool isStatement, bool templateTypingAllowed) {
                 _lexer.peekType() == TokenType::SIZEOF ||
                 _lexer.peekType() == TokenType::ALIGNOF ||
                 _lexer.peekType() == TokenType::OFFSETOF ||
-                _lexer.peekType() == TokenType::NAMEOF) {
+                _lexer.peekType() == TokenType::NAMEOF ||
+                _lexer.peekType() == TokenType::NUMBER) {
                 Expr* castee = parsePrefixes(false, false);
                 endPosition = castee->endPosition();
                 return new PotentialExplicitCastExpr(startPosition, endPosition, nestedExpr, castee);

@@ -771,45 +771,63 @@ llvm::Value *gulc::CodeGen::generateFunctionCallExpr(gulc::CodeGenContext &conte
 }
 
 llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(gulc::CodeGenContext &context, const gulc::PrefixOperatorExpr *prefixOperatorExpr) {
-    if (!llvm::isa<gulc::BuiltInType>(prefixOperatorExpr->resultType)) {
-        printError("built in prefix operator called on non-built in type!",
+    if (llvm::isa<gulc::BuiltInType>(prefixOperatorExpr->expr->resultType)) {
+        auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(prefixOperatorExpr->expr->resultType);
+
+        llvm::Value* lvalue = generateExpr(context, prefixOperatorExpr->expr);
+        llvm::Value* rvalue = context.irBuilder.CreateLoad(lvalue, "l2r");
+
+        if (prefixOperatorExpr->operatorName() == "++") {
+            if (builtInType->isFloating()) {
+                llvm::Value* newValue = context.irBuilder.CreateFAdd(rvalue, llvm::ConstantFP::get(context.llvmContext, llvm::APFloat(1.0f)), "preinctmp");
+                context.irBuilder.CreateStore(newValue, lvalue);
+            } else {
+                llvm::Value* newValue = context.irBuilder.CreateAdd(rvalue, llvm::ConstantInt::get(context.llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "preinctmp");
+                context.irBuilder.CreateStore(newValue, lvalue);
+            }
+        } else if (prefixOperatorExpr->operatorName() == "--") {
+            if (builtInType->isFloating()) {
+                llvm::Value* newValue = context.irBuilder.CreateFSub(rvalue, llvm::ConstantFP::get(context.llvmContext, llvm::APFloat(1.0f)), "predectmp");
+                context.irBuilder.CreateStore(newValue, lvalue);
+            } else {
+                llvm::Value* newValue = context.irBuilder.CreateSub(rvalue, llvm::ConstantInt::get(context.llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "predectmp");
+                context.irBuilder.CreateStore(newValue, lvalue);
+            }
+        } else if (prefixOperatorExpr->operatorName() == "-") {
+            if (builtInType->isFloating()) {
+                return context.irBuilder.CreateFNeg(rvalue, "negtmp");
+            } else {
+                return context.irBuilder.CreateNeg(rvalue, "negtmp");
+            }
+        } else if (prefixOperatorExpr->operatorName() == "&") {
+            // TODO: Should we try to do error checking here?
+            return lvalue;
+        } else if (prefixOperatorExpr->operatorName() != "+") {
+            printError("unknown built in prefix operator!",
+                       context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+        }
+
+        return lvalue;
+    } else if (llvm::isa<PointerType>(prefixOperatorExpr->expr->resultType)) {
+        llvm::Value* lvalue = generateExpr(context, prefixOperatorExpr->expr);
+        llvm::Value* rvalue = context.irBuilder.CreateLoad(lvalue, "l2r");
+
+        if (prefixOperatorExpr->operatorName() == "*") {
+            return context.irBuilder.CreateLoad(rvalue, "deref");
+        } else if (prefixOperatorExpr->operatorName() == "++" || prefixOperatorExpr->operatorName() == "--") {
+            // TODO: We need to know the size of a pointer to support this...
+            printError("increment and decrement operators not yet supported on pointer types!",
+                       context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+        } else {
+            printError("unknown prefix operator used on pointer type!",
+                       context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+        }
+    } else {
+        printError("built in prefix operator called on unsupported type!",
                    context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
-        return nullptr;
     }
 
-    auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(prefixOperatorExpr->resultType);
-
-    llvm::Value* lvalue = generateExpr(context, prefixOperatorExpr->expr);
-    llvm::Value* rvalue = context.irBuilder.CreateLoad(lvalue, "l2r");
-
-    if (prefixOperatorExpr->operatorName() == "++") {
-        if (builtInType->isFloating()) {
-            llvm::Value* newValue = context.irBuilder.CreateFAdd(rvalue, llvm::ConstantFP::get(context.llvmContext, llvm::APFloat(1.0f)), "preinctmp");
-            context.irBuilder.CreateStore(newValue, lvalue);
-        } else {
-            llvm::Value* newValue = context.irBuilder.CreateAdd(rvalue, llvm::ConstantInt::get(context.llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "preinctmp");
-            context.irBuilder.CreateStore(newValue, lvalue);
-        }
-    } else if (prefixOperatorExpr->operatorName() == "--") {
-        if (builtInType->isFloating()) {
-            llvm::Value* newValue = context.irBuilder.CreateFSub(rvalue, llvm::ConstantFP::get(context.llvmContext, llvm::APFloat(1.0f)), "predectmp");
-            context.irBuilder.CreateStore(newValue, lvalue);
-        } else {
-            llvm::Value* newValue = context.irBuilder.CreateSub(rvalue, llvm::ConstantInt::get(context.llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "predectmp");
-            context.irBuilder.CreateStore(newValue, lvalue);
-        }
-    } else if (prefixOperatorExpr->operatorName() == "-") {
-        if (builtInType->isFloating()) {
-            return context.irBuilder.CreateFNeg(rvalue, "negtmp");
-        } else {
-            return context.irBuilder.CreateNeg(rvalue, "negtmp");
-        }
-    } else if (prefixOperatorExpr->operatorName() != "+") {
-        printError("unknown built in prefix operator!",
-                   context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
-    }
-
-    return lvalue;
+    return nullptr;
 }
 
 llvm::Value *gulc::CodeGen::generatePostfixOperatorExpr(gulc::CodeGenContext &context, const gulc::PostfixOperatorExpr *postfixOperatorExpr) {

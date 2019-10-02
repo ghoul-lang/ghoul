@@ -3,6 +3,7 @@ int testFunc() {
 }
 
 int main() {
-    int* result = 2;
-    return result;
+    int result = 2;
+    int* test = &result;
+    return *test;
 }

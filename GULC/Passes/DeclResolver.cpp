@@ -335,7 +335,7 @@ void DeclResolver::processExpr(Expr *&expr) {
             processPostfixOperatorExpr(llvm::dyn_cast<PostfixOperatorExpr>(expr));
             break;
         case Expr::Kind::PotentialExplicitCast:
-            processPotentialExplicitCastExpr(llvm::dyn_cast<PotentialExplicitCastExpr>(expr));
+            processPotentialExplicitCastExpr(expr);
             break;
         case Expr::Kind::PrefixOperator:
             processPrefixOperatorExpr(llvm::dyn_cast<PrefixOperatorExpr>(expr));
@@ -1074,24 +1074,42 @@ void DeclResolver::processPostfixOperatorExpr(PostfixOperatorExpr *postfixOperat
     postfixOperatorExpr->resultType = deepCopyAndSimplifyType(postfixOperatorExpr->expr->resultType);
 }
 
-void DeclResolver::processPotentialExplicitCastExpr(PotentialExplicitCastExpr *potentialExplicitCastExpr) {
+void DeclResolver::processPotentialExplicitCastExpr(Expr*& expr) {
+    auto potentialExplicitCastExpr = llvm::dyn_cast<PotentialExplicitCastExpr>(expr);
+
     processExpr(potentialExplicitCastExpr->castType);
     processExpr(potentialExplicitCastExpr->castee);
+
+    if (!llvm::isa<ResolvedTypeRefExpr>(potentialExplicitCastExpr->castType)) {
+        printError("unknown type in explicit cast expression!",
+                   potentialExplicitCastExpr->startPosition(), potentialExplicitCastExpr->endPosition());
+    }
+
+    auto resolvedTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(potentialExplicitCastExpr->castType);
+    Type* resolvedType = resolvedTypeRef->resolvedType;
+
+    expr = new ExplicitCastExpr(potentialExplicitCastExpr->startPosition(), potentialExplicitCastExpr->endPosition(),
+                                resolvedType, potentialExplicitCastExpr->castee);
+
+    expr->resultType = deepCopyAndSimplifyType(resolvedType);
+
+    // Set the values we steal to nullptr then delete the old expression
+    resolvedTypeRef->resolvedType = nullptr;
+    potentialExplicitCastExpr->castee = nullptr;
+    delete potentialExplicitCastExpr;
 }
 
 void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorExpr) {
     processExpr(prefixOperatorExpr->expr);
 
     // TODO: Support operator overloading type resolution
+    // TODO: Support `sizeof`, `alignof`, `offsetof`, and `nameof`
     if (prefixOperatorExpr->operatorName() == "&") { // Address
-        prefixOperatorExpr->resultType = (new PointerType({}, {}, deepCopyAndSimplifyType(prefixOperatorExpr->expr->resultType)));
+        prefixOperatorExpr->resultType = new PointerType({}, {}, deepCopyAndSimplifyType(prefixOperatorExpr->expr->resultType));
     } else if (prefixOperatorExpr->operatorName() == "*") { // Dereference
         if (llvm::isa<PointerType>(prefixOperatorExpr->expr->resultType)) {
             auto pointerType = llvm::dyn_cast<PointerType>(prefixOperatorExpr->expr->resultType);
-            Type* dereferencedType = pointerType->pointToType;
-            pointerType->pointToType = nullptr;
-            delete pointerType;
-            prefixOperatorExpr->resultType = dereferencedType;
+            prefixOperatorExpr->resultType = deepCopyAndSimplifyType(pointerType->pointToType);
         } else {
             printError("cannot dereference non-pointer type `" + prefixOperatorExpr->expr->resultType->getString() + "`!",
                        prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
@@ -1113,6 +1131,7 @@ void DeclResolver::processStringLiteralExpr(StringLiteralExpr *stringLiteralExpr
 
 void DeclResolver::processTernaryExpr(TernaryExpr *ternaryExpr) {
     processExpr(ternaryExpr->condition);
+    // TODO: Verify both expressions are the same type
     processExpr(ternaryExpr->trueExpr);
     processExpr(ternaryExpr->falseExpr);
 }

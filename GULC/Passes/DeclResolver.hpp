@@ -96,7 +96,7 @@ namespace gulc {
         void processMemberAccessCallExpr(MemberAccessCallExpr* memberAccessCallExpr);
         void processParenExpr(ParenExpr* parenExpr);
         void processPostfixOperatorExpr(PostfixOperatorExpr* postfixOperatorExpr);
-        void processPotentialExplicitCastExpr(PotentialExplicitCastExpr* potentialExplicitCastExpr);
+        void processPotentialExplicitCastExpr(Expr*& expr);
         void processPrefixOperatorExpr(PrefixOperatorExpr* prefixOperatorExpr);
         void processResolvedTypeRefExpr(ResolvedTypeRefExpr* resolvedTypeRefExpr);
         void processStringLiteralExpr(StringLiteralExpr* stringLiteralExpr);
