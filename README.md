@@ -11,5 +11,3 @@ GUL borrows a lot of ideas from other languages. The current planned stand out f
  * Glass UI (inspired by old .NET project I worked on)
  * Interfaces can be added to any already defined type (interfaces are similar to Rust traits) (Rust?)
  * TODO: Add the rest of the features...
-
-License is not set in stone at the moment, it might change at any moment.
