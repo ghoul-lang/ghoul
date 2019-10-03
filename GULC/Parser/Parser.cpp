@@ -40,6 +40,8 @@
 #include <AST/Types/ImmutType.hpp>
 #include <AST/Exprs/LocalVariableDeclExpr.hpp>
 #include <AST/Types/PointerType.hpp>
+#include <AST/Types/ReferenceType.hpp>
+#include <AST/Types/RValueReferenceType.hpp>
 #include "Parser.hpp"
 
 using namespace gulc;
@@ -587,8 +589,13 @@ Type* Parser::parseTypeSuffix(Type* type) {
                 result = new PointerType(peekedToken.startPosition, peekedToken.endPosition, result);
                 break;
             case TokenType::AMPERSAND:
-                printError("references not yet supported!", peekedToken.startPosition, peekedToken.endPosition);
-                return nullptr;
+                _lexer.consumeType(TokenType::AMPERSAND);
+                result = new ReferenceType(peekedToken.startPosition, peekedToken.endPosition, result);
+                break;
+            case TokenType::AMPERSANDAMPERSAND:
+                _lexer.consumeType(TokenType::AMPERSANDAMPERSAND);
+                result = new RValueReferenceType(peekedToken.startPosition, peekedToken.endPosition, result);
+                break;
             default:
                 printError("custom type suffixes not yet supported!", peekedToken.startPosition,
                            peekedToken.endPosition);

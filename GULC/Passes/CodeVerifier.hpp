@@ -58,6 +58,7 @@ namespace gulc {
 
     private:
         bool canCastType(Type* to, Type* from, bool isExplicit);
+        bool typeIsAssignable(Type* checkType);
 
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
         void printWarning(const std::string& message, TextPosition startPosition, TextPosition endPosition);

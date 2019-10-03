@@ -23,7 +23,6 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
-//#include "llvm/Transforms/Utils.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
@@ -31,6 +30,10 @@
 #include <AST/Types/BuiltInType.hpp>
 #include <AST/Types/PointerType.hpp>
 #include <AST/Exprs/ParenExpr.hpp>
+#include <AST/Types/ReferenceType.hpp>
+#include <AST/Types/ConstType.hpp>
+#include <AST/Types/ImmutType.hpp>
+#include <AST/Types/MutType.hpp>
 #include "CodeGen.hpp"
 
 gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
@@ -134,6 +137,22 @@ llvm::Type *gulc::CodeGen::generateLlvmType(gulc::CodeGenContext& context, const
             // TODO: Is this right? What is the address space stuff?
             return llvm::PointerType::getUnqual(generateLlvmType(context, pointerType->pointToType));
         }
+        case gulc::Type::Kind::Reference: {
+            auto referenceType = llvm::dyn_cast<gulc::ReferenceType>(type);
+            return llvm::PointerType::getUnqual(generateLlvmType(context, referenceType->referenceToType));
+        }
+        case gulc::Type::Kind::Const: {
+            auto constType = llvm::dyn_cast<ConstType>(type);
+            return generateLlvmType(context, constType->pointToType);
+        }
+        case gulc::Type::Kind::Immut: {
+            auto immutType = llvm::dyn_cast<ImmutType>(type);
+            return generateLlvmType(context, immutType->pointToType);
+        }
+        case gulc::Type::Kind::Mut: {
+            auto mutType = llvm::dyn_cast<MutType>(type);
+            return generateLlvmType(context, mutType->pointToType);
+        }
         default:
             printError("type '" + type->getString() + "' not yet supported!",
                        context.fileAst, type->startPosition(), type->endPosition());
@@ -231,9 +250,7 @@ llvm::Value* gulc::CodeGen::generateExpr(CodeGenContext& context, const Expr* ex
         case gulc::Expr::Kind::Identifier:
             return generateIdentifierExpr(context, llvm::dyn_cast<IdentifierExpr>(expr));
         case gulc::Expr::Kind::ImplicitCast:
-            printError("implicit casts not yet supported!",
-                       context.fileAst, expr->startPosition(), expr->endPosition());
-            return nullptr;
+            return generateImplicitCastExpr(context, llvm::dyn_cast<ImplicitCastExpr>(expr));
         case gulc::Expr::Kind::IndexerCall:
             printError("indexer calls not yet supported!",
                        context.fileAst, expr->startPosition(), expr->endPosition());
@@ -320,6 +337,36 @@ void gulc::CodeGen::generateReturnStmt(gulc::CodeGenContext &context, const gulc
     } else {
         context.irBuilder.CreateRetVoid();
         return;
+    }
+}
+
+void gulc::CodeGen::generateLabeledStmt(gulc::CodeGenContext &context, const gulc::LabeledStmt *labeledStmt) {
+    // Curious why we can't just use normal labels...
+    llvm::BasicBlock* labelBody;
+
+    if (context.currentFunctionLabelsContains(labeledStmt->label())) {
+        labelBody = context.currentFunctionLabels[labeledStmt->label()];
+    } else {
+        labelBody = llvm::BasicBlock::Create(context.llvmContext, labeledStmt->label());
+        context.addCurrentFunctionLabel(labeledStmt->label(), labelBody);
+    }
+
+    // We have to explicitly branch to blocks for some reason...
+    context.irBuilder.CreateBr(labelBody);
+    addBlockAndSetInsertionPoint(context, labelBody);
+
+    if (labeledStmt->labeledStmt != nullptr) {
+        generateStmt(context, labeledStmt->labeledStmt, labeledStmt->label());
+    }
+}
+
+void gulc::CodeGen::generateGotoStmt(gulc::CodeGenContext &context, const gulc::GotoStmt *gotoStmt) {
+    if (context.currentFunctionLabelsContains(gotoStmt->label())) {
+        context.irBuilder.CreateBr(context.currentFunctionLabels[gotoStmt->label()]);
+    } else {
+        llvm::BasicBlock* newBasicBlock = llvm::BasicBlock::Create(context.llvmContext, gotoStmt->label());
+        context.irBuilder.CreateBr(newBasicBlock);
+        context.addCurrentFunctionLabel(gotoStmt->label(), newBasicBlock);
     }
 }
 
@@ -554,16 +601,28 @@ llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(gulc::CodeGenContext &con
     llvm::Value* leftValue = generateExpr(context, binaryOperatorExpr->leftValue);
     llvm::Value* rightValue = generateExpr(context, binaryOperatorExpr->rightValue);
 
+    gulc::Type* resultType = binaryOperatorExpr->resultType;
+
+    // Ignore the const, mut, and immut...
+    if (llvm::isa<ConstType>(resultType)) {
+        resultType = llvm::dyn_cast<ConstType>(resultType)->pointToType;
+    } else if (llvm::isa<ImmutType>(resultType)) {
+        resultType = llvm::dyn_cast<ImmutType>(resultType)->pointToType;
+    } else if (llvm::isa<MutType>(resultType)) {
+        resultType = llvm::dyn_cast<MutType>(resultType)->pointToType;
+    }
+
     // TODO: Support the `PointerType`
     bool isFloat = false;
     bool isSigned = false;
 
-    if (llvm::isa<BuiltInType>(binaryOperatorExpr->resultType)) {
-        auto builtInType = llvm::dyn_cast<BuiltInType>(binaryOperatorExpr->resultType);
+    if (llvm::isa<BuiltInType>(resultType)) {
+        auto builtInType = llvm::dyn_cast<BuiltInType>(resultType);
 
         isFloat = builtInType->isFloating();
         isSigned = builtInType->isSigned();
-    } else if (!llvm::isa<PointerType>(binaryOperatorExpr->resultType)) {
+    } else if (!(llvm::isa<PointerType>(resultType) ||
+                 llvm::isa<ReferenceType>(resultType))) {
         printError("unknown binary operator expression!",
                    context.fileAst, binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
         return nullptr;
@@ -707,36 +766,6 @@ llvm::Value *gulc::CodeGen::generateFloatLiteralExpr(gulc::CodeGenContext &conte
     return nullptr;
 }
 
-void gulc::CodeGen::generateLabeledStmt(gulc::CodeGenContext &context, const gulc::LabeledStmt *labeledStmt) {
-    // Curious why we can't just use normal labels...
-    llvm::BasicBlock* labelBody;
-
-    if (context.currentFunctionLabelsContains(labeledStmt->label())) {
-        labelBody = context.currentFunctionLabels[labeledStmt->label()];
-    } else {
-        labelBody = llvm::BasicBlock::Create(context.llvmContext, labeledStmt->label());
-        context.addCurrentFunctionLabel(labeledStmt->label(), labelBody);
-    }
-
-    // We have to explicitly branch to blocks for some reason...
-    context.irBuilder.CreateBr(labelBody);
-    addBlockAndSetInsertionPoint(context, labelBody);
-
-    if (labeledStmt->labeledStmt != nullptr) {
-        generateStmt(context, labeledStmt->labeledStmt, labeledStmt->label());
-    }
-}
-
-void gulc::CodeGen::generateGotoStmt(gulc::CodeGenContext &context, const gulc::GotoStmt *gotoStmt) {
-    if (context.currentFunctionLabelsContains(gotoStmt->label())) {
-        context.irBuilder.CreateBr(context.currentFunctionLabels[gotoStmt->label()]);
-    } else {
-        llvm::BasicBlock* newBasicBlock = llvm::BasicBlock::Create(context.llvmContext, gotoStmt->label());
-        context.irBuilder.CreateBr(newBasicBlock);
-        context.addCurrentFunctionLabel(gotoStmt->label(), newBasicBlock);
-    }
-}
-
 llvm::Value *gulc::CodeGen::generateLocalVariableDeclExpr(gulc::CodeGenContext &context, const gulc::LocalVariableDeclExpr *localVariableDeclExpr) {
     return context.addLocalVariable(localVariableDeclExpr->name(), generateLlvmType(context, localVariableDeclExpr->resultType));
 }
@@ -752,6 +781,12 @@ llvm::Value *gulc::CodeGen::generateIdentifierExpr(gulc::CodeGenContext &context
     }
 
     return nullptr;
+}
+
+llvm::Value *gulc::CodeGen::generateImplicitCastExpr(gulc::CodeGenContext &context, const gulc::ImplicitCastExpr *implicitCastExpr) {
+    llvm::Value* result = generateExpr(context, implicitCastExpr->castee);
+    castValue(context, implicitCastExpr->castType, implicitCastExpr->castee->resultType, result);
+    return result;
 }
 
 llvm::Value *gulc::CodeGen::generateLValueToRValue(gulc::CodeGenContext &context, const gulc::LValueToRValueExpr *lValueToRValueExpr) {
@@ -786,8 +821,19 @@ llvm::Value *gulc::CodeGen::generateFunctionCallExpr(gulc::CodeGenContext &conte
 }
 
 llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(gulc::CodeGenContext &context, const gulc::PrefixOperatorExpr *prefixOperatorExpr) {
-    if (llvm::isa<gulc::BuiltInType>(prefixOperatorExpr->expr->resultType)) {
-        auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(prefixOperatorExpr->expr->resultType);
+    gulc::Type* exprResultType = prefixOperatorExpr->expr->resultType;
+
+    // Ignore the const, mut, and immut...
+    if (llvm::isa<ConstType>(exprResultType)) {
+        exprResultType = llvm::dyn_cast<ConstType>(exprResultType)->pointToType;
+    } else if (llvm::isa<ImmutType>(exprResultType)) {
+        exprResultType = llvm::dyn_cast<ImmutType>(exprResultType)->pointToType;
+    } else if (llvm::isa<MutType>(exprResultType)) {
+        exprResultType = llvm::dyn_cast<MutType>(exprResultType)->pointToType;
+    }
+
+    if (llvm::isa<gulc::BuiltInType>(exprResultType)) {
+        auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(exprResultType);
 
         llvm::Value* lvalue = generateExpr(context, prefixOperatorExpr->expr);
         llvm::Value* rvalue = context.irBuilder.CreateLoad(lvalue, "l2r");
@@ -814,18 +860,18 @@ llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(gulc::CodeGenContext &con
             } else {
                 return context.irBuilder.CreateNeg(rvalue, "negtmp");
             }
-        } else if (prefixOperatorExpr->operatorName() == "&") {
+        } else if (prefixOperatorExpr->operatorName() == "&" || prefixOperatorExpr->operatorName() == ".ref") {
             // TODO: Should we try to do error checking here?
             return lvalue;
         } else if (prefixOperatorExpr->operatorName() != "+") {
-            printError("unknown built in prefix operator!",
+            printError("unknown built in prefix operator '" + prefixOperatorExpr->operatorName() +  "'!",
                        context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
         }
 
         return lvalue;
-    } else if (llvm::isa<PointerType>(prefixOperatorExpr->expr->resultType)) {
-        llvm::Value* lvalue = generateExpr(context, prefixOperatorExpr->expr);
-        llvm::Value* rvalue = context.irBuilder.CreateLoad(lvalue, "l2r");
+    } else if (llvm::isa<PointerType>(exprResultType)) {
+        llvm::Value *lvalue = generateExpr(context, prefixOperatorExpr->expr);
+        llvm::Value *rvalue = context.irBuilder.CreateLoad(lvalue, "l2r");
 
         if (prefixOperatorExpr->operatorName() == "*") {
             return context.irBuilder.CreateLoad(rvalue, "deref");
@@ -834,7 +880,21 @@ llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(gulc::CodeGenContext &con
             printError("increment and decrement operators not yet supported on pointer types!",
                        context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
         } else {
-            printError("unknown prefix operator used on pointer type!",
+            printError("unknown prefix operator '" + prefixOperatorExpr->operatorName() + "' used on pointer type!",
+                       context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+        }
+    } else if (llvm::isa<ReferenceType>(exprResultType)) {
+        llvm::Value *lvalue = generateExpr(context, prefixOperatorExpr->expr);
+        llvm::Value *rvalue = context.irBuilder.CreateLoad(lvalue, "l2r");
+
+        if (prefixOperatorExpr->operatorName() == ".deref") {
+            return context.irBuilder.CreateLoad(rvalue, "deref");
+        } else if (prefixOperatorExpr->operatorName() == "++" || prefixOperatorExpr->operatorName() == "--") {
+            // TODO: We need to know the size of a pointer to support this...
+            printError("increment and decrement operators not yet supported on reference types!",
+                       context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+        } else {
+            printError("unknown prefix operator '" + prefixOperatorExpr->operatorName() + "' used on reference type!",
                        context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
         }
     } else {
@@ -879,4 +939,80 @@ llvm::Value *gulc::CodeGen::generatePostfixOperatorExpr(gulc::CodeGenContext &co
     }
 
     return rvalue;
+}
+
+void gulc::CodeGen::castValue(CodeGenContext& context, gulc::Type *to, gulc::Type *from, llvm::Value*& value) {
+    // We ignore const, mut, and immut here since LLVM doesn't have any concept of these...
+    if (llvm::isa<ConstType>(to)) {
+        to = llvm::dyn_cast<ConstType>(to)->pointToType;
+    } else if (llvm::isa<MutType>(to)) {
+        to = llvm::dyn_cast<MutType>(to)->pointToType;
+    } else if (llvm::isa<ImmutType>(to)) {
+        to = llvm::dyn_cast<ImmutType>(to)->pointToType;
+    }
+
+    if (llvm::isa<ConstType>(from)) {
+        from = llvm::dyn_cast<ConstType>(from)->pointToType;
+    } else if (llvm::isa<MutType>(from)) {
+        from = llvm::dyn_cast<MutType>(from)->pointToType;
+    } else if (llvm::isa<ImmutType>(from)) {
+        from = llvm::dyn_cast<ImmutType>(from)->pointToType;
+    }
+
+    if (llvm::isa<BuiltInType>(from)) {
+        auto fromBuiltIn = llvm::dyn_cast<BuiltInType>(from);
+
+        if (llvm::isa<BuiltInType>(to)) {
+            auto toBuiltIn = llvm::dyn_cast<BuiltInType>(to);
+
+            if (fromBuiltIn->isFloating()) {
+                if (toBuiltIn->isFloating()) {
+                    if (toBuiltIn->size() > fromBuiltIn->size()) {
+                        value = context.irBuilder.CreateFPExt(value, generateLlvmType(context, to), "fpext");
+                        return;
+                    } else {
+                        value = context.irBuilder.CreateFPTrunc(value, generateLlvmType(context, to), "fptrunc");
+                        return;
+                    }
+                } else if (toBuiltIn->isSigned()) {
+                    value = context.irBuilder.CreateFPToSI(value, generateLlvmType(context, to), "fp2si");
+                    return;
+                } else {
+                    value = context.irBuilder.CreateFPToUI(value, generateLlvmType(context, to), "fp2ui");
+                    return;
+                }
+            } else if (fromBuiltIn->isSigned()) {
+                if (toBuiltIn->isFloating()) {
+                    value = context.irBuilder.CreateSIToFP(value, generateLlvmType(context, to), "si2fp");
+                    return;
+                } else {
+                    // TODO: I'm not sure if the `isSigned` is meant for `value` or `destTy`? Assuming value...
+                    value = context.irBuilder.CreateIntCast(value, generateLlvmType(context, to), fromBuiltIn->isSigned(), "si2int");
+                    return;
+                }
+            } else {
+                if (toBuiltIn->isFloating()) {
+                    value = context.irBuilder.CreateUIToFP(value, generateLlvmType(context, to), "ui2fp");
+                    return;
+                } else {
+                    // TODO: I'm not sure if the `isSigned` is meant for `value` or `destTy`? Assuming value...
+                    value = context.irBuilder.CreateIntCast(value, generateLlvmType(context, to), fromBuiltIn->isSigned(), "ui2int");
+                    return;
+                }
+            }
+        } else if (llvm::isa<PointerType>(to)) {
+            if (fromBuiltIn->isFloating()) {
+                printError("[INTERNAL] casting from a float to a pointer is NOT supported!",
+                           context.fileAst, to->startPosition(), to->endPosition());
+                return;
+            }
+
+            value = context.irBuilder.CreateIntToPtr(value, generateLlvmType(context, to), "int2ptr");
+            return;
+        }
+    }
+
+    // TODO: We need to have the start and end positions passed to us
+    printError("casting to type `" + to->getString() + "` from type `" + from->getString() + "` is not supported!",
+               context.fileAst, to->startPosition(), to->endPosition());
 }

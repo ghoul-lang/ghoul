@@ -31,7 +31,9 @@ namespace gulc {
             FunctionPointer,
             Const,
             Mut,
-            Immut
+            Immut,
+            Reference,
+            RValueReference
         };
 
         Kind getTypeKind() const { return _kind; }

@@ -25,6 +25,8 @@
 #include <AST/Types/ConstType.hpp>
 #include <AST/Types/MutType.hpp>
 #include <AST/Types/ImmutType.hpp>
+#include <AST/Types/ReferenceType.hpp>
+#include <AST/Types/RValueReferenceType.hpp>
 #include "DeclResolver.hpp"
 
 using namespace gulc;
@@ -82,6 +84,9 @@ bool DeclResolver::resolveType(Type *&type) {
     } else if (type->getTypeKind() == Type::Kind::Pointer) {
         auto pointerType = llvm::dyn_cast<PointerType>(type);
         return resolveType(pointerType->pointToType);
+    } else if (type->getTypeKind() == Type::Kind::Reference) {
+        auto referenceType = llvm::dyn_cast<ReferenceType>(type);
+        return resolveType(referenceType->referenceToType);
     }
 
     return false;
@@ -126,6 +131,12 @@ bool DeclResolver::getTypesAreSame(const Type* type1, const Type* type2) {
                 auto pointerType2 = llvm::dyn_cast<PointerType>(type2);
 
                 return getTypesAreSame(pointerType1->pointToType, pointerType2->pointToType);
+            }
+            case Type::Kind::Reference: {
+                auto refType1 = llvm::dyn_cast<ReferenceType>(type1);
+                auto refType2 = llvm::dyn_cast<ReferenceType>(type2);
+
+                return getTypesAreSame(refType1->referenceToType, refType2->referenceToType);
             }
 			case Type::Kind::FunctionPointer: {
 				auto funcPointerType1 = llvm::dyn_cast<FunctionPointerType>(type1);
@@ -208,6 +219,14 @@ Type *DeclResolver::deepCopyAndSimplifyType(const Type *type) {
         case Type::Kind::TemplateTypename: {
             auto templateTypenameType = llvm::dyn_cast<TemplateTypenameType>(type);
             return new TemplateTypenameType(templateTypenameType->startPosition(), templateTypenameType->endPosition());
+        }
+        case Type::Kind::Reference: {
+            auto referenceType = llvm::dyn_cast<ReferenceType>(type);
+            return new ReferenceType(referenceType->startPosition(), referenceType->endPosition(), deepCopyAndSimplifyType(referenceType->referenceToType));
+        }
+        case Type::Kind::RValueReference: {
+            auto rvalueReferenceType = llvm::dyn_cast<RValueReferenceType>(type);
+            return new ReferenceType(rvalueReferenceType->startPosition(), rvalueReferenceType->endPosition(), deepCopyAndSimplifyType(rvalueReferenceType->referenceToType));
         }
         case Type::Kind::Unresolved: {
             std::cout << "gulc [INTERNAL] resolver error: attempted to deep copy unresolved type, operation not supported!" << std::endl;
@@ -507,7 +526,41 @@ void DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
     if (returnStmt->hasReturnValue()) {
         processExpr(returnStmt->returnValue);
 
-        if (!getTypesAreSame(returnStmt->returnValue->resultType, returnType)) {
+        bool typesAreSame = false;
+
+        // If the return value isn't a reference but the return type of the function is we need to create a reference? This should probably be illegal?
+        if (!(llvm::isa<ReferenceType>(returnStmt->returnValue->resultType) ||
+              llvm::isa<RValueReferenceType>(returnStmt->returnValue->resultType))) {
+            if (llvm::isa<ReferenceType>(returnType)) {
+                auto referenceType = llvm::dyn_cast<ReferenceType>(returnType);
+                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, referenceType->referenceToType);
+            } else if (llvm::isa<RValueReferenceType>(returnType)) {
+                auto referenceType = llvm::dyn_cast<RValueReferenceType>(returnType);
+                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, referenceType->referenceToType);
+            } else {
+                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType);
+            }
+        // If the return type of the function isn't a reference but the result value type is then we dereference the result value
+        } else if (!(llvm::isa<ReferenceType>(returnType) ||
+                     llvm::isa<RValueReferenceType>(returnType))) {
+            if (llvm::isa<ReferenceType>(returnStmt->returnValue->resultType)) {
+                auto referenceType = llvm::dyn_cast<ReferenceType>(returnStmt->returnValue->resultType);
+                typesAreSame = getTypesAreSame(returnType, referenceType->referenceToType);
+            } else if (llvm::isa<RValueReferenceType>(returnStmt->returnValue->resultType)) {
+                auto referenceType = llvm::dyn_cast<RValueReferenceType>(returnStmt->returnValue->resultType);
+                typesAreSame = getTypesAreSame(returnType, referenceType->referenceToType);
+            } else {
+                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType);
+            }
+        } else {
+            typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType);
+        }
+
+        if (!(llvm::isa<ReferenceType>(returnType) || llvm::isa<RValueReferenceType>(returnType))) {
+            convertLValueToRValue(returnStmt->returnValue);
+        }
+
+        if (!typesAreSame) {
             // We will handle this in the verifier.
             auto implicitCastExpr = new ImplicitCastExpr(returnStmt->returnValue->startPosition(),
                                                          returnStmt->returnValue->endPosition(),
@@ -518,8 +571,6 @@ void DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
 
             returnStmt->returnValue = implicitCastExpr;
         }
-
-        convertLValueToRValue(returnStmt->returnValue);
     }
 }
 
@@ -598,7 +649,83 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
                                                             localVarTypeRef->endPosition(),
                                                             localVarTypeRef->resolvedType);
 
-            auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition(), localVarTypeRef, varName);
+            auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(),
+                                                              binaryOperatorExpr->endPosition(), localVarTypeRef,
+                                                              varName);
+
+            processLocalVariableDeclExpr(localVarDeclExpr);
+            expr = localVarDeclExpr;
+
+            // Delete the binary operator expression (this will delete the left and right expressions)
+            delete binaryOperatorExpr;
+
+            return;
+        } else if (binaryOperatorExpr->operatorName() == "&") {
+            if (!llvm::isa<IdentifierExpr>(binaryOperatorExpr->rightValue)) {
+                printError("expected local variable name after reference type!",
+                           binaryOperatorExpr->rightValue->startPosition(),
+                           binaryOperatorExpr->rightValue->endPosition());
+                return;
+            }
+
+            auto localVarTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue);
+            auto varNameExpr = llvm::dyn_cast<IdentifierExpr>(binaryOperatorExpr->rightValue);
+
+            if (varNameExpr->hasTemplateArguments()) {
+                printError("local variable name cannot have template arguments!",
+                           varNameExpr->startPosition(),
+                           varNameExpr->endPosition());
+                return;
+            }
+
+            binaryOperatorExpr->leftValue = nullptr;
+
+            std::string varName = varNameExpr->name();
+
+            localVarTypeRef->resolvedType = new ReferenceType(localVarTypeRef->startPosition(),
+                                                            localVarTypeRef->endPosition(),
+                                                            localVarTypeRef->resolvedType);
+
+            auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(),
+                                                              binaryOperatorExpr->endPosition(), localVarTypeRef,
+                                                              varName);
+
+            processLocalVariableDeclExpr(localVarDeclExpr);
+            expr = localVarDeclExpr;
+
+            // Delete the binary operator expression (this will delete the left and right expressions)
+            delete binaryOperatorExpr;
+
+            return;
+        } else if (binaryOperatorExpr->operatorName() == "&&") {
+            if (!llvm::isa<IdentifierExpr>(binaryOperatorExpr->rightValue)) {
+                printError("expected local variable name after rvalue reference type!",
+                           binaryOperatorExpr->rightValue->startPosition(),
+                           binaryOperatorExpr->rightValue->endPosition());
+                return;
+            }
+
+            auto localVarTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue);
+            auto varNameExpr = llvm::dyn_cast<IdentifierExpr>(binaryOperatorExpr->rightValue);
+
+            if (varNameExpr->hasTemplateArguments()) {
+                printError("local variable name cannot have template arguments!",
+                           varNameExpr->startPosition(),
+                           varNameExpr->endPosition());
+                return;
+            }
+
+            binaryOperatorExpr->leftValue = nullptr;
+
+            std::string varName = varNameExpr->name();
+
+            localVarTypeRef->resolvedType = new RValueReferenceType(localVarTypeRef->startPosition(),
+                                                              localVarTypeRef->endPosition(),
+                                                              localVarTypeRef->resolvedType);
+
+            auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(),
+                                                              binaryOperatorExpr->endPosition(), localVarTypeRef,
+                                                              varName);
 
             processLocalVariableDeclExpr(localVarDeclExpr);
             expr = localVarDeclExpr;
@@ -617,12 +744,25 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
 
     processExpr(binaryOperatorExpr->rightValue);
 
-    convertLValueToRValue(binaryOperatorExpr->rightValue);
-
-    Type* leftType = binaryOperatorExpr->leftValue->resultType;
-    Type* rightType = binaryOperatorExpr->rightValue->resultType;
-
     if (binaryOperatorExpr->isBuiltInAssignmentOperator()) {
+        Type* leftType = binaryOperatorExpr->leftValue->resultType;
+        Type* rightType = binaryOperatorExpr->rightValue->resultType;
+
+        bool leftIsReference = llvm::isa<ReferenceType>(leftType) || llvm::isa<RValueReferenceType>(leftType);
+        bool rightIsReference = llvm::isa<ReferenceType>(rightType) || llvm::isa<RValueReferenceType>(rightType);
+
+        // If the left side of the assignment isn't a reference then we convert the right side from an lvalue/reference to an rvalue
+        if (!leftIsReference) {
+            convertLValueToRValue(binaryOperatorExpr->rightValue);
+            rightType = binaryOperatorExpr->rightValue->resultType;
+        } else if (!rightIsReference) {
+            binaryOperatorExpr->rightValue = new PrefixOperatorExpr(binaryOperatorExpr->rightValue->startPosition(),
+                                                                    binaryOperatorExpr->rightValue->endPosition(),
+                                                                    ".ref", binaryOperatorExpr->rightValue);
+            processExpr(binaryOperatorExpr->rightValue);
+            rightType = binaryOperatorExpr->rightValue->resultType;
+        }
+
         if (!getTypesAreSame(leftType, rightType)) {
             binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
                                                                   binaryOperatorExpr->rightValue->endPosition(),
@@ -679,6 +819,10 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
         return;
     } else {
         convertLValueToRValue(binaryOperatorExpr->leftValue);
+        convertLValueToRValue(binaryOperatorExpr->rightValue);
+
+        Type* leftType = binaryOperatorExpr->leftValue->resultType;
+        Type* rightType = binaryOperatorExpr->rightValue->resultType;
 
         if (llvm::isa<BuiltInType>(leftType) && llvm::isa<BuiltInType>(rightType)) {
             auto leftBuiltInType = llvm::dyn_cast<BuiltInType>(leftType);
@@ -1130,6 +1274,22 @@ void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorE
                        prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
             return;
         }
+    } else if (prefixOperatorExpr->operatorName() == ".ref") {
+        if (!llvm::isa<IdentifierExpr>(prefixOperatorExpr->expr)) {
+            printError("cannot create reference to non-variable call expressions!",
+                       prefixOperatorExpr->expr->startPosition(), prefixOperatorExpr->expr->endPosition());
+            return;
+        }
+
+        prefixOperatorExpr->resultType = new ReferenceType({}, {}, deepCopyAndSimplifyType(prefixOperatorExpr->expr->resultType));
+    } else if (prefixOperatorExpr->operatorName() == ".deref") {
+        if (llvm::isa<ReferenceType>(prefixOperatorExpr->expr->resultType)) {
+            auto referenceType = llvm::dyn_cast<ReferenceType>(prefixOperatorExpr->expr->resultType);
+            prefixOperatorExpr->resultType = deepCopyAndSimplifyType(referenceType->referenceToType);
+        } else {
+            printError("[INTERNAL] expected reference type!", prefixOperatorExpr->expr->startPosition(), prefixOperatorExpr->expr->endPosition());
+            return;
+        }
     } else {
         prefixOperatorExpr->resultType = deepCopyAndSimplifyType(prefixOperatorExpr->expr->resultType);
     }
@@ -1169,7 +1329,12 @@ void DeclResolver::processUnresolvedTypeRefExpr(Expr *&expr) {
 
 void DeclResolver::convertLValueToRValue(Expr*& potentialLValue) {
     // TODO: IdentifierExpr isn't the only thing we will have to do this for, right?
-    if (llvm::isa<IdentifierExpr>(potentialLValue)) {
+    if (llvm::isa<ReferenceType>(potentialLValue->resultType)) {
+        auto newPotentialReference = new PrefixOperatorExpr(potentialLValue->startPosition(), potentialLValue->endPosition(),
+                                                            ".deref", potentialLValue);
+        processPrefixOperatorExpr(newPotentialReference);
+        potentialLValue = newPotentialReference;
+    } else if (llvm::isa<IdentifierExpr>(potentialLValue)) {
         Expr* newRValue = new LValueToRValueExpr(potentialLValue->startPosition(), potentialLValue->endPosition(), potentialLValue);
         newRValue->resultType = deepCopyAndSimplifyType(potentialLValue->resultType);
         potentialLValue = newRValue;

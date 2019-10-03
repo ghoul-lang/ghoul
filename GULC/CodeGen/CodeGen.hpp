@@ -40,6 +40,7 @@
 #include <AST/Exprs/PostfixOperatorExpr.hpp>
 #include <AST/Stmts/BreakStmt.hpp>
 #include <AST/Stmts/ContinueStmt.hpp>
+#include <AST/Exprs/ImplicitCastExpr.hpp>
 #include "Module.hpp"
 
 namespace gulc {
@@ -202,11 +203,13 @@ namespace gulc {
         llvm::Value* generateFloatLiteralExpr(CodeGenContext& context, const FloatLiteralExpr* floatLiteralExpr);
         llvm::Value* generateLocalVariableDeclExpr(CodeGenContext& context, const LocalVariableDeclExpr* localVariableDeclExpr);
         llvm::Value* generateIdentifierExpr(CodeGenContext& context, const IdentifierExpr* identifierExpr);
+        llvm::Value* generateImplicitCastExpr(CodeGenContext& context, const ImplicitCastExpr* implicitCastExpr);
         llvm::Value* generateLValueToRValue(CodeGenContext& context, const LValueToRValueExpr* lValueToRValueExpr);
         llvm::Value* generateFunctionCallExpr(CodeGenContext& context, const FunctionCallExpr* functionCallExpr);
         llvm::Value* generatePrefixOperatorExpr(CodeGenContext& context, const PrefixOperatorExpr* prefixOperatorExpr);
         llvm::Value* generatePostfixOperatorExpr(CodeGenContext& context, const PostfixOperatorExpr* postfixOperatorExpr);
 
+        void castValue(CodeGenContext& context, gulc::Type* to, gulc::Type* from, llvm::Value*& value);
     };
 }
 
