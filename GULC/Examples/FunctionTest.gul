@@ -1,9 +1,13 @@
-int testFunc() {
-    return 12;
+int test(int i) {
+    return i;
+}
+
+int test(const int i) {
+    return i;
 }
 
 int main() {
     const int result = 2;
-    int const& test = result;
+    int const &mut test = result;
     return test;
 }

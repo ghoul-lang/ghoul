@@ -74,12 +74,54 @@ bool DeclResolver::resolveType(Type *&type) {
         }
     } else if (type->getTypeKind() == Type::Kind::Const) {
         auto constType = llvm::dyn_cast<ConstType>(type);
+
+        if (llvm::isa<ConstType>(constType->pointToType)) {
+            printWarning("duplicate `const` qualifier not needed!",
+                         constType->startPosition(), constType->endPosition());
+        } else if (llvm::isa<MutType>(constType->pointToType)) {
+            printError("`const` and `mut` qualifiers are not mixable!",
+                       constType->startPosition(), constType->endPosition());
+            return false;
+        } else if (llvm::isa<ImmutType>(constType->pointToType)) {
+            printError("`const` and `immut` qualifiers are not mixable!",
+                       constType->startPosition(), constType->endPosition());
+            return false;
+        }
+
         return resolveType(constType->pointToType);
     } else if (type->getTypeKind() == Type::Kind::Mut) {
         auto mutType = llvm::dyn_cast<MutType>(type);
+
+        if (llvm::isa<ConstType>(mutType->pointToType)) {
+            printError("`mut` and `const` qualifiers are not mixable!",
+                       mutType->startPosition(), mutType->endPosition());
+            return false;
+        } else if (llvm::isa<MutType>(mutType->pointToType)) {
+            printWarning("duplicate `mut` qualifier not needed!",
+                         mutType->startPosition(), mutType->endPosition());
+        } else if (llvm::isa<ImmutType>(mutType->pointToType)) {
+            printError("`mut` and `immut` qualifiers are not mixable!",
+                       mutType->startPosition(), mutType->endPosition());
+            return false;
+        }
+
         return resolveType(mutType->pointToType);
     } else if (type->getTypeKind() == Type::Kind::Immut) {
         auto immutType = llvm::dyn_cast<ImmutType>(type);
+
+        if (llvm::isa<ConstType>(immutType->pointToType)) {
+            printError("`immut` and `const` qualifiers are not mixable!",
+                       immutType->startPosition(), immutType->endPosition());
+            return false;
+        } else if (llvm::isa<MutType>(immutType->pointToType)) {
+            printError("`immut` and `mut` qualifiers are not mixable!",
+                       immutType->startPosition(), immutType->endPosition());
+            return false;
+        } else if (llvm::isa<ImmutType>(immutType->pointToType)) {
+            printWarning("duplicate `immut` qualifier not needed!",
+                         immutType->startPosition(), immutType->endPosition());
+        }
+
         return resolveType(immutType->pointToType);
     } else if (type->getTypeKind() == Type::Kind::Pointer) {
         auto pointerType = llvm::dyn_cast<PointerType>(type);
@@ -93,26 +135,27 @@ bool DeclResolver::resolveType(Type *&type) {
 }
 
 // TODO: Should we just combine with `getTypeGreaterThan` as a `compareTypes`?
-bool DeclResolver::getTypesAreSame(const Type* type1, const Type* type2) {
+// TODO: `ignoreQualifiers` should only ignore the first qualifiers...
+bool DeclResolver::getTypesAreSame(const Type* type1, const Type* type2, bool ignoreQualifiers) {
     if (type1->getTypeKind() == type2->getTypeKind()) {
         switch (type1->getTypeKind()) {
             case Type::Kind::Const: {
                 auto constType1 = llvm::dyn_cast<ConstType>(type1);
                 auto constType2 = llvm::dyn_cast<ConstType>(type2);
 
-                return getTypesAreSame(constType1->pointToType, constType2->pointToType);
+                return getTypesAreSame(constType1->pointToType, constType2->pointToType, ignoreQualifiers);
             }
             case Type::Kind::Mut: {
                 auto mutType1 = llvm::dyn_cast<MutType>(type1);
                 auto mutType2 = llvm::dyn_cast<MutType>(type2);
 
-                return getTypesAreSame(mutType1->pointToType, mutType2->pointToType);
+                return getTypesAreSame(mutType1->pointToType, mutType2->pointToType, ignoreQualifiers);
             }
             case Type::Kind::Immut: {
                 auto immutType1 = llvm::dyn_cast<ImmutType>(type1);
                 auto immutType2 = llvm::dyn_cast<ImmutType>(type2);
 
-                return getTypesAreSame(immutType1->pointToType, immutType2->pointToType);
+                return getTypesAreSame(immutType1->pointToType, immutType2->pointToType, ignoreQualifiers);
             }
             case Type::Kind::BuiltIn: {
                 auto builtInType1 = llvm::dyn_cast<BuiltInType>(type1);
@@ -124,25 +167,25 @@ bool DeclResolver::getTypesAreSame(const Type* type1, const Type* type2) {
                 auto pointerType1 = llvm::dyn_cast<PointerType>(type1);
                 auto pointerType2 = llvm::dyn_cast<PointerType>(type2);
 
-                return getTypesAreSame(pointerType1->pointToType, pointerType2->pointToType);
+                return getTypesAreSame(pointerType1->pointToType, pointerType2->pointToType, ignoreQualifiers);
             }
             case Type::Kind::Pointer: {
                 auto pointerType1 = llvm::dyn_cast<PointerType>(type1);
                 auto pointerType2 = llvm::dyn_cast<PointerType>(type2);
 
-                return getTypesAreSame(pointerType1->pointToType, pointerType2->pointToType);
+                return getTypesAreSame(pointerType1->pointToType, pointerType2->pointToType, ignoreQualifiers);
             }
             case Type::Kind::Reference: {
                 auto refType1 = llvm::dyn_cast<ReferenceType>(type1);
                 auto refType2 = llvm::dyn_cast<ReferenceType>(type2);
 
-                return getTypesAreSame(refType1->referenceToType, refType2->referenceToType);
+                return getTypesAreSame(refType1->referenceToType, refType2->referenceToType, ignoreQualifiers);
             }
 			case Type::Kind::FunctionPointer: {
 				auto funcPointerType1 = llvm::dyn_cast<FunctionPointerType>(type1);
 				auto funcPointerType2 = llvm::dyn_cast<FunctionPointerType>(type2);
 
-				if (!getTypesAreSame(funcPointerType1->resultType, funcPointerType2->resultType)) {
+				if (!getTypesAreSame(funcPointerType1->resultType, funcPointerType2->resultType, ignoreQualifiers)) {
 					return false;
 				}
 
@@ -152,7 +195,7 @@ bool DeclResolver::getTypesAreSame(const Type* type1, const Type* type2) {
 
 				if (!funcPointerType1->paramTypes.empty()) {
 					for (std::size_t i = 0; i < funcPointerType1->paramTypes.size(); ++i) {
-						if (!getTypesAreSame(funcPointerType1->paramTypes[i], funcPointerType2->paramTypes[i])) {
+						if (!getTypesAreSame(funcPointerType1->paramTypes[i], funcPointerType2->paramTypes[i], ignoreQualifiers)) {
 							return false;
 						}
 					}
@@ -168,9 +211,53 @@ bool DeclResolver::getTypesAreSame(const Type* type1, const Type* type2) {
                 return false;
             }
         }
+    } else if (ignoreQualifiers) { // Types are not the same...
+        bool typeChanged = false;
+
+        if (llvm::isa<MutType>(type1)) {
+            type1 = llvm::dyn_cast<MutType>(type1)->pointToType;
+            typeChanged = true;
+        } else if (llvm::isa<ConstType>(type1)) {
+            type1 = llvm::dyn_cast<ConstType>(type1)->pointToType;
+            typeChanged = true;
+        } else if (llvm::isa<ImmutType>(type1)) {
+            type1 = llvm::dyn_cast<ImmutType>(type1)->pointToType;
+            typeChanged = true;
+        }
+
+        if (llvm::isa<MutType>(type2)) {
+            type2 = llvm::dyn_cast<MutType>(type2)->pointToType;
+            typeChanged = true;
+        } else if (llvm::isa<ConstType>(type2)) {
+            type2 = llvm::dyn_cast<ConstType>(type2)->pointToType;
+            typeChanged = true;
+        } else if (llvm::isa<ImmutType>(type2)) {
+            type2 = llvm::dyn_cast<ImmutType>(type2)->pointToType;
+            typeChanged = true;
+        }
+
+        if (typeChanged) {
+            return getTypesAreSame(type1, type2, ignoreQualifiers);
+        }
     }
 
     return false;
+}
+
+bool DeclResolver::shouldCastType(const Type* to, const Type* from) {
+    return false;
+}
+
+bool DeclResolver::getTypeIsReference(const Type* check) {
+    if (llvm::isa<MutType>(check)) {
+        check = llvm::dyn_cast<MutType>(check)->pointToType;
+    } else if (llvm::isa<ConstType>(check)) {
+        check = llvm::dyn_cast<ConstType>(check)->pointToType;
+    } else if (llvm::isa<ImmutType>(check)) {
+        check = llvm::dyn_cast<ImmutType>(check)->pointToType;
+    }
+
+    return llvm::isa<ReferenceType>(check) || llvm::isa<RValueReferenceType>(check);
 }
 
 Type *DeclResolver::deepCopyAndSimplifyType(const Type *type) {
@@ -240,6 +327,11 @@ Type *DeclResolver::deepCopyAndSimplifyType(const Type *type) {
     return nullptr;
 }
 
+bool DeclResolver::checkFunctionExists(FunctionDecl *function, bool nameAmbiguous) {
+
+    return false;
+}
+
 void DeclResolver::printError(const std::string &message, TextPosition startPosition, TextPosition endPosition) {
     std::cout << "gulc resolver error[" << currentFileAst->filePath() << ", "
                                      "{" << startPosition.line << ", " << startPosition.column << "} "
@@ -247,6 +339,14 @@ void DeclResolver::printError(const std::string &message, TextPosition startPosi
               << message
               << std::endl;
     std::exit(1);
+}
+
+void DeclResolver::printWarning(const std::string &message, TextPosition startPosition, TextPosition endPosition) {
+    std::cout << "gulc warning[" << currentFileAst->filePath() << ", "
+                              "{" << startPosition.line << ", " << startPosition.column << "} "
+                              "to {" << endPosition.line << ", " << endPosition.column << "}]: "
+              << message
+              << std::endl;
 }
 
 void DeclResolver::printDebugWarning(const std::string &message) {
@@ -529,34 +629,32 @@ void DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
         bool typesAreSame = false;
 
         // If the return value isn't a reference but the return type of the function is we need to create a reference? This should probably be illegal?
-        if (!(llvm::isa<ReferenceType>(returnStmt->returnValue->resultType) ||
-              llvm::isa<RValueReferenceType>(returnStmt->returnValue->resultType))) {
+        if (!getTypeIsReference(returnStmt->returnValue->resultType)) {
             if (llvm::isa<ReferenceType>(returnType)) {
                 auto referenceType = llvm::dyn_cast<ReferenceType>(returnType);
-                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, referenceType->referenceToType);
+                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, referenceType->referenceToType, true);
             } else if (llvm::isa<RValueReferenceType>(returnType)) {
                 auto referenceType = llvm::dyn_cast<RValueReferenceType>(returnType);
-                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, referenceType->referenceToType);
+                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, referenceType->referenceToType, true);
             } else {
-                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType);
+                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
             }
         // If the return type of the function isn't a reference but the result value type is then we dereference the result value
-        } else if (!(llvm::isa<ReferenceType>(returnType) ||
-                     llvm::isa<RValueReferenceType>(returnType))) {
+        } else if (!getTypeIsReference(returnType)) {
             if (llvm::isa<ReferenceType>(returnStmt->returnValue->resultType)) {
                 auto referenceType = llvm::dyn_cast<ReferenceType>(returnStmt->returnValue->resultType);
-                typesAreSame = getTypesAreSame(returnType, referenceType->referenceToType);
+                typesAreSame = getTypesAreSame(returnType, referenceType->referenceToType, true);
             } else if (llvm::isa<RValueReferenceType>(returnStmt->returnValue->resultType)) {
                 auto referenceType = llvm::dyn_cast<RValueReferenceType>(returnStmt->returnValue->resultType);
-                typesAreSame = getTypesAreSame(returnType, referenceType->referenceToType);
+                typesAreSame = getTypesAreSame(returnType, referenceType->referenceToType, true);
             } else {
-                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType);
+                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
             }
         } else {
-            typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType);
+            typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
         }
 
-        if (!(llvm::isa<ReferenceType>(returnType) || llvm::isa<RValueReferenceType>(returnType))) {
+        if (!getTypeIsReference(returnType)) {
             convertLValueToRValue(returnStmt->returnValue);
         }
 
@@ -748,8 +846,8 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
         Type* leftType = binaryOperatorExpr->leftValue->resultType;
         Type* rightType = binaryOperatorExpr->rightValue->resultType;
 
-        bool leftIsReference = llvm::isa<ReferenceType>(leftType) || llvm::isa<RValueReferenceType>(leftType);
-        bool rightIsReference = llvm::isa<ReferenceType>(rightType) || llvm::isa<RValueReferenceType>(rightType);
+        bool leftIsReference = getTypeIsReference(leftType);
+        bool rightIsReference = getTypeIsReference(rightType);
 
         // If the left side of the assignment isn't a reference then we convert the right side from an lvalue/reference to an rvalue
         if (!leftIsReference) {
@@ -763,7 +861,7 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
             rightType = binaryOperatorExpr->rightValue->resultType;
         }
 
-        if (!getTypesAreSame(leftType, rightType)) {
+        if (!getTypesAreSame(leftType, rightType, true)) {
             binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
                                                                   binaryOperatorExpr->rightValue->endPosition(),
                                                                   deepCopyAndSimplifyType(leftType),
@@ -1261,13 +1359,23 @@ void DeclResolver::processPotentialExplicitCastExpr(Expr*& expr) {
 void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorExpr) {
     processExpr(prefixOperatorExpr->expr);
 
+    gulc::Type* checkType = prefixOperatorExpr->expr->resultType;
+
+    if (llvm::isa<MutType>(checkType)) {
+        checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
+    } else if (llvm::isa<ConstType>(checkType)) {
+        checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
+    } else if (llvm::isa<ImmutType>(checkType)) {
+        checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
+    }
+
     // TODO: Support operator overloading type resolution
     // TODO: Support `sizeof`, `alignof`, `offsetof`, and `nameof`
     if (prefixOperatorExpr->operatorName() == "&") { // Address
         prefixOperatorExpr->resultType = new PointerType({}, {}, deepCopyAndSimplifyType(prefixOperatorExpr->expr->resultType));
     } else if (prefixOperatorExpr->operatorName() == "*") { // Dereference
-        if (llvm::isa<PointerType>(prefixOperatorExpr->expr->resultType)) {
-            auto pointerType = llvm::dyn_cast<PointerType>(prefixOperatorExpr->expr->resultType);
+        if (llvm::isa<PointerType>(checkType)) {
+            auto pointerType = llvm::dyn_cast<PointerType>(checkType);
             prefixOperatorExpr->resultType = deepCopyAndSimplifyType(pointerType->pointToType);
         } else {
             printError("cannot dereference non-pointer type `" + prefixOperatorExpr->expr->resultType->getString() + "`!",
@@ -1283,8 +1391,8 @@ void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorE
 
         prefixOperatorExpr->resultType = new ReferenceType({}, {}, deepCopyAndSimplifyType(prefixOperatorExpr->expr->resultType));
     } else if (prefixOperatorExpr->operatorName() == ".deref") {
-        if (llvm::isa<ReferenceType>(prefixOperatorExpr->expr->resultType)) {
-            auto referenceType = llvm::dyn_cast<ReferenceType>(prefixOperatorExpr->expr->resultType);
+        if (llvm::isa<ReferenceType>(checkType)) {
+            auto referenceType = llvm::dyn_cast<ReferenceType>(checkType);
             prefixOperatorExpr->resultType = deepCopyAndSimplifyType(referenceType->referenceToType);
         } else {
             printError("[INTERNAL] expected reference type!", prefixOperatorExpr->expr->startPosition(), prefixOperatorExpr->expr->endPosition());
@@ -1329,7 +1437,17 @@ void DeclResolver::processUnresolvedTypeRefExpr(Expr *&expr) {
 
 void DeclResolver::convertLValueToRValue(Expr*& potentialLValue) {
     // TODO: IdentifierExpr isn't the only thing we will have to do this for, right?
-    if (llvm::isa<ReferenceType>(potentialLValue->resultType)) {
+    Type* checkType = potentialLValue->resultType;
+
+    if (llvm::isa<MutType>(checkType)) {
+        checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
+    } else if (llvm::isa<ConstType>(checkType)) {
+        checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
+    } else if (llvm::isa<ImmutType>(checkType)) {
+        checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
+    }
+
+    if (llvm::isa<ReferenceType>(checkType)) {
         auto newPotentialReference = new PrefixOperatorExpr(potentialLValue->startPosition(), potentialLValue->endPosition(),
                                                             ".deref", potentialLValue);
         processPrefixOperatorExpr(newPotentialReference);
