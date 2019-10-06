@@ -2,10 +2,6 @@ int test(int i) {
     return i;
 }
 
-int test(const int i) {
-    return i;
-}
-
 int main() {
     const int result = 2;
     int const &mut test = result;

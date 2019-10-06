@@ -54,7 +54,11 @@ namespace gulc {
             ResolvedTypeRef,
             UnresolvedTypeRef,
 
-            LocalVariableDecl
+            LocalVariableDecl,
+
+            RefLocalVariable,
+            RefParameter,
+            RefFileFunction
         };
 
         Kind getExprKind() const { return _kind; }

@@ -41,6 +41,9 @@
 #include <AST/Stmts/BreakStmt.hpp>
 #include <AST/Stmts/ContinueStmt.hpp>
 #include <AST/Exprs/ImplicitCastExpr.hpp>
+#include <AST/Exprs/RefFileFunctionExpr.hpp>
+#include <AST/Exprs/RefLocalVariableExpr.hpp>
+#include <AST/Exprs/RefParameterExpr.hpp>
 #include "Module.hpp"
 
 namespace gulc {
@@ -208,8 +211,14 @@ namespace gulc {
         llvm::Value* generateFunctionCallExpr(CodeGenContext& context, const FunctionCallExpr* functionCallExpr);
         llvm::Value* generatePrefixOperatorExpr(CodeGenContext& context, const PrefixOperatorExpr* prefixOperatorExpr);
         llvm::Value* generatePostfixOperatorExpr(CodeGenContext& context, const PostfixOperatorExpr* postfixOperatorExpr);
+        llvm::Value* generateRefLocalVariableExpr(CodeGenContext& context, const RefLocalVariableExpr* refLocalVariableExpr);
+        llvm::Value* generateRefParameterExpr(CodeGenContext& context, const RefParameterExpr* refParameterExpr);
+
+        llvm::Function* generateRefFunctionExpr(CodeGenContext& context, const Expr* expr, std::string* nameOut);
+        llvm::Function* generateRefFileFunctionExpr(CodeGenContext& context, const RefFileFunctionExpr* refFileFunctionExpr);
 
         void castValue(CodeGenContext& context, gulc::Type* to, gulc::Type* from, llvm::Value*& value);
+
     };
 }
 

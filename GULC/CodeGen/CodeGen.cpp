@@ -279,6 +279,10 @@ llvm::Value* gulc::CodeGen::generateExpr(CodeGenContext& context, const Expr* ex
             return nullptr;
         case gulc::Expr::Kind::LValueToRValue:
             return generateLValueToRValue(context, llvm::dyn_cast<LValueToRValueExpr>(expr));
+        case gulc::Expr::Kind::RefLocalVariable:
+            return generateRefLocalVariableExpr(context, llvm::dyn_cast<RefLocalVariableExpr>(expr));
+        case gulc::Expr::Kind::RefParameter:
+            return generateRefParameterExpr(context, llvm::dyn_cast<RefParameterExpr>(expr));
         default:
             printError("unexpected expression type in code generator!",
                        context.fileAst, expr->startPosition(), expr->endPosition());
@@ -771,15 +775,8 @@ llvm::Value *gulc::CodeGen::generateLocalVariableDeclExpr(gulc::CodeGenContext &
 }
 
 llvm::Value *gulc::CodeGen::generateIdentifierExpr(gulc::CodeGenContext &context, const gulc::IdentifierExpr *identifierExpr) {
-    llvm::AllocaInst* localVariableAlloca = context.getLocalVariableOrNull(identifierExpr->name());
-
-    if (localVariableAlloca != nullptr) {
-        return localVariableAlloca;
-    } else {
-        printError("only local variables are currently supported!",
-                   context.fileAst, identifierExpr->startPosition(), identifierExpr->endPosition());
-    }
-
+    printError("[INTERNAL] identifier found in codegen, expression not supported!",
+               context.fileAst, identifierExpr->startPosition(), identifierExpr->endPosition());
     return nullptr;
 }
 
@@ -796,16 +793,8 @@ llvm::Value *gulc::CodeGen::generateLValueToRValue(gulc::CodeGenContext &context
 }
 
 llvm::Value *gulc::CodeGen::generateFunctionCallExpr(gulc::CodeGenContext &context, const gulc::FunctionCallExpr *functionCallExpr) {
-    if (!llvm::isa<IdentifierExpr>(functionCallExpr->functionReference)) {
-        printError("function pointer and virtual member function calls not yet supported!",
-                   context.fileAst, functionCallExpr->startPosition(), functionCallExpr->endPosition());
-        return nullptr;
-    }
-
-    auto functionIdentifier = llvm::dyn_cast<IdentifierExpr>(functionCallExpr->functionReference);
-
-    // NOTE: All error checking is should be handled before the code generator
-    llvm::Function* func = context.module->getFunction(functionIdentifier->name());
+    std::string funcName;
+    llvm::Function* func = generateRefFunctionExpr(context, functionCallExpr->functionReference, &funcName);
 
     std::vector<llvm::Value*> llvmArgs{};
 
@@ -817,7 +806,7 @@ llvm::Value *gulc::CodeGen::generateFunctionCallExpr(gulc::CodeGenContext &conte
         }
     }
 
-    return context.irBuilder.CreateCall(func, llvmArgs, functionIdentifier->name() + "_result");
+    return context.irBuilder.CreateCall(func, llvmArgs, funcName + "_result");
 }
 
 llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(gulc::CodeGenContext &context, const gulc::PrefixOperatorExpr *prefixOperatorExpr) {
@@ -939,6 +928,55 @@ llvm::Value *gulc::CodeGen::generatePostfixOperatorExpr(gulc::CodeGenContext &co
     }
 
     return rvalue;
+}
+
+llvm::Value *gulc::CodeGen::generateRefLocalVariableExpr(gulc::CodeGenContext &context, const gulc::RefLocalVariableExpr *refLocalVariableExpr) {
+    llvm::AllocaInst* localVariableAlloca = context.getLocalVariableOrNull(refLocalVariableExpr->name());
+
+    if (localVariableAlloca != nullptr) {
+        return localVariableAlloca;
+    } else {
+        printError("[INTERNAL] local variable was not found!",
+                   context.fileAst, refLocalVariableExpr->startPosition(), refLocalVariableExpr->endPosition());
+    }
+
+    return nullptr;
+}
+
+llvm::Value *gulc::CodeGen::generateRefParameterExpr(gulc::CodeGenContext &context, const gulc::RefParameterExpr *refParameterExpr) {
+    // The naming is a little weird to me, while yes the value referenced is technically the argument value we're still
+    //  referencing the parameter name here. Doesn't `currentFunction->params()` make much more sense?
+    std::size_t index = 0;
+
+    for (llvm::Argument& param : context.currentFunction->args()) {
+        if (index == refParameterExpr->paramIndex()) {
+            return &param;
+        }
+
+        ++index;
+    }
+
+    printError("[INTERNAL] parameter was not found!",
+               context.fileAst, refParameterExpr->startPosition(), refParameterExpr->endPosition());
+    return nullptr;
+}
+
+llvm::Function *gulc::CodeGen::generateRefFunctionExpr(gulc::CodeGenContext &context, const gulc::Expr *expr, std::string *nameOut) {
+    switch (expr->getExprKind()) {
+        case gulc::Expr::Kind::RefFileFunction: {
+            auto refFileFunction = llvm::dyn_cast<RefFileFunctionExpr>(expr);
+            *nameOut = refFileFunction->name();
+            return generateRefFileFunctionExpr(context, refFileFunction);
+        }
+        default:
+            printError("[INTERNAL] unsupported function reference!",
+                       context.fileAst, expr->startPosition(), expr->endPosition());
+            return nullptr;
+    }
+}
+
+llvm::Function *gulc::CodeGen::generateRefFileFunctionExpr(gulc::CodeGenContext &context, const gulc::RefFileFunctionExpr *refFileFunctionExpr) {
+    return nullptr;
 }
 
 void gulc::CodeGen::castValue(CodeGenContext& context, gulc::Type *to, gulc::Type *from, llvm::Value*& value) {

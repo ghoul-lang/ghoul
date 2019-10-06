@@ -27,6 +27,9 @@
 #include <AST/Types/ImmutType.hpp>
 #include <AST/Types/ReferenceType.hpp>
 #include <AST/Types/RValueReferenceType.hpp>
+#include <AST/Exprs/RefLocalVariableExpr.hpp>
+#include <AST/Exprs/RefParameterExpr.hpp>
+#include <AST/Exprs/RefFileFunctionExpr.hpp>
 #include "DeclResolver.hpp"
 
 using namespace gulc;
@@ -1074,16 +1077,36 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
     // Then we check local variables
     for (std::size_t i = 0; i < functionLocalVariablesCount; ++i) {
         if (functionLocalVariables[i]->name() == identifierExpr->name()) {
-            identifierExpr->resultType = deepCopyAndSimplifyType(functionLocalVariables[i]->resultType);
+            if (identifierExpr->hasTemplateArguments()) {
+                printError("local variable references cannot have template arguments!",
+                           identifierExpr->startPosition(), identifierExpr->endPosition());
+            }
+
+            expr = new RefLocalVariableExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
+                                            identifierExpr->name());
+            expr->resultType = deepCopyAndSimplifyType(functionLocalVariables[i]->resultType);
+
+            delete identifierExpr;
+
             return;
         }
     }
 
     // then params
     if (functionParams != nullptr) {
-        for (const ParameterDecl* param : *functionParams) {
-            if (param->name() == identifierExpr->name()) {
-                identifierExpr->resultType = deepCopyAndSimplifyType(param->type);
+        for (std::size_t paramIndex = 0; paramIndex < functionParams->size(); ++paramIndex) {
+            if ((*functionParams)[paramIndex]->name() == identifierExpr->name()) {
+                if (identifierExpr->hasTemplateArguments()) {
+                    printError("parameter references cannot have template arguments!",
+                               identifierExpr->startPosition(), identifierExpr->endPosition());
+                }
+
+                expr = new RefParameterExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
+                                            paramIndex);
+                expr->resultType = deepCopyAndSimplifyType((*functionParams)[paramIndex]->type);
+
+                delete identifierExpr;
+
                 return;
             }
         }
@@ -1189,7 +1212,13 @@ functionWasFound:
             paramTypeCopy.push_back(deepCopyAndSimplifyType(param->type));
         }
 
-        identifierExpr->resultType = new FunctionPointerType({}, {}, resultTypeCopy, paramTypeCopy);
+        // TODO: the tempalte arguments need to be processed
+        expr = new RefFileFunctionExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
+                                       identifierExpr->name(), identifierExpr->templateArguments);
+        expr->resultType = new FunctionPointerType({}, {}, resultTypeCopy, paramTypeCopy);
+
+        delete identifierExpr;
+
         return;
     }
 
@@ -1383,7 +1412,8 @@ void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorE
             return;
         }
     } else if (prefixOperatorExpr->operatorName() == ".ref") {
-        if (!llvm::isa<IdentifierExpr>(prefixOperatorExpr->expr)) {
+        if (!(llvm::isa<RefLocalVariableExpr>(prefixOperatorExpr->expr) ||
+              llvm::isa<RefParameterExpr>(prefixOperatorExpr->expr))) {
             printError("cannot create reference to non-variable call expressions!",
                        prefixOperatorExpr->expr->startPosition(), prefixOperatorExpr->expr->endPosition());
             return;
