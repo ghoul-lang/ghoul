@@ -1,9 +1,12 @@
-int test(int i) {
-    return i;
+void test(int* i) {
+    *i = 23;
+    return;
 }
 
 int main() {
-    const int result = 2;
-    int const &mut test = result;
-    return test;
+    int result = 2;
+
+    test(&result);
+
+    return result;
 }

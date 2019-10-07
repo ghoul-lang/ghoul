@@ -330,11 +330,6 @@ Type *DeclResolver::deepCopyAndSimplifyType(const Type *type) {
     return nullptr;
 }
 
-bool DeclResolver::checkFunctionExists(FunctionDecl *function, bool nameAmbiguous) {
-
-    return false;
-}
-
 void DeclResolver::printError(const std::string &message, TextPosition startPosition, TextPosition endPosition) {
     std::cout << "gulc resolver error[" << currentFileAst->filePath() << ", "
                                      "{" << startPosition.line << ", " << startPosition.column << "} "
@@ -1169,7 +1164,7 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                             }
 
                             // TODO: Support checking if something can be implicitly casted properly.
-                            if (!getTypesAreSame((*(functionCallArgs))[i]->resultType, functionDecl->resultType)) {
+                            if (!getTypesAreSame((*(functionCallArgs))[i]->resultType, functionDecl->parameters[i]->type)) {
                                 argsMatch = false;
                                 break;
                             }
@@ -1482,9 +1477,11 @@ void DeclResolver::convertLValueToRValue(Expr*& potentialLValue) {
                                                             ".deref", potentialLValue);
         processPrefixOperatorExpr(newPotentialReference);
         potentialLValue = newPotentialReference;
-    } else if (llvm::isa<IdentifierExpr>(potentialLValue)) {
+    } else if (llvm::isa<RefLocalVariableExpr>(potentialLValue) || llvm::isa<RefParameterExpr>(potentialLValue)) {
         Expr* newRValue = new LValueToRValueExpr(potentialLValue->startPosition(), potentialLValue->endPosition(), potentialLValue);
         newRValue->resultType = deepCopyAndSimplifyType(potentialLValue->resultType);
         potentialLValue = newRValue;
+    } else if (llvm::isa<IdentifierExpr>(potentialLValue)) {
+        printDebugWarning("Identifier found in `convertLValueToRValue`!");
     }
 }

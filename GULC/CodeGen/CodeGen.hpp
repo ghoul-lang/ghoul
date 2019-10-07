@@ -47,16 +47,76 @@
 #include "Module.hpp"
 
 namespace gulc {
-    // TODO: This doesn't really need to exist. Not sure why I've been doing it this way. We can really just make all of this apart of `CodeGen`
-    struct CodeGenContext {
-        FileAST& fileAst;
-        llvm::LLVMContext& llvmContext;
-        llvm::IRBuilder<>& irBuilder;
+    class CodeGen {
+    public:
+        CodeGen()
+                : currentFileAst(nullptr), llvmContext(nullptr), irBuilder(nullptr), module(nullptr), funcPass(nullptr),
+                  loopNameNumber(0),
+                  currentFunction(nullptr), currentFunctionParameters(), entryBlockBuilder(nullptr),
+                  currentFunctionLabels(), currentFunctionLocalVariablesCount(0),  currentFunctionLocalVariables(),
+                  currentLoopBlockContinue(nullptr), currentLoopBlockBreak(nullptr),
+                  nestedLoopCount(0), nestedLoopContinues(), nestedLoopBreaks() {}
+
+        gulc::Module generate(FileAST& file);
+
+    private:
+        void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
+
+        llvm::GlobalObject* generateDecl(const Decl* decl);
+        void generateStmt(const Stmt* stmt, const std::string& stmtName = "");
+        llvm::Value* generateExpr(const Expr* expr);
+
+        // Helpers
+        void addBlockAndSetInsertionPoint(llvm::BasicBlock* basicBlock);
+
+        // Decls
+        llvm::Function* generateFunctionDecl(const FunctionDecl* functionDecl);
+
+        // Stmts
+        void generateCompoundStmt(const CompoundStmt* compoundStmt);
+        void generateReturnStmt(const ReturnStmt* returnStmt);
+        void generateLabeledStmt(const LabeledStmt* labeledStmt);
+        void generateGotoStmt(const GotoStmt* gotoStmt);
+        void generateIfStmt(const IfStmt* ifStmt);
+        void generateWhileStmt(const WhileStmt* whileStmt, const std::string& loopName);
+        void generateDoStmt(const DoStmt* doStmt, const std::string& loopName);
+        void generateForStmt(const ForStmt* forStmt, const std::string& loopName);
+        void generateBreakStmt(const BreakStmt* breakStmt);
+        void generateContinueStmt(const ContinueStmt* continueStmt);
+
+        // Types
+        llvm::Type* generateLlvmType(const gulc::Type* type);
+        std::vector<llvm::Type*> generateParamTypes(const std::vector<ParameterDecl*>& parameters);
+
+        // Exprs
+        llvm::Value* generateBinaryOperatorExpr(const BinaryOperatorExpr* binaryOperatorExpr);
+        llvm::Value* generateIntegerLiteralExpr(const IntegerLiteralExpr* integerLiteralExpr);
+        llvm::Value* generateFloatLiteralExpr(const FloatLiteralExpr* floatLiteralExpr);
+        llvm::Value* generateLocalVariableDeclExpr(const LocalVariableDeclExpr* localVariableDeclExpr);
+        llvm::Value* generateIdentifierExpr(const IdentifierExpr* identifierExpr);
+        llvm::Value* generateImplicitCastExpr(const ImplicitCastExpr* implicitCastExpr);
+        llvm::Value* generateLValueToRValue(const LValueToRValueExpr* lValueToRValueExpr);
+        llvm::Value* generateFunctionCallExpr(const FunctionCallExpr* functionCallExpr);
+        llvm::Value* generatePrefixOperatorExpr(const PrefixOperatorExpr* prefixOperatorExpr);
+        llvm::Value* generatePostfixOperatorExpr(const PostfixOperatorExpr* postfixOperatorExpr);
+        llvm::Value* generateRefLocalVariableExpr(const RefLocalVariableExpr* refLocalVariableExpr);
+        llvm::Value* generateRefParameterExpr(const RefParameterExpr* refParameterExpr);
+
+        llvm::Function* generateRefFunctionExpr(const Expr* expr, std::string* nameOut);
+        llvm::Function* generateRefFileFunctionExpr(const RefFileFunctionExpr* refFileFunctionExpr);
+
+        void castValue(gulc::Type* to, gulc::Type* from, llvm::Value*& value);
+
+        // Context info
+        FileAST* currentFileAst;
+        llvm::LLVMContext* llvmContext;
+        llvm::IRBuilder<>* irBuilder;
         llvm::Module* module;
         llvm::legacy::FunctionPassManager* funcPass;
         unsigned int loopNameNumber;
 
         llvm::Function* currentFunction;
+        std::vector<llvm::AllocaInst*> currentFunctionParameters;
         llvm::IRBuilder<>* entryBlockBuilder;
         std::map<std::string, llvm::BasicBlock*> currentFunctionLabels;
         unsigned int currentFunctionLocalVariablesCount;
@@ -68,15 +128,6 @@ namespace gulc {
         unsigned int nestedLoopCount;
         std::vector<llvm::BasicBlock*> nestedLoopContinues;
         std::vector<llvm::BasicBlock*> nestedLoopBreaks;
-
-        CodeGenContext(FileAST& fileAst, llvm::LLVMContext& llvmContext, llvm::IRBuilder<>& irBuilder,
-                       llvm::Module* module, llvm::legacy::FunctionPassManager* funcPass)
-                : fileAst(fileAst), llvmContext(llvmContext), irBuilder(irBuilder), module(module), funcPass(funcPass),
-                  loopNameNumber(0),
-                  currentFunction(nullptr), entryBlockBuilder(nullptr), currentFunctionLabels(),
-				  currentFunctionLocalVariablesCount(0),  currentFunctionLocalVariables(),
-                  currentLoopBlockContinue(nullptr), currentLoopBlockBreak(nullptr),
-                  nestedLoopCount(0), nestedLoopContinues(), nestedLoopBreaks() {}
 
         bool currentFunctionLabelsContains(const std::string& labelName) {
             return currentFunctionLabels.find(labelName) != currentFunctionLabels.end();
@@ -94,12 +145,21 @@ namespace gulc {
                 entryBlockBuilder = nullptr;
             }
 
+            currentFunctionParameters.clear();
             currentFunctionLocalVariables.clear();
             currentFunctionLabels.clear();
 
             this->currentFunction = currentFunction;
             this->entryBlockBuilder = new llvm::IRBuilder<>(&currentFunction->getEntryBlock(),
                                                             currentFunction->getEntryBlock().begin());
+
+            for (llvm::Argument& arg : currentFunction->args()) {
+                llvm::AllocaInst* allocaInst = this->entryBlockBuilder->CreateAlloca(arg.getType(), nullptr);
+
+                currentFunctionParameters.push_back(allocaInst);
+
+                this->entryBlockBuilder->CreateStore(&arg, allocaInst);
+            }
         }
 
         llvm::AllocaInst* addLocalVariable(const std::string& varName, llvm::Type* llvmType) {
@@ -165,59 +225,6 @@ namespace gulc {
 
             return nullptr;
         }
-    };
-
-    class CodeGen {
-    public:
-        gulc::Module generate(FileAST& file);
-
-    private:
-        void printError(const std::string& message, FileAST &fileAst, TextPosition startPosition, TextPosition endPosition);
-
-        llvm::GlobalObject* generateDecl(CodeGenContext& context, const Decl* decl);
-        void generateStmt(CodeGenContext& context, const Stmt* stmt, const std::string& stmtName = "");
-        llvm::Value* generateExpr(CodeGenContext& context, const Expr* expr);
-
-        // Helpers
-        void addBlockAndSetInsertionPoint(CodeGenContext& context, llvm::BasicBlock* basicBlock);
-
-        // Decls
-        llvm::Function* generateFunctionDecl(CodeGenContext& context, const FunctionDecl* functionDecl);
-
-        // Stmts
-        void generateCompoundStmt(CodeGenContext& context, const CompoundStmt* compoundStmt);
-        void generateReturnStmt(CodeGenContext& context, const ReturnStmt* returnStmt);
-        void generateLabeledStmt(CodeGenContext& context, const LabeledStmt* labeledStmt);
-        void generateGotoStmt(CodeGenContext& context, const GotoStmt* gotoStmt);
-        void generateIfStmt(CodeGenContext& context, const IfStmt* ifStmt);
-        void generateWhileStmt(CodeGenContext& context, const WhileStmt* whileStmt, const std::string& loopName);
-        void generateDoStmt(CodeGenContext& context, const DoStmt* doStmt, const std::string& loopName);
-        void generateForStmt(CodeGenContext& context, const ForStmt* forStmt, const std::string& loopName);
-        void generateBreakStmt(CodeGenContext& context, const BreakStmt* breakStmt);
-        void generateContinueStmt(CodeGenContext& context, const ContinueStmt* continueStmt);
-
-        // Types
-        llvm::Type* generateLlvmType(gulc::CodeGenContext& context, const gulc::Type* type);
-        std::vector<llvm::Type*> generateParamTypes(gulc::CodeGenContext& context, const std::vector<ParameterDecl*>& parameters);
-
-        // Exprs
-        llvm::Value* generateBinaryOperatorExpr(CodeGenContext& context, const BinaryOperatorExpr* binaryOperatorExpr);
-        llvm::Value* generateIntegerLiteralExpr(CodeGenContext& context, const IntegerLiteralExpr* integerLiteralExpr);
-        llvm::Value* generateFloatLiteralExpr(CodeGenContext& context, const FloatLiteralExpr* floatLiteralExpr);
-        llvm::Value* generateLocalVariableDeclExpr(CodeGenContext& context, const LocalVariableDeclExpr* localVariableDeclExpr);
-        llvm::Value* generateIdentifierExpr(CodeGenContext& context, const IdentifierExpr* identifierExpr);
-        llvm::Value* generateImplicitCastExpr(CodeGenContext& context, const ImplicitCastExpr* implicitCastExpr);
-        llvm::Value* generateLValueToRValue(CodeGenContext& context, const LValueToRValueExpr* lValueToRValueExpr);
-        llvm::Value* generateFunctionCallExpr(CodeGenContext& context, const FunctionCallExpr* functionCallExpr);
-        llvm::Value* generatePrefixOperatorExpr(CodeGenContext& context, const PrefixOperatorExpr* prefixOperatorExpr);
-        llvm::Value* generatePostfixOperatorExpr(CodeGenContext& context, const PostfixOperatorExpr* postfixOperatorExpr);
-        llvm::Value* generateRefLocalVariableExpr(CodeGenContext& context, const RefLocalVariableExpr* refLocalVariableExpr);
-        llvm::Value* generateRefParameterExpr(CodeGenContext& context, const RefParameterExpr* refParameterExpr);
-
-        llvm::Function* generateRefFunctionExpr(CodeGenContext& context, const Expr* expr, std::string* nameOut);
-        llvm::Function* generateRefFileFunctionExpr(CodeGenContext& context, const RefFileFunctionExpr* refFileFunctionExpr);
-
-        void castValue(CodeGenContext& context, gulc::Type* to, gulc::Type* from, llvm::Value*& value);
 
     };
 }

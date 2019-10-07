@@ -57,10 +57,14 @@ gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
 
     funcPassManager->doInitialization();
 
-    gulc::CodeGenContext codeGenContext = CodeGenContext(file, *llvmContext, irBuilder, genModule, funcPassManager);
+    currentFileAst = &file;
+    this->llvmContext = llvmContext;
+    this->irBuilder = &irBuilder;
+    this->module = genModule;
+    this->funcPass = funcPassManager;
 
     for (const gulc::Decl* decl : file.topLevelDecls()) {
-        generateDecl(codeGenContext, decl);
+        generateDecl(decl);
 
         //globalObject.print()
     }
@@ -73,8 +77,8 @@ gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
     return Module(file.filePath(), llvmContext, genModule);
 }
 
-void gulc::CodeGen::printError(const std::string &message, gulc::FileAST &fileAst, TextPosition startPosition, TextPosition endPosition) {
-    std::cout << "gulc codegen error[" << fileAst.filePath() << ", "
+void gulc::CodeGen::printError(const std::string &message, TextPosition startPosition, TextPosition endPosition) {
+    std::cout << "gulc codegen error[" << currentFileAst->filePath() << ", "
                                     "{" << startPosition.line << ", " << startPosition.column << "} "
                                     "to {" << endPosition.line << ", " << endPosition.column << "}]: "
               << message
@@ -82,34 +86,34 @@ void gulc::CodeGen::printError(const std::string &message, gulc::FileAST &fileAs
     std::exit(1);
 }
 
-llvm::Type *gulc::CodeGen::generateLlvmType(gulc::CodeGenContext& context, const gulc::Type* type) {
+llvm::Type *gulc::CodeGen::generateLlvmType(const gulc::Type* type) {
     switch (type->getTypeKind()) {
         case gulc::Type::Kind::BuiltIn: {
             auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(type);
 
             // Void is special...
             if (builtInType->size() == 0) {
-                return llvm::Type::getVoidTy(context.llvmContext);
+                return llvm::Type::getVoidTy(*llvmContext);
             }
 
             // Bool is special...
             if (builtInType->isBool()) {
-                return llvm::Type::getInt1Ty(context.llvmContext);
+                return llvm::Type::getInt1Ty(*llvmContext);
             }
 
             // Floats...
             if (builtInType->isFloating()) {
                 switch (builtInType->size()) {
                     case 2:
-                        return llvm::Type::getHalfTy(context.llvmContext);
+                        return llvm::Type::getHalfTy(*llvmContext);
                     case 4:
-                        return llvm::Type::getFloatTy(context.llvmContext);
+                        return llvm::Type::getFloatTy(*llvmContext);
                     case 8:
-                        return llvm::Type::getDoubleTy(context.llvmContext);
+                        return llvm::Type::getDoubleTy(*llvmContext);
                     //case 16: 128 bit is support on some platforms, we should support it...
                     default:
                         printError("unsupported floating point size for type '" + type->getString() + "'!",
-                                   context.fileAst, type->startPosition(), type->endPosition());
+                                   type->startPosition(), type->endPosition());
                         return nullptr;
                 }
             }
@@ -118,492 +122,499 @@ llvm::Type *gulc::CodeGen::generateLlvmType(gulc::CodeGenContext& context, const
             // Thing to not here is that LLVM handles the signedness of a variable by the operation you used, similar to assembly. That is why we don't check if it is signed here.
             switch (builtInType->size()) {
                 case 1:
-                    return llvm::Type::getInt8Ty(context.llvmContext);
+                    return llvm::Type::getInt8Ty(*llvmContext);
                 case 2:
-                    return llvm::Type::getInt16Ty(context.llvmContext);
+                    return llvm::Type::getInt16Ty(*llvmContext);
                 case 4:
-                    return llvm::Type::getInt32Ty(context.llvmContext);
+                    return llvm::Type::getInt32Ty(*llvmContext);
                 case 8:
-                    return llvm::Type::getInt64Ty(context.llvmContext);
+                    return llvm::Type::getInt64Ty(*llvmContext);
                     //case 16: 128 bit is supported on some platforms, we should support it...
                 default:
                     printError("unsupported floating point size for type '" + type->getString() + "'!",
-                               context.fileAst, type->startPosition(), type->endPosition());
+                               type->startPosition(), type->endPosition());
                     return nullptr;
             }
         }
         case gulc::Type::Kind::Pointer: {
             auto pointerType = llvm::dyn_cast<gulc::PointerType>(type);
             // TODO: Is this right? What is the address space stuff?
-            return llvm::PointerType::getUnqual(generateLlvmType(context, pointerType->pointToType));
+            return llvm::PointerType::getUnqual(generateLlvmType(pointerType->pointToType));
         }
         case gulc::Type::Kind::Reference: {
             auto referenceType = llvm::dyn_cast<gulc::ReferenceType>(type);
-            return llvm::PointerType::getUnqual(generateLlvmType(context, referenceType->referenceToType));
+            return llvm::PointerType::getUnqual(generateLlvmType(referenceType->referenceToType));
         }
         case gulc::Type::Kind::Const: {
             auto constType = llvm::dyn_cast<ConstType>(type);
-            return generateLlvmType(context, constType->pointToType);
+            return generateLlvmType(constType->pointToType);
         }
         case gulc::Type::Kind::Immut: {
             auto immutType = llvm::dyn_cast<ImmutType>(type);
-            return generateLlvmType(context, immutType->pointToType);
+            return generateLlvmType(immutType->pointToType);
         }
         case gulc::Type::Kind::Mut: {
             auto mutType = llvm::dyn_cast<MutType>(type);
-            return generateLlvmType(context, mutType->pointToType);
+            return generateLlvmType(mutType->pointToType);
         }
         default:
             printError("type '" + type->getString() + "' not yet supported!",
-                       context.fileAst, type->startPosition(), type->endPosition());
+                       type->startPosition(), type->endPosition());
             return nullptr;
     }
     return nullptr;
 }
 
-std::vector<llvm::Type*> gulc::CodeGen::generateParamTypes(gulc::CodeGenContext& context, const std::vector<ParameterDecl*>& parameters) {
+std::vector<llvm::Type*> gulc::CodeGen::generateParamTypes(const std::vector<ParameterDecl*>& parameters) {
     std::vector<llvm::Type*> paramTypes{};
     paramTypes.reserve(parameters.size());
 
     for (const ParameterDecl* parameterDecl : parameters) {
-        paramTypes.push_back(generateLlvmType(context, parameterDecl->type));
+        paramTypes.push_back(generateLlvmType(parameterDecl->type));
     }
 
     return paramTypes;
 }
 
-llvm::GlobalObject* gulc::CodeGen::generateDecl(gulc::CodeGenContext& context, const gulc::Decl *decl) {
+llvm::GlobalObject* gulc::CodeGen::generateDecl(const gulc::Decl *decl) {
     switch (decl->getDeclKind()) {
         case gulc::Decl::Kind::Function:
-            return generateFunctionDecl(context, llvm::dyn_cast<gulc::FunctionDecl>(decl));
+            return generateFunctionDecl(llvm::dyn_cast<gulc::FunctionDecl>(decl));
         default:
             printError("internal - unsupported decl!",
-                       context.fileAst, decl->startPosition(), decl->endPosition());
+                       decl->startPosition(), decl->endPosition());
             break;
     }
 
 	return nullptr;
 }
 
-void gulc::CodeGen::generateStmt(gulc::CodeGenContext &context, const gulc::Stmt *stmt, const std::string& stmtName) {
+void gulc::CodeGen::generateStmt(const gulc::Stmt *stmt, const std::string& stmtName) {
     switch (stmt->getStmtKind()) {
         case gulc::Stmt::Kind::Break:
-            return generateBreakStmt(context, llvm::dyn_cast<BreakStmt>(stmt));
+            return generateBreakStmt(llvm::dyn_cast<BreakStmt>(stmt));
         case gulc::Stmt::Kind::Case:
-            printError("`case` not yet supported!", context.fileAst, stmt->startPosition(), stmt->endPosition());
+            printError("`case` not yet supported!", stmt->startPosition(), stmt->endPosition());
             return;
         case gulc::Stmt::Kind::Compound:
-            return generateCompoundStmt(context, llvm::dyn_cast<CompoundStmt>(stmt));
+            return generateCompoundStmt(llvm::dyn_cast<CompoundStmt>(stmt));
         case gulc::Stmt::Kind::Continue:
-            return generateContinueStmt(context, llvm::dyn_cast<ContinueStmt>(stmt));
+            return generateContinueStmt(llvm::dyn_cast<ContinueStmt>(stmt));
         case gulc::Stmt::Kind::Do:
-            return generateDoStmt(context, llvm::dyn_cast<DoStmt>(stmt), stmtName);
+            return generateDoStmt(llvm::dyn_cast<DoStmt>(stmt), stmtName);
         case gulc::Stmt::Kind::For:
-            return generateForStmt(context, llvm::dyn_cast<ForStmt>(stmt), stmtName);
+            return generateForStmt(llvm::dyn_cast<ForStmt>(stmt), stmtName);
         case gulc::Stmt::Kind::Goto:
-            return generateGotoStmt(context, llvm::dyn_cast<GotoStmt>(stmt));
+            return generateGotoStmt(llvm::dyn_cast<GotoStmt>(stmt));
         case gulc::Stmt::Kind::If:
-            return generateIfStmt(context, llvm::dyn_cast<IfStmt>(stmt));
+            return generateIfStmt(llvm::dyn_cast<IfStmt>(stmt));
         case gulc::Stmt::Kind::Labeled:
-            return generateLabeledStmt(context, llvm::dyn_cast<LabeledStmt>(stmt));
+            return generateLabeledStmt(llvm::dyn_cast<LabeledStmt>(stmt));
         case gulc::Stmt::Kind::Return:
-            return generateReturnStmt(context, llvm::dyn_cast<ReturnStmt>(stmt));
+            return generateReturnStmt(llvm::dyn_cast<ReturnStmt>(stmt));
         case gulc::Stmt::Kind::Switch:
-            printError("`switch` not yet supported!", context.fileAst, stmt->startPosition(), stmt->endPosition());
+            printError("`switch` not yet supported!", stmt->startPosition(), stmt->endPosition());
             return;
         case gulc::Stmt::Kind::Try:
-            printError("`try` not yet supported!", context.fileAst, stmt->startPosition(), stmt->endPosition());
+            printError("`try` not yet supported!", stmt->startPosition(), stmt->endPosition());
             return;
         case gulc::Stmt::Kind::TryCatch:
-            printError("`catch` not yet supported!", context.fileAst, stmt->startPosition(), stmt->endPosition());
+            printError("`catch` not yet supported!", stmt->startPosition(), stmt->endPosition());
             return;
         case gulc::Stmt::Kind::TryFinally:
-            printError("`finally` not yet supported!", context.fileAst, stmt->startPosition(), stmt->endPosition());
+            printError("`finally` not yet supported!", stmt->startPosition(), stmt->endPosition());
             return;
         case gulc::Stmt::Kind::While:
-            return generateWhileStmt(context, llvm::dyn_cast<WhileStmt>(stmt), stmtName);
+            return generateWhileStmt(llvm::dyn_cast<WhileStmt>(stmt), stmtName);
         case gulc::Stmt::Kind::Expr:
             // TODO: Is this a memory leak? I can't figure out if we have to explicitly free the unused `Value*` or if LLVM is storing it somewhere else?
             //  I even went so far as to check the `clang` code generator and they explicitly state they're ignoring an `LValue` result...
             //  and when I go to the definition of `LValue` it has an `llvm::Value*` member that isn't freed in a constructor...
-            generateExpr(context, llvm::dyn_cast<Expr>(stmt));
+            generateExpr(llvm::dyn_cast<Expr>(stmt));
             break;
     }
 }
 
-llvm::Value* gulc::CodeGen::generateExpr(CodeGenContext& context, const Expr* expr) {
+llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
     switch (expr->getExprKind()) {
         case gulc::Expr::Kind::BinaryOperator:
-            return generateBinaryOperatorExpr(context, llvm::dyn_cast<BinaryOperatorExpr>(expr));
+            return generateBinaryOperatorExpr(llvm::dyn_cast<BinaryOperatorExpr>(expr));
         case gulc::Expr::Kind::CharacterLiteral:
             printError("character literals not yet supported!",
-                       context.fileAst, expr->startPosition(), expr->endPosition());
+                       expr->startPosition(), expr->endPosition());
             return nullptr;
         case gulc::Expr::Kind::ExplicitCast:
             printError("explicit casts not yet supported!",
-                       context.fileAst, expr->startPosition(), expr->endPosition());
+                       expr->startPosition(), expr->endPosition());
             return nullptr;
         case gulc::Expr::Kind::FloatLiteral:
-            return generateFloatLiteralExpr(context, llvm::dyn_cast<FloatLiteralExpr>(expr));
+            return generateFloatLiteralExpr(llvm::dyn_cast<FloatLiteralExpr>(expr));
         case gulc::Expr::Kind::FunctionCall:
-            return generateFunctionCallExpr(context, llvm::dyn_cast<FunctionCallExpr>(expr));
+            return generateFunctionCallExpr(llvm::dyn_cast<FunctionCallExpr>(expr));
         case gulc::Expr::Kind::Identifier:
-            return generateIdentifierExpr(context, llvm::dyn_cast<IdentifierExpr>(expr));
+            return generateIdentifierExpr(llvm::dyn_cast<IdentifierExpr>(expr));
         case gulc::Expr::Kind::ImplicitCast:
-            return generateImplicitCastExpr(context, llvm::dyn_cast<ImplicitCastExpr>(expr));
+            return generateImplicitCastExpr(llvm::dyn_cast<ImplicitCastExpr>(expr));
         case gulc::Expr::Kind::IndexerCall:
             printError("indexer calls not yet supported!",
-                       context.fileAst, expr->startPosition(), expr->endPosition());
+                       expr->startPosition(), expr->endPosition());
             return nullptr;
         case gulc::Expr::Kind::IntegerLiteral:
-            return generateIntegerLiteralExpr(context, llvm::dyn_cast<IntegerLiteralExpr>(expr));
+            return generateIntegerLiteralExpr(llvm::dyn_cast<IntegerLiteralExpr>(expr));
         case gulc::Expr::Kind::LocalVariableDecl:
-            return generateLocalVariableDeclExpr(context, llvm::dyn_cast<LocalVariableDeclExpr>(expr));
+            return generateLocalVariableDeclExpr(llvm::dyn_cast<LocalVariableDeclExpr>(expr));
         case gulc::Expr::Kind::MemberAccessCall:
             printError("member access calls not yet supported!",
-                       context.fileAst, expr->startPosition(), expr->endPosition());
+                       expr->startPosition(), expr->endPosition());
             return nullptr;
         case gulc::Expr::Kind::Paren:
-            return generateExpr(context, llvm::dyn_cast<ParenExpr>(expr)->containedExpr);
+            return generateExpr(llvm::dyn_cast<ParenExpr>(expr)->containedExpr);
         case gulc::Expr::Kind::PostfixOperator:
-            return generatePostfixOperatorExpr(context, llvm::dyn_cast<PostfixOperatorExpr>(expr));
+            return generatePostfixOperatorExpr(llvm::dyn_cast<PostfixOperatorExpr>(expr));
         case gulc::Expr::Kind::PrefixOperator:
-            return generatePrefixOperatorExpr(context, llvm::dyn_cast<PrefixOperatorExpr>(expr));
+            return generatePrefixOperatorExpr(llvm::dyn_cast<PrefixOperatorExpr>(expr));
         case gulc::Expr::Kind::StringLiteral:
             printError("string literals not yet supported!",
-                       context.fileAst, expr->startPosition(), expr->endPosition());
+                       expr->startPosition(), expr->endPosition());
             return nullptr;
         case gulc::Expr::Kind::Ternary:
             printError("ternary operators not yet supported!",
-                       context.fileAst, expr->startPosition(), expr->endPosition());
+                       expr->startPosition(), expr->endPosition());
             return nullptr;
         case gulc::Expr::Kind::LValueToRValue:
-            return generateLValueToRValue(context, llvm::dyn_cast<LValueToRValueExpr>(expr));
+            return generateLValueToRValue(llvm::dyn_cast<LValueToRValueExpr>(expr));
         case gulc::Expr::Kind::RefLocalVariable:
-            return generateRefLocalVariableExpr(context, llvm::dyn_cast<RefLocalVariableExpr>(expr));
+            return generateRefLocalVariableExpr(llvm::dyn_cast<RefLocalVariableExpr>(expr));
         case gulc::Expr::Kind::RefParameter:
-            return generateRefParameterExpr(context, llvm::dyn_cast<RefParameterExpr>(expr));
+            return generateRefParameterExpr(llvm::dyn_cast<RefParameterExpr>(expr));
         default:
             printError("unexpected expression type in code generator!",
-                       context.fileAst, expr->startPosition(), expr->endPosition());
+                       expr->startPosition(), expr->endPosition());
             return nullptr;
     }
 }
 
 // Helpers
-void gulc::CodeGen::addBlockAndSetInsertionPoint(CodeGenContext& context, llvm::BasicBlock* basicBlock) {
-    context.currentFunction->getBasicBlockList().push_back(basicBlock);
-    context.irBuilder.SetInsertPoint(basicBlock);
+void gulc::CodeGen::addBlockAndSetInsertionPoint(llvm::BasicBlock* basicBlock) {
+    currentFunction->getBasicBlockList().push_back(basicBlock);
+    irBuilder->SetInsertPoint(basicBlock);
 }
 
 // Decls
-llvm::Function* gulc::CodeGen::generateFunctionDecl(gulc::CodeGenContext& context, const gulc::FunctionDecl *functionDecl) {
-    std::vector<llvm::Type*> paramTypes = generateParamTypes(context, functionDecl->parameters);
-    llvm::Type* returnType = generateLlvmType(context, functionDecl->resultType);
+llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *functionDecl) {
+    std::vector<llvm::Type*> paramTypes = generateParamTypes(functionDecl->parameters);
+    llvm::Type* returnType = generateLlvmType(functionDecl->resultType);
     llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
-    llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::CommonLinkage, functionDecl->name(), context.module);
+    llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::CommonLinkage, functionDecl->name(), module);
 
-    llvm::BasicBlock* funcBody = llvm::BasicBlock::Create(context.llvmContext, "entry", function);
-    context.irBuilder.SetInsertPoint(funcBody);
-    context.setCurrentFunction(function);
+    llvm::BasicBlock* funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", function);
+    irBuilder->SetInsertPoint(funcBody);
+    setCurrentFunction(function);
 
     // Generate the function body
-    context.currentFunctionLocalVariablesCount = 0;
-    generateStmt(context, functionDecl->body());
-    context.currentFunctionLocalVariablesCount = 0;
+    currentFunctionLocalVariablesCount = 0;
+    generateStmt(functionDecl->body());
+    currentFunctionLocalVariablesCount = 0;
+
+
+    // TODO: CodeGen shouldn't have to handle this, this should be handled elsewhere (`CodeVerifier` should check that a function returns on all code paths)
+    if (llvm::isa<BuiltInType>(functionDecl->resultType) &&
+            llvm::dyn_cast<BuiltInType>(functionDecl->resultType)->size() == 0) {
+        irBuilder->CreateRetVoid();
+    }
 
     // TODO: We might want to remove this.
     verifyFunction(*function);
-    context.funcPass->run(*function);
+    funcPass->run(*function);
 
     // Reset the insertion point (this probably isn't needed but oh well)
-    context.irBuilder.ClearInsertionPoint();
-	context.currentFunction = nullptr;
+    irBuilder->ClearInsertionPoint();
+	currentFunction = nullptr;
 
     return function;
 }
 
 // Stmts
-void gulc::CodeGen::generateCompoundStmt(gulc::CodeGenContext &context, const gulc::CompoundStmt* compoundStmt) {
-    unsigned int oldLocalVariableCount = context.currentFunctionLocalVariablesCount;
+void gulc::CodeGen::generateCompoundStmt(const gulc::CompoundStmt* compoundStmt) {
+    unsigned int oldLocalVariableCount = currentFunctionLocalVariablesCount;
 
     for (const Stmt* stmt : compoundStmt->statements()) {
-        generateStmt(context, stmt);
+        generateStmt(stmt);
     }
 
-    context.currentFunctionLocalVariablesCount = oldLocalVariableCount;
+    currentFunctionLocalVariablesCount = oldLocalVariableCount;
 }
 
-void gulc::CodeGen::generateReturnStmt(gulc::CodeGenContext &context, const gulc::ReturnStmt *returnStmt) {
+void gulc::CodeGen::generateReturnStmt(const gulc::ReturnStmt *returnStmt) {
     if (returnStmt->hasReturnValue()) {
-        context.irBuilder.CreateRet(generateExpr(context, returnStmt->returnValue));
+        irBuilder->CreateRet(generateExpr(returnStmt->returnValue));
         return;
     } else {
-        context.irBuilder.CreateRetVoid();
+        irBuilder->CreateRetVoid();
         return;
     }
 }
 
-void gulc::CodeGen::generateLabeledStmt(gulc::CodeGenContext &context, const gulc::LabeledStmt *labeledStmt) {
+void gulc::CodeGen::generateLabeledStmt(const gulc::LabeledStmt *labeledStmt) {
     // Curious why we can't just use normal labels...
     llvm::BasicBlock* labelBody;
 
-    if (context.currentFunctionLabelsContains(labeledStmt->label())) {
-        labelBody = context.currentFunctionLabels[labeledStmt->label()];
+    if (currentFunctionLabelsContains(labeledStmt->label())) {
+        labelBody = currentFunctionLabels[labeledStmt->label()];
     } else {
-        labelBody = llvm::BasicBlock::Create(context.llvmContext, labeledStmt->label());
-        context.addCurrentFunctionLabel(labeledStmt->label(), labelBody);
+        labelBody = llvm::BasicBlock::Create(*llvmContext, labeledStmt->label());
+        addCurrentFunctionLabel(labeledStmt->label(), labelBody);
     }
 
     // We have to explicitly branch to blocks for some reason...
-    context.irBuilder.CreateBr(labelBody);
-    addBlockAndSetInsertionPoint(context, labelBody);
+    irBuilder->CreateBr(labelBody);
+    addBlockAndSetInsertionPoint(labelBody);
 
     if (labeledStmt->labeledStmt != nullptr) {
-        generateStmt(context, labeledStmt->labeledStmt, labeledStmt->label());
+        generateStmt(labeledStmt->labeledStmt, labeledStmt->label());
     }
 }
 
-void gulc::CodeGen::generateGotoStmt(gulc::CodeGenContext &context, const gulc::GotoStmt *gotoStmt) {
-    if (context.currentFunctionLabelsContains(gotoStmt->label())) {
-        context.irBuilder.CreateBr(context.currentFunctionLabels[gotoStmt->label()]);
+void gulc::CodeGen::generateGotoStmt(const gulc::GotoStmt *gotoStmt) {
+    if (currentFunctionLabelsContains(gotoStmt->label())) {
+        irBuilder->CreateBr(currentFunctionLabels[gotoStmt->label()]);
     } else {
-        llvm::BasicBlock* newBasicBlock = llvm::BasicBlock::Create(context.llvmContext, gotoStmt->label());
-        context.irBuilder.CreateBr(newBasicBlock);
-        context.addCurrentFunctionLabel(gotoStmt->label(), newBasicBlock);
+        llvm::BasicBlock* newBasicBlock = llvm::BasicBlock::Create(*llvmContext, gotoStmt->label());
+        irBuilder->CreateBr(newBasicBlock);
+        addCurrentFunctionLabel(gotoStmt->label(), newBasicBlock);
     }
 }
 
-void gulc::CodeGen::generateIfStmt(gulc::CodeGenContext &context, const gulc::IfStmt *ifStmt) {
-    llvm::Value* cond = generateExpr(context, ifStmt->condition);
+void gulc::CodeGen::generateIfStmt(const gulc::IfStmt *ifStmt) {
+    llvm::Value* cond = generateExpr(ifStmt->condition);
 
-    llvm::BasicBlock* trueBlock = llvm::BasicBlock::Create(context.llvmContext, "ifTrueBlock", context.currentFunction);
-    llvm::BasicBlock* mergeBlock = llvm::BasicBlock::Create(context.llvmContext, "ifMerge");
+    llvm::BasicBlock* trueBlock = llvm::BasicBlock::Create(*llvmContext, "ifTrueBlock", currentFunction);
+    llvm::BasicBlock* mergeBlock = llvm::BasicBlock::Create(*llvmContext, "ifMerge");
     llvm::BasicBlock* falseBlock = nullptr;
 
     // If there isn't a false block we make the IR jump to the merge block on false, else we make an actual false block
     if (ifStmt->hasFalseStmt()) {
-        falseBlock = llvm::BasicBlock::Create(context.llvmContext, "ifFalseBlock");
+        falseBlock = llvm::BasicBlock::Create(*llvmContext, "ifFalseBlock");
 
-        context.irBuilder.CreateCondBr(cond, trueBlock, falseBlock);
+        irBuilder->CreateCondBr(cond, trueBlock, falseBlock);
     } else {
-        context.irBuilder.CreateCondBr(cond, trueBlock, mergeBlock);
+        irBuilder->CreateCondBr(cond, trueBlock, mergeBlock);
     }
 
     // Set the insert point to our true block then generate the statement for it...
-    context.irBuilder.SetInsertPoint(trueBlock);
-    generateStmt(context, ifStmt->trueStmt);
-    context.irBuilder.CreateBr(mergeBlock);
+    irBuilder->SetInsertPoint(trueBlock);
+    generateStmt(ifStmt->trueStmt);
+    irBuilder->CreateBr(mergeBlock);
 
     // And then add a jump to the merge block if there is a false statement
     if (ifStmt->hasFalseStmt()) {
         // Set the insert point to the false block and then generate the statement for it...
-        context.currentFunction->getBasicBlockList().push_back(falseBlock);
-        context.irBuilder.SetInsertPoint(falseBlock);
-        generateStmt(context, ifStmt->falseStmt);
+        currentFunction->getBasicBlockList().push_back(falseBlock);
+        irBuilder->SetInsertPoint(falseBlock);
+        generateStmt(ifStmt->falseStmt);
         // Branch to merge when done...
-        context.irBuilder.CreateBr(mergeBlock);
+        irBuilder->CreateBr(mergeBlock);
     }
 
     // Add the merge block to the function and then set the insert point to it
-    context.currentFunction->getBasicBlockList().push_back(mergeBlock);
-    context.irBuilder.SetInsertPoint(mergeBlock);
+    currentFunction->getBasicBlockList().push_back(mergeBlock);
+    irBuilder->SetInsertPoint(mergeBlock);
 }
 
-void gulc::CodeGen::generateWhileStmt(gulc::CodeGenContext &context, const gulc::WhileStmt *whileStmt, const std::string& loopName) {
+void gulc::CodeGen::generateWhileStmt(const gulc::WhileStmt *whileStmt, const std::string& loopName) {
     std::string whileName;
 
     if (loopName.empty()) {
-        whileName = "loop" + std::to_string(context.loopNameNumber);
-        ++context.loopNameNumber;
+        whileName = "loop" + std::to_string(loopNameNumber);
+        ++loopNameNumber;
     } else {
         whileName = loopName;
     }
 
-    llvm::BasicBlock* continueLoop = llvm::BasicBlock::Create(context.llvmContext, whileName + "_continue", context.currentFunction);
-    llvm::BasicBlock* loop = llvm::BasicBlock::Create(context.llvmContext, whileName + "_loop", context.currentFunction);
-    llvm::BasicBlock* breakLoop = llvm::BasicBlock::Create(context.llvmContext, whileName + "_break");
+    llvm::BasicBlock* continueLoop = llvm::BasicBlock::Create(*llvmContext, whileName + "_continue", currentFunction);
+    llvm::BasicBlock* loop = llvm::BasicBlock::Create(*llvmContext, whileName + "_loop", currentFunction);
+    llvm::BasicBlock* breakLoop = llvm::BasicBlock::Create(*llvmContext, whileName + "_break");
 
     // For some reason we can't just fall through to the continue loop? We have to explicitly branch to it?
-    context.irBuilder.CreateBr(continueLoop);
+    irBuilder->CreateBr(continueLoop);
 
     // Set the insert point to the continue loop block and start adding the loop data...
-    context.irBuilder.SetInsertPoint(continueLoop);
+    irBuilder->SetInsertPoint(continueLoop);
 
-    llvm::Value* cond = generateExpr(context, whileStmt->condition);
+    llvm::Value* cond = generateExpr(whileStmt->condition);
     // If the condition is true we continue the loop, if not we break from the loop...
-    context.irBuilder.CreateCondBr(cond, loop, breakLoop);
+    irBuilder->CreateCondBr(cond, loop, breakLoop);
 
     // Set the insert point to the loop block for our actual statement...
-    context.irBuilder.SetInsertPoint(loop);
+    irBuilder->SetInsertPoint(loop);
 
     // We make sure to back up and restore the old loop's break and continue blocks for our `break` and `continue` keywords
-    llvm::BasicBlock* oldLoopContinue = context.currentLoopBlockContinue;
-    llvm::BasicBlock* oldLoopBreak = context.currentLoopBlockBreak;
+    llvm::BasicBlock* oldLoopContinue = currentLoopBlockContinue;
+    llvm::BasicBlock* oldLoopBreak = currentLoopBlockBreak;
 
-    context.currentLoopBlockContinue = continueLoop;
-    context.currentLoopBlockBreak = breakLoop;
+    currentLoopBlockContinue = continueLoop;
+    currentLoopBlockBreak = breakLoop;
 
     // Generate the loop statement within the loop block then jump back to the continue block...
-    context.enterNestedLoop(continueLoop, breakLoop);
-    generateStmt(context, whileStmt->loopStmt);
-    context.leaveNestedLoop();
-    context.irBuilder.CreateBr(continueLoop);
+    enterNestedLoop(continueLoop, breakLoop);
+    generateStmt(whileStmt->loopStmt);
+    leaveNestedLoop();
+    irBuilder->CreateBr(continueLoop);
 
-    context.currentLoopBlockContinue = oldLoopContinue;
-    context.currentLoopBlockBreak = oldLoopBreak;
+    currentLoopBlockContinue = oldLoopContinue;
+    currentLoopBlockBreak = oldLoopBreak;
 
     // Finish by adding the break loop block and setting the insert point to it...
-    context.currentFunction->getBasicBlockList().push_back(breakLoop);
-    context.irBuilder.SetInsertPoint(breakLoop);
+    currentFunction->getBasicBlockList().push_back(breakLoop);
+    irBuilder->SetInsertPoint(breakLoop);
 }
 
-void gulc::CodeGen::generateDoStmt(gulc::CodeGenContext& context, const gulc::DoStmt* doStmt, const std::string& loopName) {
+void gulc::CodeGen::generateDoStmt(const gulc::DoStmt* doStmt, const std::string& loopName) {
     std::string doName;
 
     if (loopName.empty()) {
-        doName = "loop" + std::to_string(context.loopNameNumber);
-        ++context.loopNameNumber;
+        doName = "loop" + std::to_string(loopNameNumber);
+        ++loopNameNumber;
     } else {
         doName = loopName;
     }
 
-    llvm::BasicBlock* loop = llvm::BasicBlock::Create(context.llvmContext, doName + "_loop", context.currentFunction);
-    llvm::BasicBlock* loopContinue = llvm::BasicBlock::Create(context.llvmContext, doName + "_continue");
-    llvm::BasicBlock* loopBreak = llvm::BasicBlock::Create(context.llvmContext, doName + "_break");
+    llvm::BasicBlock* loop = llvm::BasicBlock::Create(*llvmContext, doName + "_loop", currentFunction);
+    llvm::BasicBlock* loopContinue = llvm::BasicBlock::Create(*llvmContext, doName + "_continue");
+    llvm::BasicBlock* loopBreak = llvm::BasicBlock::Create(*llvmContext, doName + "_break");
 
     // For some reason we can't just fall through to the continue loop? We have to explicitly branch to it?
-    context.irBuilder.CreateBr(loop);
+    irBuilder->CreateBr(loop);
     // Set the insert point to the loop block and start adding the loop data...
-    context.irBuilder.SetInsertPoint(loop);
+    irBuilder->SetInsertPoint(loop);
 
     // We make sure to back up and restore the old loop's break and continue blocks for our `break` and `continue` keywords
-    llvm::BasicBlock* oldLoopContinue = context.currentLoopBlockContinue;
-    llvm::BasicBlock* oldLoopBreak = context.currentLoopBlockBreak;
+    llvm::BasicBlock* oldLoopContinue = currentLoopBlockContinue;
+    llvm::BasicBlock* oldLoopBreak = currentLoopBlockBreak;
 
-    context.currentLoopBlockContinue = loopContinue;
-    context.currentLoopBlockBreak = loopBreak;
+    currentLoopBlockContinue = loopContinue;
+    currentLoopBlockBreak = loopBreak;
 
     // Generate the statement we loop on...
-    context.enterNestedLoop(loopContinue, loopBreak);
-    generateStmt(context, doStmt->loopStmt);
-    context.leaveNestedLoop();
-    context.irBuilder.CreateBr(loopContinue);
+    enterNestedLoop(loopContinue, loopBreak);
+    generateStmt(doStmt->loopStmt);
+    leaveNestedLoop();
+    irBuilder->CreateBr(loopContinue);
 
-    context.currentLoopBlockContinue = oldLoopContinue;
-    context.currentLoopBlockBreak = oldLoopBreak;
+    currentLoopBlockContinue = oldLoopContinue;
+    currentLoopBlockBreak = oldLoopBreak;
 
     // Add the loop continue block to the function and set it as the insert point...
-    context.currentFunction->getBasicBlockList().push_back(loopContinue);
-    context.irBuilder.SetInsertPoint(loopContinue);
+    currentFunction->getBasicBlockList().push_back(loopContinue);
+    irBuilder->SetInsertPoint(loopContinue);
 
     // Generate the condition and create the conditional branch
-    llvm::Value* cond = generateExpr(context, doStmt->condition);
-    context.irBuilder.CreateCondBr(cond, loop, loopBreak);
+    llvm::Value* cond = generateExpr(doStmt->condition);
+    irBuilder->CreateCondBr(cond, loop, loopBreak);
 
     // Add the loop break block to the function and set it as the insert point...
-    context.currentFunction->getBasicBlockList().push_back(loopBreak);
-    context.irBuilder.SetInsertPoint(loopBreak);
+    currentFunction->getBasicBlockList().push_back(loopBreak);
+    irBuilder->SetInsertPoint(loopBreak);
 }
 
-void gulc::CodeGen::generateForStmt(gulc::CodeGenContext& context, const gulc::ForStmt* forStmt, const std::string& loopName) {
+void gulc::CodeGen::generateForStmt(const gulc::ForStmt* forStmt, const std::string& loopName) {
     if (forStmt->preLoop != nullptr) {
-        generateExpr(context, forStmt->preLoop);
+        generateExpr(forStmt->preLoop);
     }
 
     std::string forName;
 
     if (loopName.empty()) {
-        forName = "loop" + std::to_string(context.loopNameNumber);
-        ++context.loopNameNumber;
+        forName = "loop" + std::to_string(loopNameNumber);
+        ++loopNameNumber;
     } else {
         forName = loopName;
     }
 
-    llvm::BasicBlock* loop = llvm::BasicBlock::Create(context.llvmContext, forName + "_loop", context.currentFunction);
-    llvm::BasicBlock* hiddenContinueLoop = llvm::BasicBlock::Create(context.llvmContext, forName + "_hidden_continue");
-    llvm::BasicBlock* continueLoop = llvm::BasicBlock::Create(context.llvmContext, forName + "_continue");
-    llvm::BasicBlock* breakLoop = llvm::BasicBlock::Create(context.llvmContext, forName + "_break");
+    llvm::BasicBlock* loop = llvm::BasicBlock::Create(*llvmContext, forName + "_loop", currentFunction);
+    llvm::BasicBlock* hiddenContinueLoop = llvm::BasicBlock::Create(*llvmContext, forName + "_hidden_continue");
+    llvm::BasicBlock* continueLoop = llvm::BasicBlock::Create(*llvmContext, forName + "_continue");
+    llvm::BasicBlock* breakLoop = llvm::BasicBlock::Create(*llvmContext, forName + "_break");
 
     // Set the loop as the current insert point
-    context.irBuilder.CreateBr(loop);
-    context.irBuilder.SetInsertPoint(loop);
+    irBuilder->CreateBr(loop);
+    irBuilder->SetInsertPoint(loop);
 
-    llvm::Value* cond = generateExpr(context, forStmt->condition);
+    llvm::Value* cond = generateExpr(forStmt->condition);
     // If the condition is true we continue the loop, if not we break from the loop...
-    context.irBuilder.CreateCondBr(cond, hiddenContinueLoop, breakLoop);
+    irBuilder->CreateCondBr(cond, hiddenContinueLoop, breakLoop);
 
     // Set the hidden continue loop as the current insert point
-    context.currentFunction->getBasicBlockList().push_back(hiddenContinueLoop);
-    context.irBuilder.SetInsertPoint(hiddenContinueLoop);
+    currentFunction->getBasicBlockList().push_back(hiddenContinueLoop);
+    irBuilder->SetInsertPoint(hiddenContinueLoop);
 
     // We make sure to back up and restore the old loop's break and continue blocks for our `break` and `continue` keywords
-    llvm::BasicBlock* oldLoopContinue = context.currentLoopBlockContinue;
-    llvm::BasicBlock* oldLoopBreak = context.currentLoopBlockBreak;
+    llvm::BasicBlock* oldLoopContinue = currentLoopBlockContinue;
+    llvm::BasicBlock* oldLoopBreak = currentLoopBlockBreak;
 
-    context.currentLoopBlockContinue = continueLoop;
-    context.currentLoopBlockBreak = breakLoop;
+    currentLoopBlockContinue = continueLoop;
+    currentLoopBlockBreak = breakLoop;
 
     // Generate the statement we loop on
-    context.enterNestedLoop(continueLoop, breakLoop);
-    generateStmt(context, forStmt->loopStmt);
-    context.leaveNestedLoop();
+    enterNestedLoop(continueLoop, breakLoop);
+    generateStmt(forStmt->loopStmt);
+    leaveNestedLoop();
 
-    context.currentLoopBlockContinue = oldLoopContinue;
-    context.currentLoopBlockBreak = oldLoopBreak;
+    currentLoopBlockContinue = oldLoopContinue;
+    currentLoopBlockBreak = oldLoopBreak;
 
     // Now we go to our actual continue block, the continue block has to be here so we apply the 'iterationExpr'
-    context.irBuilder.CreateBr(continueLoop);
-    context.currentFunction->getBasicBlockList().push_back(continueLoop);
-    context.irBuilder.SetInsertPoint(continueLoop);
+    irBuilder->CreateBr(continueLoop);
+    currentFunction->getBasicBlockList().push_back(continueLoop);
+    irBuilder->SetInsertPoint(continueLoop);
 
     // Generate the iteration expression (usually `++i`)
-    generateExpr(context, forStmt->iterationExpr);
+    generateExpr(forStmt->iterationExpr);
 
     // Branch back to the beginning of our loop...
-    context.irBuilder.CreateBr(loop);
+    irBuilder->CreateBr(loop);
 
     // And then finish off by adding the break point.
-    context.currentFunction->getBasicBlockList().push_back(breakLoop);
-    context.irBuilder.SetInsertPoint(breakLoop);
+    currentFunction->getBasicBlockList().push_back(breakLoop);
+    irBuilder->SetInsertPoint(breakLoop);
 }
 
-void gulc::CodeGen::generateBreakStmt(gulc::CodeGenContext &context, const gulc::BreakStmt *breakStmt) {
+void gulc::CodeGen::generateBreakStmt(const gulc::BreakStmt *breakStmt) {
     if (breakStmt->label().empty()) {
-        context.irBuilder.CreateBr(context.currentLoopBlockBreak);
+        irBuilder->CreateBr(currentLoopBlockBreak);
     } else {
-        llvm::BasicBlock* breakBlock = context.getBreakBlock(breakStmt->label());
+        llvm::BasicBlock* breakBlock = getBreakBlock(breakStmt->label());
 
         if (breakBlock == nullptr) {
             printError("[INTERNAL] block '" + breakStmt->label() + "' not found!",
-                       context.fileAst, breakStmt->startPosition(), breakStmt->endPosition());
+                       breakStmt->startPosition(), breakStmt->endPosition());
             return;
         }
 
-        context.irBuilder.CreateBr(breakBlock);
+        irBuilder->CreateBr(breakBlock);
     }
 }
 
-void gulc::CodeGen::generateContinueStmt(gulc::CodeGenContext &context, const gulc::ContinueStmt *continueStmt) {
+void gulc::CodeGen::generateContinueStmt(const gulc::ContinueStmt *continueStmt) {
     if (continueStmt->label().empty()) {
-        context.irBuilder.CreateBr(context.currentLoopBlockContinue);
+        irBuilder->CreateBr(currentLoopBlockContinue);
     } else {
-        llvm::BasicBlock* continueBlock = context.getContinueBlock(continueStmt->label());
+        llvm::BasicBlock* continueBlock = getContinueBlock(continueStmt->label());
 
         if (continueBlock == nullptr) {
             printError("[INTERNAL] block '" + continueStmt->label() + "' not found!",
-                       context.fileAst, continueStmt->startPosition(), continueStmt->endPosition());
+                       continueStmt->startPosition(), continueStmt->endPosition());
             return;
         }
 
-        context.irBuilder.CreateBr(continueBlock);
+        irBuilder->CreateBr(continueBlock);
     }
 }
 
 // Exprs
-llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(gulc::CodeGenContext &context, const gulc::BinaryOperatorExpr *binaryOperatorExpr) {
-    llvm::Value* leftValue = generateExpr(context, binaryOperatorExpr->leftValue);
-    llvm::Value* rightValue = generateExpr(context, binaryOperatorExpr->rightValue);
+llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperatorExpr *binaryOperatorExpr) {
+    llvm::Value* leftValue = generateExpr(binaryOperatorExpr->leftValue);
+    llvm::Value* rightValue = generateExpr(binaryOperatorExpr->rightValue);
 
     gulc::Type* resultType = binaryOperatorExpr->resultType;
 
@@ -628,173 +639,173 @@ llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(gulc::CodeGenContext &con
     } else if (!(llvm::isa<PointerType>(resultType) ||
                  llvm::isa<ReferenceType>(resultType))) {
         printError("unknown binary operator expression!",
-                   context.fileAst, binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+                   binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
         return nullptr;
     }
 
     if (binaryOperatorExpr->operatorName() == "=") {
-        return context.irBuilder.CreateStore(rightValue, leftValue, false);
+        return irBuilder->CreateStore(rightValue, leftValue, false);
     } else if (binaryOperatorExpr->operatorName() == "+") {
         if (isFloat) {
-            return context.irBuilder.CreateFAdd(leftValue, rightValue, "addtmp");
+            return irBuilder->CreateFAdd(leftValue, rightValue, "addtmp");
         } else {
-            return context.irBuilder.CreateAdd(leftValue, rightValue, "addtmp");
+            return irBuilder->CreateAdd(leftValue, rightValue, "addtmp");
         }
     } else if (binaryOperatorExpr->operatorName() == "-") {
         if (isFloat) {
-            return context.irBuilder.CreateFSub(leftValue, rightValue, "subtmp");
+            return irBuilder->CreateFSub(leftValue, rightValue, "subtmp");
         } else {
-            return context.irBuilder.CreateSub(leftValue, rightValue, "subtmp");
+            return irBuilder->CreateSub(leftValue, rightValue, "subtmp");
         }
     } else if (binaryOperatorExpr->operatorName() == "*") {
         if (isFloat) {
-            return context.irBuilder.CreateFMul(leftValue, rightValue, "multmp");
+            return irBuilder->CreateFMul(leftValue, rightValue, "multmp");
         } else {
-            return context.irBuilder.CreateMul(leftValue, rightValue, "multmp");
+            return irBuilder->CreateMul(leftValue, rightValue, "multmp");
         }
     } else if (binaryOperatorExpr->operatorName() == "/") {
         if (isFloat) {
-            return context.irBuilder.CreateFDiv(leftValue, rightValue, "divtmp");
+            return irBuilder->CreateFDiv(leftValue, rightValue, "divtmp");
         } else {
             // TODO: What are the `Exact` variants?
             if (isSigned) {
-                return context.irBuilder.CreateSDiv(leftValue, rightValue, "divtmp");
+                return irBuilder->CreateSDiv(leftValue, rightValue, "divtmp");
             } else {
-                return context.irBuilder.CreateUDiv(leftValue, rightValue, "divtmp");
+                return irBuilder->CreateUDiv(leftValue, rightValue, "divtmp");
             }
         }
     } else if (binaryOperatorExpr->operatorName() == "%") {
         if (isFloat) {
-            return context.irBuilder.CreateFRem(leftValue, rightValue, "remtmp");
+            return irBuilder->CreateFRem(leftValue, rightValue, "remtmp");
         } else {
             // TODO: What are the `Exact` variants?
             if (isSigned) {
-                return context.irBuilder.CreateSRem(leftValue, rightValue, "remtmp");
+                return irBuilder->CreateSRem(leftValue, rightValue, "remtmp");
             } else {
-                return context.irBuilder.CreateURem(leftValue, rightValue, "remtmp");
+                return irBuilder->CreateURem(leftValue, rightValue, "remtmp");
             }
         }
     } else if (binaryOperatorExpr->operatorName() == "^") {
-        return context.irBuilder.CreateXor(leftValue, rightValue, "xortmp");
+        return irBuilder->CreateXor(leftValue, rightValue, "xortmp");
     } else if (binaryOperatorExpr->operatorName() == "<<") {
-        return context.irBuilder.CreateShl(leftValue, rightValue, "shltmp");
+        return irBuilder->CreateShl(leftValue, rightValue, "shltmp");
     } else if (binaryOperatorExpr->operatorName() == ">>") {
         if (isSigned) {
-            return context.irBuilder.CreateAShr(leftValue, rightValue, "ashrtmp");
+            return irBuilder->CreateAShr(leftValue, rightValue, "ashrtmp");
         } else {
-            return context.irBuilder.CreateLShr(leftValue, rightValue, "lshrtmp");
+            return irBuilder->CreateLShr(leftValue, rightValue, "lshrtmp");
         }
     } else if (binaryOperatorExpr->operatorName() == "==") {
         if (isFloat) {
-            return context.irBuilder.CreateFCmpOEQ(leftValue, rightValue, "eqtmp");
+            return irBuilder->CreateFCmpOEQ(leftValue, rightValue, "eqtmp");
         } else {
-            return context.irBuilder.CreateICmpEQ(leftValue, rightValue, "eqtmp");
+            return irBuilder->CreateICmpEQ(leftValue, rightValue, "eqtmp");
         }
     } else if (binaryOperatorExpr->operatorName() == ">") {
         if (isFloat) {
-            return context.irBuilder.CreateFCmpOGT(leftValue, rightValue, "gttmp");
+            return irBuilder->CreateFCmpOGT(leftValue, rightValue, "gttmp");
         } else {
             if (isSigned) {
-                return context.irBuilder.CreateICmpSGT(leftValue, rightValue, "gttmp");
+                return irBuilder->CreateICmpSGT(leftValue, rightValue, "gttmp");
             } else {
-                return context.irBuilder.CreateICmpUGT(leftValue, rightValue, "gttmp");
+                return irBuilder->CreateICmpUGT(leftValue, rightValue, "gttmp");
             }
         }
     } else if (binaryOperatorExpr->operatorName() == ">=") {
         if (isFloat) {
-            return context.irBuilder.CreateFCmpOGE(leftValue, rightValue, "getmp");
+            return irBuilder->CreateFCmpOGE(leftValue, rightValue, "getmp");
         } else {
             if (isSigned) {
-                return context.irBuilder.CreateICmpSGE(leftValue, rightValue, "getmp");
+                return irBuilder->CreateICmpSGE(leftValue, rightValue, "getmp");
             } else {
-                return context.irBuilder.CreateICmpUGE(leftValue, rightValue, "getmp");
+                return irBuilder->CreateICmpUGE(leftValue, rightValue, "getmp");
             }
         }
     } else if (binaryOperatorExpr->operatorName() == "<") {
         if (isFloat) {
-            return context.irBuilder.CreateFCmpOLT(leftValue, rightValue, "lttmp");
+            return irBuilder->CreateFCmpOLT(leftValue, rightValue, "lttmp");
         } else {
             if (isSigned) {
-                return context.irBuilder.CreateICmpSLT(leftValue, rightValue, "lttmp");
+                return irBuilder->CreateICmpSLT(leftValue, rightValue, "lttmp");
             } else {
-                return context.irBuilder.CreateICmpULT(leftValue, rightValue, "lttmp");
+                return irBuilder->CreateICmpULT(leftValue, rightValue, "lttmp");
             }
         }
     } else if (binaryOperatorExpr->operatorName() == "<=") {
         if (isFloat) {
-            return context.irBuilder.CreateFCmpOLE(leftValue, rightValue, "letmp");
+            return irBuilder->CreateFCmpOLE(leftValue, rightValue, "letmp");
         } else {
             if (isSigned) {
-                return context.irBuilder.CreateICmpSLE(leftValue, rightValue, "letmp");
+                return irBuilder->CreateICmpSLE(leftValue, rightValue, "letmp");
             } else {
-                return context.irBuilder.CreateICmpULE(leftValue, rightValue, "letmp");
+                return irBuilder->CreateICmpULE(leftValue, rightValue, "letmp");
             }
         }
     } else {
         printError("binary operator '" + binaryOperatorExpr->operatorName() + "' not yet supported!",
-                   context.fileAst, binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+                   binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
         return nullptr;
     }
 }
 
-llvm::Value *gulc::CodeGen::generateIntegerLiteralExpr(gulc::CodeGenContext &context, const gulc::IntegerLiteralExpr *integerLiteralExpr) {
+llvm::Value *gulc::CodeGen::generateIntegerLiteralExpr(const gulc::IntegerLiteralExpr *integerLiteralExpr) {
     if (auto builtInType = llvm::dyn_cast<BuiltInType>(integerLiteralExpr->resultType)) {
         unsigned int numOfBits = builtInType->size() * 8;
-        return llvm::ConstantInt::get(context.llvmContext, llvm::APInt(numOfBits, integerLiteralExpr->numberString(), integerLiteralExpr->numberBase()));
+        return llvm::ConstantInt::get(*llvmContext, llvm::APInt(numOfBits, integerLiteralExpr->numberString(), integerLiteralExpr->numberBase()));
     } else {
         printError("unknown integer literal type!",
-                   context.fileAst, integerLiteralExpr->startPosition(), integerLiteralExpr->endPosition());
+                   integerLiteralExpr->startPosition(), integerLiteralExpr->endPosition());
         return nullptr;
     }
 }
 
-llvm::Value *gulc::CodeGen::generateFloatLiteralExpr(gulc::CodeGenContext &context, const gulc::FloatLiteralExpr *floatLiteralExpr) {
+llvm::Value *gulc::CodeGen::generateFloatLiteralExpr(const gulc::FloatLiteralExpr *floatLiteralExpr) {
     if (auto builtInType = llvm::dyn_cast<BuiltInType>(floatLiteralExpr->resultType)) {
         switch (builtInType->size()) {
             case 2:
-                return llvm::ConstantFP::get(context.llvmContext, llvm::APFloat(llvm::APFloat::IEEEhalf(), floatLiteralExpr->numberValue()));
+                return llvm::ConstantFP::get(*llvmContext, llvm::APFloat(llvm::APFloat::IEEEhalf(), floatLiteralExpr->numberValue()));
             case 4:
-                return llvm::ConstantFP::get(context.llvmContext, llvm::APFloat(llvm::APFloat::IEEEsingle(), floatLiteralExpr->numberValue()));
+                return llvm::ConstantFP::get(*llvmContext, llvm::APFloat(llvm::APFloat::IEEEsingle(), floatLiteralExpr->numberValue()));
             case 8:
-                return llvm::ConstantFP::get(context.llvmContext, llvm::APFloat(llvm::APFloat::IEEEdouble(), floatLiteralExpr->numberValue()));
+                return llvm::ConstantFP::get(*llvmContext, llvm::APFloat(llvm::APFloat::IEEEdouble(), floatLiteralExpr->numberValue()));
             // case 16: // TODO: Support the quad
             default:
                 printError("unsupported floating point size!",
-                           context.fileAst, floatLiteralExpr->startPosition(), floatLiteralExpr->endPosition());
+                           floatLiteralExpr->startPosition(), floatLiteralExpr->endPosition());
                 return nullptr;
         }
     }
 
     printError("unknown float literal type!",
-               context.fileAst, floatLiteralExpr->startPosition(), floatLiteralExpr->endPosition());
+               floatLiteralExpr->startPosition(), floatLiteralExpr->endPosition());
     return nullptr;
 }
 
-llvm::Value *gulc::CodeGen::generateLocalVariableDeclExpr(gulc::CodeGenContext &context, const gulc::LocalVariableDeclExpr *localVariableDeclExpr) {
-    return context.addLocalVariable(localVariableDeclExpr->name(), generateLlvmType(context, localVariableDeclExpr->resultType));
+llvm::Value *gulc::CodeGen::generateLocalVariableDeclExpr(const gulc::LocalVariableDeclExpr *localVariableDeclExpr) {
+    return addLocalVariable(localVariableDeclExpr->name(), generateLlvmType(localVariableDeclExpr->resultType));
 }
 
-llvm::Value *gulc::CodeGen::generateIdentifierExpr(gulc::CodeGenContext &context, const gulc::IdentifierExpr *identifierExpr) {
+llvm::Value *gulc::CodeGen::generateIdentifierExpr(const gulc::IdentifierExpr *identifierExpr) {
     printError("[INTERNAL] identifier found in codegen, expression not supported!",
-               context.fileAst, identifierExpr->startPosition(), identifierExpr->endPosition());
+               identifierExpr->startPosition(), identifierExpr->endPosition());
     return nullptr;
 }
 
-llvm::Value *gulc::CodeGen::generateImplicitCastExpr(gulc::CodeGenContext &context, const gulc::ImplicitCastExpr *implicitCastExpr) {
-    llvm::Value* result = generateExpr(context, implicitCastExpr->castee);
-    castValue(context, implicitCastExpr->castType, implicitCastExpr->castee->resultType, result);
+llvm::Value *gulc::CodeGen::generateImplicitCastExpr(const gulc::ImplicitCastExpr *implicitCastExpr) {
+    llvm::Value* result = generateExpr(implicitCastExpr->castee);
+    castValue(implicitCastExpr->castType, implicitCastExpr->castee->resultType, result);
     return result;
 }
 
-llvm::Value *gulc::CodeGen::generateLValueToRValue(gulc::CodeGenContext &context, const gulc::LValueToRValueExpr *lValueToRValueExpr) {
-    llvm::Value* lValue = generateExpr(context, lValueToRValueExpr->lvalue);
+llvm::Value *gulc::CodeGen::generateLValueToRValue(const gulc::LValueToRValueExpr *lValueToRValueExpr) {
+    llvm::Value* lValue = generateExpr(lValueToRValueExpr->lvalue);
 
-    return context.irBuilder.CreateLoad(lValue, "l2r");
+    return irBuilder->CreateLoad(lValue, "l2r");
 }
 
-llvm::Value *gulc::CodeGen::generateFunctionCallExpr(gulc::CodeGenContext &context, const gulc::FunctionCallExpr *functionCallExpr) {
+llvm::Value *gulc::CodeGen::generateFunctionCallExpr(const gulc::FunctionCallExpr *functionCallExpr) {
     std::string funcName;
-    llvm::Function* func = generateRefFunctionExpr(context, functionCallExpr->functionReference, &funcName);
+    llvm::Function* func = generateRefFunctionExpr(functionCallExpr->functionReference, &funcName);
 
     std::vector<llvm::Value*> llvmArgs{};
 
@@ -802,14 +813,14 @@ llvm::Value *gulc::CodeGen::generateFunctionCallExpr(gulc::CodeGenContext &conte
         llvmArgs.reserve(functionCallExpr->arguments.size());
 
         for (gulc::Expr *arg : functionCallExpr->arguments) {
-            llvmArgs.push_back(generateExpr(context, arg));
+            llvmArgs.push_back(generateExpr(arg));
         }
     }
 
-    return context.irBuilder.CreateCall(func, llvmArgs, funcName + "_result");
+    return irBuilder->CreateCall(func, llvmArgs, funcName + "_result");
 }
 
-llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(gulc::CodeGenContext &context, const gulc::PrefixOperatorExpr *prefixOperatorExpr) {
+llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperatorExpr *prefixOperatorExpr) {
     gulc::Type* exprResultType = prefixOperatorExpr->expr->resultType;
 
     // Ignore the const, mut, and immut...
@@ -824,162 +835,154 @@ llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(gulc::CodeGenContext &con
     if (llvm::isa<gulc::BuiltInType>(exprResultType)) {
         auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(exprResultType);
 
-        llvm::Value* lvalue = generateExpr(context, prefixOperatorExpr->expr);
-        llvm::Value* rvalue = context.irBuilder.CreateLoad(lvalue, "l2r");
+        llvm::Value* lvalue = generateExpr(prefixOperatorExpr->expr);
+        llvm::Value* rvalue = irBuilder->CreateLoad(lvalue, "l2r");
 
         if (prefixOperatorExpr->operatorName() == "++") {
             if (builtInType->isFloating()) {
-                llvm::Value* newValue = context.irBuilder.CreateFAdd(rvalue, llvm::ConstantFP::get(context.llvmContext, llvm::APFloat(1.0f)), "preinctmp");
-                context.irBuilder.CreateStore(newValue, lvalue);
+                llvm::Value* newValue = irBuilder->CreateFAdd(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)), "preinctmp");
+                irBuilder->CreateStore(newValue, lvalue);
             } else {
-                llvm::Value* newValue = context.irBuilder.CreateAdd(rvalue, llvm::ConstantInt::get(context.llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "preinctmp");
-                context.irBuilder.CreateStore(newValue, lvalue);
+                llvm::Value* newValue = irBuilder->CreateAdd(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "preinctmp");
+                irBuilder->CreateStore(newValue, lvalue);
             }
         } else if (prefixOperatorExpr->operatorName() == "--") {
             if (builtInType->isFloating()) {
-                llvm::Value* newValue = context.irBuilder.CreateFSub(rvalue, llvm::ConstantFP::get(context.llvmContext, llvm::APFloat(1.0f)), "predectmp");
-                context.irBuilder.CreateStore(newValue, lvalue);
+                llvm::Value* newValue = irBuilder->CreateFSub(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)), "predectmp");
+                irBuilder->CreateStore(newValue, lvalue);
             } else {
-                llvm::Value* newValue = context.irBuilder.CreateSub(rvalue, llvm::ConstantInt::get(context.llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "predectmp");
-                context.irBuilder.CreateStore(newValue, lvalue);
+                llvm::Value* newValue = irBuilder->CreateSub(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "predectmp");
+                irBuilder->CreateStore(newValue, lvalue);
             }
         } else if (prefixOperatorExpr->operatorName() == "-") {
             if (builtInType->isFloating()) {
-                return context.irBuilder.CreateFNeg(rvalue, "negtmp");
+                return irBuilder->CreateFNeg(rvalue, "negtmp");
             } else {
-                return context.irBuilder.CreateNeg(rvalue, "negtmp");
+                return irBuilder->CreateNeg(rvalue, "negtmp");
             }
         } else if (prefixOperatorExpr->operatorName() == "&" || prefixOperatorExpr->operatorName() == ".ref") {
             // TODO: Should we try to do error checking here?
             return lvalue;
         } else if (prefixOperatorExpr->operatorName() != "+") {
             printError("unknown built in prefix operator '" + prefixOperatorExpr->operatorName() +  "'!",
-                       context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+                       prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
         }
 
         return lvalue;
     } else if (llvm::isa<PointerType>(exprResultType)) {
-        llvm::Value *lvalue = generateExpr(context, prefixOperatorExpr->expr);
-        llvm::Value *rvalue = context.irBuilder.CreateLoad(lvalue, "l2r");
+        llvm::Value *lvalue = generateExpr(prefixOperatorExpr->expr);
 
         if (prefixOperatorExpr->operatorName() == "*") {
-            return context.irBuilder.CreateLoad(rvalue, "deref");
+            return irBuilder->CreateLoad(lvalue, "deref");
         } else if (prefixOperatorExpr->operatorName() == "++" || prefixOperatorExpr->operatorName() == "--") {
             // TODO: We need to know the size of a pointer to support this...
             printError("increment and decrement operators not yet supported on pointer types!",
-                       context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+                       prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
         } else {
             printError("unknown prefix operator '" + prefixOperatorExpr->operatorName() + "' used on pointer type!",
-                       context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+                       prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
         }
     } else if (llvm::isa<ReferenceType>(exprResultType)) {
-        llvm::Value *lvalue = generateExpr(context, prefixOperatorExpr->expr);
-        llvm::Value *rvalue = context.irBuilder.CreateLoad(lvalue, "l2r");
+        llvm::Value *lvalue = generateExpr(prefixOperatorExpr->expr);
+        llvm::Value *rvalue = irBuilder->CreateLoad(lvalue, "l2r");
 
         if (prefixOperatorExpr->operatorName() == ".deref") {
-            return context.irBuilder.CreateLoad(rvalue, "deref");
+            return irBuilder->CreateLoad(rvalue, "deref");
         } else if (prefixOperatorExpr->operatorName() == "++" || prefixOperatorExpr->operatorName() == "--") {
             // TODO: We need to know the size of a pointer to support this...
             printError("increment and decrement operators not yet supported on reference types!",
-                       context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+                       prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
         } else {
             printError("unknown prefix operator '" + prefixOperatorExpr->operatorName() + "' used on reference type!",
-                       context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+                       prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
         }
     } else {
         printError("built in prefix operator called on unsupported type!",
-                   context.fileAst, prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+                   prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
     }
 
     return nullptr;
 }
 
-llvm::Value *gulc::CodeGen::generatePostfixOperatorExpr(gulc::CodeGenContext &context, const gulc::PostfixOperatorExpr *postfixOperatorExpr) {
+llvm::Value *gulc::CodeGen::generatePostfixOperatorExpr(const gulc::PostfixOperatorExpr *postfixOperatorExpr) {
     if (!llvm::isa<gulc::BuiltInType>(postfixOperatorExpr->resultType)) {
         printError("built in postfix operator called on non-built in type!",
-                   context.fileAst, postfixOperatorExpr->startPosition(), postfixOperatorExpr->endPosition());
+                   postfixOperatorExpr->startPosition(), postfixOperatorExpr->endPosition());
         return nullptr;
     }
 
     auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(postfixOperatorExpr->resultType);
 
-    llvm::Value* lvalue = generateExpr(context, postfixOperatorExpr->expr);
-    llvm::Value* rvalue = context.irBuilder.CreateLoad(lvalue, "l2r");
+    llvm::Value* lvalue = generateExpr(postfixOperatorExpr->expr);
+    llvm::Value* rvalue = irBuilder->CreateLoad(lvalue, "l2r");
 
     if (postfixOperatorExpr->operatorName() == "++") {
         if (builtInType->isFloating()) {
-            llvm::Value* newValue = context.irBuilder.CreateFAdd(rvalue, llvm::ConstantFP::get(context.llvmContext, llvm::APFloat(1.0f)), "preinctmp");
-            context.irBuilder.CreateStore(newValue, lvalue);
+            llvm::Value* newValue = irBuilder->CreateFAdd(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)), "preinctmp");
+            irBuilder->CreateStore(newValue, lvalue);
         } else {
-            llvm::Value* newValue = context.irBuilder.CreateAdd(rvalue, llvm::ConstantInt::get(context.llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "preinctmp");
-            context.irBuilder.CreateStore(newValue, lvalue);
+            llvm::Value* newValue = irBuilder->CreateAdd(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "preinctmp");
+            irBuilder->CreateStore(newValue, lvalue);
         }
     } else if (postfixOperatorExpr->operatorName() == "--") {
         if (builtInType->isFloating()) {
-            llvm::Value* newValue = context.irBuilder.CreateFSub(rvalue, llvm::ConstantFP::get(context.llvmContext, llvm::APFloat(1.0f)), "predectmp");
-            context.irBuilder.CreateStore(newValue, lvalue);
+            llvm::Value* newValue = irBuilder->CreateFSub(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)), "predectmp");
+            irBuilder->CreateStore(newValue, lvalue);
         } else {
-            llvm::Value* newValue = context.irBuilder.CreateSub(rvalue, llvm::ConstantInt::get(context.llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "predectmp");
-            context.irBuilder.CreateStore(newValue, lvalue);
+            llvm::Value* newValue = irBuilder->CreateSub(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "predectmp");
+            irBuilder->CreateStore(newValue, lvalue);
         }
     } else {
         printError("unknown built in postfix operator!",
-                   context.fileAst, postfixOperatorExpr->startPosition(), postfixOperatorExpr->endPosition());
+                   postfixOperatorExpr->startPosition(), postfixOperatorExpr->endPosition());
     }
 
     return rvalue;
 }
 
-llvm::Value *gulc::CodeGen::generateRefLocalVariableExpr(gulc::CodeGenContext &context, const gulc::RefLocalVariableExpr *refLocalVariableExpr) {
-    llvm::AllocaInst* localVariableAlloca = context.getLocalVariableOrNull(refLocalVariableExpr->name());
+llvm::Value *gulc::CodeGen::generateRefLocalVariableExpr(const gulc::RefLocalVariableExpr *refLocalVariableExpr) {
+    llvm::AllocaInst* localVariableAlloca = getLocalVariableOrNull(refLocalVariableExpr->name());
 
     if (localVariableAlloca != nullptr) {
         return localVariableAlloca;
     } else {
         printError("[INTERNAL] local variable was not found!",
-                   context.fileAst, refLocalVariableExpr->startPosition(), refLocalVariableExpr->endPosition());
+                   refLocalVariableExpr->startPosition(), refLocalVariableExpr->endPosition());
     }
 
     return nullptr;
 }
 
-llvm::Value *gulc::CodeGen::generateRefParameterExpr(gulc::CodeGenContext &context, const gulc::RefParameterExpr *refParameterExpr) {
-    // The naming is a little weird to me, while yes the value referenced is technically the argument value we're still
-    //  referencing the parameter name here. Doesn't `currentFunction->params()` make much more sense?
-    std::size_t index = 0;
-
-    for (llvm::Argument& param : context.currentFunction->args()) {
-        if (index == refParameterExpr->paramIndex()) {
-            return &param;
-        }
-
-        ++index;
+llvm::Value *gulc::CodeGen::generateRefParameterExpr(const gulc::RefParameterExpr *refParameterExpr) {
+    if (refParameterExpr->paramIndex() < currentFunctionParameters.size()) {
+        return currentFunctionParameters[refParameterExpr->paramIndex()];
     }
 
     printError("[INTERNAL] parameter was not found!",
-               context.fileAst, refParameterExpr->startPosition(), refParameterExpr->endPosition());
+               refParameterExpr->startPosition(), refParameterExpr->endPosition());
     return nullptr;
 }
 
-llvm::Function *gulc::CodeGen::generateRefFunctionExpr(gulc::CodeGenContext &context, const gulc::Expr *expr, std::string *nameOut) {
+llvm::Function *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr, std::string *nameOut) {
     switch (expr->getExprKind()) {
         case gulc::Expr::Kind::RefFileFunction: {
             auto refFileFunction = llvm::dyn_cast<RefFileFunctionExpr>(expr);
             *nameOut = refFileFunction->name();
-            return generateRefFileFunctionExpr(context, refFileFunction);
+            return generateRefFileFunctionExpr(refFileFunction);
         }
         default:
             printError("[INTERNAL] unsupported function reference!",
-                       context.fileAst, expr->startPosition(), expr->endPosition());
+                       expr->startPosition(), expr->endPosition());
             return nullptr;
     }
 }
 
-llvm::Function *gulc::CodeGen::generateRefFileFunctionExpr(gulc::CodeGenContext &context, const gulc::RefFileFunctionExpr *refFileFunctionExpr) {
-    return nullptr;
+llvm::Function *gulc::CodeGen::generateRefFileFunctionExpr(const gulc::RefFileFunctionExpr *refFileFunctionExpr) {
+    // NOTE: All error checking is should be handled before the code generator
+    return module->getFunction(refFileFunctionExpr->name());
 }
 
-void gulc::CodeGen::castValue(CodeGenContext& context, gulc::Type *to, gulc::Type *from, llvm::Value*& value) {
+void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& value) {
     // We ignore const, mut, and immut here since LLVM doesn't have any concept of these...
     if (llvm::isa<ConstType>(to)) {
         to = llvm::dyn_cast<ConstType>(to)->pointToType;
@@ -1006,51 +1009,51 @@ void gulc::CodeGen::castValue(CodeGenContext& context, gulc::Type *to, gulc::Typ
             if (fromBuiltIn->isFloating()) {
                 if (toBuiltIn->isFloating()) {
                     if (toBuiltIn->size() > fromBuiltIn->size()) {
-                        value = context.irBuilder.CreateFPExt(value, generateLlvmType(context, to), "fpext");
+                        value = irBuilder->CreateFPExt(value, generateLlvmType(to), "fpext");
                         return;
                     } else {
-                        value = context.irBuilder.CreateFPTrunc(value, generateLlvmType(context, to), "fptrunc");
+                        value = irBuilder->CreateFPTrunc(value, generateLlvmType(to), "fptrunc");
                         return;
                     }
                 } else if (toBuiltIn->isSigned()) {
-                    value = context.irBuilder.CreateFPToSI(value, generateLlvmType(context, to), "fp2si");
+                    value = irBuilder->CreateFPToSI(value, generateLlvmType(to), "fp2si");
                     return;
                 } else {
-                    value = context.irBuilder.CreateFPToUI(value, generateLlvmType(context, to), "fp2ui");
+                    value = irBuilder->CreateFPToUI(value, generateLlvmType(to), "fp2ui");
                     return;
                 }
             } else if (fromBuiltIn->isSigned()) {
                 if (toBuiltIn->isFloating()) {
-                    value = context.irBuilder.CreateSIToFP(value, generateLlvmType(context, to), "si2fp");
+                    value = irBuilder->CreateSIToFP(value, generateLlvmType(to), "si2fp");
                     return;
                 } else {
                     // TODO: I'm not sure if the `isSigned` is meant for `value` or `destTy`? Assuming value...
-                    value = context.irBuilder.CreateIntCast(value, generateLlvmType(context, to), fromBuiltIn->isSigned(), "si2int");
+                    value = irBuilder->CreateIntCast(value, generateLlvmType(to), fromBuiltIn->isSigned(), "si2int");
                     return;
                 }
             } else {
                 if (toBuiltIn->isFloating()) {
-                    value = context.irBuilder.CreateUIToFP(value, generateLlvmType(context, to), "ui2fp");
+                    value = irBuilder->CreateUIToFP(value, generateLlvmType(to), "ui2fp");
                     return;
                 } else {
                     // TODO: I'm not sure if the `isSigned` is meant for `value` or `destTy`? Assuming value...
-                    value = context.irBuilder.CreateIntCast(value, generateLlvmType(context, to), fromBuiltIn->isSigned(), "ui2int");
+                    value = irBuilder->CreateIntCast(value, generateLlvmType(to), fromBuiltIn->isSigned(), "ui2int");
                     return;
                 }
             }
         } else if (llvm::isa<PointerType>(to)) {
             if (fromBuiltIn->isFloating()) {
                 printError("[INTERNAL] casting from a float to a pointer is NOT supported!",
-                           context.fileAst, to->startPosition(), to->endPosition());
+                           to->startPosition(), to->endPosition());
                 return;
             }
 
-            value = context.irBuilder.CreateIntToPtr(value, generateLlvmType(context, to), "int2ptr");
+            value = irBuilder->CreateIntToPtr(value, generateLlvmType(to), "int2ptr");
             return;
         }
     }
 
     // TODO: We need to have the start and end positions passed to us
     printError("casting to type `" + to->getString() + "` from type `" + from->getString() + "` is not supported!",
-               context.fileAst, to->startPosition(), to->endPosition());
+               to->startPosition(), to->endPosition());
 }

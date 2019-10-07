@@ -21,6 +21,7 @@
 #include <AST/Types/ImmutType.hpp>
 #include <AST/Types/MutType.hpp>
 #include "CodeVerifier.hpp"
+#include "DeclResolver.hpp"
 
 using namespace gulc;
 
@@ -335,6 +336,12 @@ void CodeVerifier::verifyExpr(Expr*& expr) {
 
 // Decls
 void CodeVerifier::verifyFunctionDecl(FunctionDecl *functionDecl) {
+    if (checkFunctionExists(functionDecl)) {
+        printError("function name '" + functionDecl->name() + "' is ambiguous with the current parameter types!",
+                   functionDecl->startPosition(), functionDecl->endPosition());
+        return;
+    }
+
     currentFunctionReturnType = functionDecl->resultType;
     currentFunctionTemplateParameters = &functionDecl->templateParameters;
     currentFunctionParameters = &functionDecl->parameters;
@@ -413,7 +420,9 @@ void CodeVerifier::verifyLabeledStmt(LabeledStmt *labeledStmt) {
 
 void CodeVerifier::verifyReturnStmt(ReturnStmt *returnStmt) {
     // TODO: Should we verify the return value result type is the same as the result type of the current function?
-    verifyExpr(returnStmt->returnValue);
+    if (returnStmt->hasReturnValue()) {
+        verifyExpr(returnStmt->returnValue);
+    }
 }
 
 void CodeVerifier::verifySwitchStmt(SwitchStmt *switchStmt) {
@@ -587,4 +596,64 @@ void CodeVerifier::verifyTernaryExpr(TernaryExpr *ternaryExpr) {
 void CodeVerifier::verifyUnresolvedTypeRefExpr(Expr *&expr) {
     printError("[INTERNAL] found `UnresolvedTypeRefExpr` in verifier, this is not supported!",
                expr->startPosition(), expr->endPosition());
+}
+
+bool CodeVerifier::checkFunctionExists(FunctionDecl *function) {
+    // TODO: Check current class
+    // TODO: Check current namespace
+    // Check current file
+    for (Decl* checkDecl : currentFileAst->topLevelDecls()) {
+        // Skip if the `checkDecl` IS the `function` we're supposed to be checking...
+        if (function == checkDecl) continue;
+
+        if (llvm::isa<FunctionDecl>(checkDecl)) {
+            auto functionDecl = llvm::dyn_cast<FunctionDecl>(checkDecl);
+
+            if (checkDecl->name() == function->name()) {
+                // If the parameters are the same then we return saying the function exists...
+                if (checkParamsAreSame(functionDecl->parameters, function->parameters)) {
+                    return true;
+                }
+                // Else we keep searching...
+            }
+        }
+    }
+
+    return false;
+}
+
+bool CodeVerifier::checkParamsAreSame(std::vector<ParameterDecl *> &params1, std::vector<ParameterDecl *> &params2) {
+    // NOTE: We do NOT allow overloaded functions with optional values to conflict with functions that do not have optionals
+    //  Ex: `test(int i)` and `test(int i, int j = 0)` CANNOT appear in the same context.
+    //  This should NOT be an ambiguity error when you call `test`, it should be an error when generating one of the functions (depends on the order the functions compile in...)
+    std::size_t checkLength = params1.size();
+
+    if (params2.size() > checkLength) {
+        checkLength = params2.size();
+    }
+
+    for (std::size_t i = 0; i < checkLength; ++i) {
+        // If `i` is greater than or equal to the size of `param1` or `param2` then we check the opposite list for an optional value
+        //  if there is an optional value at the index then we say the types are the same.
+        if (i >= params1.size()) {
+            return params2[i]->hasDefaultArgument();
+        } else if (i >= params2.size()) {
+            return params1[i]->hasDefaultArgument();
+        } else {
+            // If `i` is still within the range for both `param1` and `param2` then we check the equality of each param...
+            Type* paramType1 = params1[i]->type;
+            Type* paramType2 = params2[i]->type;
+
+            // All parameters are const by default, so we ignore the const qualifier...
+            if (llvm::isa<ConstType>(paramType1)) paramType1 = llvm::dyn_cast<ConstType>(paramType1)->pointToType;
+            if (llvm::isa<ConstType>(paramType2)) paramType2 = llvm::dyn_cast<ConstType>(paramType2)->pointToType;
+
+            if (!DeclResolver::getTypesAreSame(paramType1, paramType2)) {
+                return false;
+            }
+        }
+    }
+
+    // If we reach this point then the parameter lists are the same in terms of callability...
+    return true;
 }

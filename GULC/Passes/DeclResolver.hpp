@@ -57,6 +57,8 @@
 namespace gulc {
     // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
     class DeclResolver {
+        friend class CodeVerifier;
+
     public:
         DeclResolver()
                 : currentFileAst(nullptr), returnType(nullptr), functionTemplateParams(nullptr),
@@ -68,13 +70,11 @@ namespace gulc {
     private:
         bool resolveType(Type*& type);
 
-        bool getTypesAreSame(const Type* type1, const Type* type2, bool ignoreQualifiers = false);
+        static bool getTypesAreSame(const Type* type1, const Type* type2, bool ignoreQualifiers = false);
         bool shouldCastType(const Type* to, const Type* from);
         bool getTypeIsReference(const Type* check);
 
         Type* deepCopyAndSimplifyType(const Type* type);
-
-        bool checkFunctionExists(FunctionDecl* function, bool nameAmbiguous);
 
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
         void printWarning(const std::string& message, TextPosition startPosition, TextPosition endPosition);

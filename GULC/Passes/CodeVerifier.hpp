@@ -60,6 +60,9 @@ namespace gulc {
         bool canCastType(Type* to, Type* from, bool isExplicit);
         bool typeIsAssignable(Type* checkType);
 
+        bool checkFunctionExists(FunctionDecl* function);
+        bool checkParamsAreSame(std::vector<ParameterDecl*>& params1, std::vector<ParameterDecl*>& params2);
+
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
         void printWarning(const std::string& message, TextPosition startPosition, TextPosition endPosition);
         void printDebugWarning(const std::string& message);
