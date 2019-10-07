@@ -41,16 +41,20 @@ namespace gulc {
         TextPosition endPosition() const { return _endPosition; }
         virtual std::string getString() const = 0;
 
+        virtual bool isLValue() const { return _isLValue; }
+        virtual void setIsLValue(bool isLValue) { _isLValue = isLValue; }
+
         virtual ~Type() = default;
 
     protected:
         Type(Kind kind, TextPosition startPosition, TextPosition endPosition)
-                : _kind(kind), _startPosition(startPosition), _endPosition(endPosition) {}
+                : _kind(kind), _startPosition(startPosition), _endPosition(endPosition), _isLValue(false) {}
 
     private:
         const Kind _kind;
         const TextPosition _startPosition;
         const TextPosition _endPosition;
+        bool _isLValue;
 
     };
 }

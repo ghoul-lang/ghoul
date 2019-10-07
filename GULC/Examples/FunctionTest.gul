@@ -1,12 +1,14 @@
-void test(int* i) {
-    *i = 23;
-    return;
+int& lvalueTest(int& i) {
+    return i;
+}
+
+void modify(int* mod) {
+    *mod += 1;
 }
 
 int main() {
     int result = 2;
-
-    test(&result);
-
-    return result;
+    int& l = lvalueTest(result);
+    modify(&result);
+    return l;
 }

@@ -24,7 +24,10 @@ namespace gulc {
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::Reference; }
 
         ReferenceType(TextPosition startPosition, TextPosition endPosition, Type* referenceToType)
-                : Type(Kind::Reference, startPosition, endPosition), referenceToType(referenceToType) {}
+                : Type(Kind::Reference, startPosition, endPosition), referenceToType(referenceToType) {
+            // `ReferenceType` is an lvalue by default.
+            setIsLValue(true);
+        }
 
         Type *referenceToType;
 

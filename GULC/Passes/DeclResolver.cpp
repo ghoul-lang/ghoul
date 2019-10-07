@@ -652,9 +652,7 @@ void DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
             typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
         }
 
-        if (!getTypeIsReference(returnType)) {
-            convertLValueToRValue(returnStmt->returnValue);
-        }
+        convertLValueToRValue(returnStmt->returnValue, !getTypeIsReference(returnType));
 
         if (!typesAreSame) {
             // We will handle this in the verifier.
@@ -1014,7 +1012,8 @@ void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
     for (Expr*& arg : functionCallExpr->arguments) {
         processExpr(arg);
 
-        convertLValueToRValue(arg);
+        // NOTE: `convertLValueToRValue` is called AFTER resolving the declaration...
+        //convertLValueToRValue(arg);
     }
 
     if (functionCallExpr->hasArguments()) {
@@ -1027,6 +1026,13 @@ void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
     // TODO: Support `ConstType`, `MutType`, and `ImmutType` since they can all contain `FunctionPointerType`
     if (llvm::isa<FunctionPointerType>(functionCallExpr->functionReference->resultType)) {
         auto functionPointerType = llvm::dyn_cast<FunctionPointerType>(functionCallExpr->functionReference->resultType);
+
+        for (std::size_t i = 0; i < functionCallExpr->arguments.size(); ++i) {
+            // TODO: We will also have to handle implicit casting at some point...
+            if (!getTypeIsReference(functionPointerType->paramTypes[i])) {
+                convertLValueToRValue(functionCallExpr->arguments[i]);
+            }
+        }
 
         // We set the result type of this expression to the result type of the function being called.
         functionCallExpr->resultType = deepCopyAndSimplifyType(functionPointerType->resultType);
@@ -1080,6 +1086,8 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
             expr = new RefLocalVariableExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
                                             identifierExpr->name());
             expr->resultType = deepCopyAndSimplifyType(functionLocalVariables[i]->resultType);
+            // A local variable reference is an lvalue.
+            expr->resultType->setIsLValue(true);
 
             delete identifierExpr;
 
@@ -1099,6 +1107,8 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                 expr = new RefParameterExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
                                             paramIndex);
                 expr->resultType = deepCopyAndSimplifyType((*functionParams)[paramIndex]->type);
+                // A parameter reference is an lvalue.
+                expr->resultType->setIsLValue(true);
 
                 delete identifierExpr;
 
@@ -1163,8 +1173,16 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                                 break;
                             }
 
+                            Type* argType = (*(functionCallArgs))[i]->resultType;
+                            Type* paramType = functionDecl->parameters[i]->type;
+
+                            if (llvm::isa<ReferenceType>(argType)) argType = llvm::dyn_cast<ReferenceType>(argType)->referenceToType;
+                            if (llvm::isa<RValueReferenceType>(argType)) argType = llvm::dyn_cast<RValueReferenceType>(argType)->referenceToType;
+                            if (llvm::isa<ReferenceType>(paramType)) paramType = llvm::dyn_cast<ReferenceType>(paramType)->referenceToType;
+                            if (llvm::isa<RValueReferenceType>(paramType)) paramType = llvm::dyn_cast<RValueReferenceType>(paramType)->referenceToType;
+
                             // TODO: Support checking if something can be implicitly casted properly.
-                            if (!getTypesAreSame((*(functionCallArgs))[i]->resultType, functionDecl->parameters[i]->type)) {
+                            if (!getTypesAreSame(argType, paramType)) {
                                 argsMatch = false;
                                 break;
                             }
@@ -1317,9 +1335,11 @@ void DeclResolver::processLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr)
 
         processExpr(argument);
 
-        expr = new PrefixOperatorExpr(localVariableDeclOrPrefixOperatorCallExpr->startPosition(),
-                                      localVariableDeclOrPrefixOperatorCallExpr->endPosition(),
-                                      operatorName, argument);
+        PrefixOperatorExpr* prefixOperatorExpr = new PrefixOperatorExpr(localVariableDeclOrPrefixOperatorCallExpr->startPosition(),
+                                                                        localVariableDeclOrPrefixOperatorCallExpr->endPosition(),
+                                                                        operatorName, argument);
+        processPrefixOperatorExpr(prefixOperatorExpr);
+        expr = prefixOperatorExpr;
 
         delete localVariableDeclOrPrefixOperatorCallExpr;
         return;
@@ -1401,6 +1421,8 @@ void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorE
         if (llvm::isa<PointerType>(checkType)) {
             auto pointerType = llvm::dyn_cast<PointerType>(checkType);
             prefixOperatorExpr->resultType = deepCopyAndSimplifyType(pointerType->pointToType);
+            // A dereferenced value is an lvalue
+            prefixOperatorExpr->resultType->setIsLValue(true);
         } else {
             printError("cannot dereference non-pointer type `" + prefixOperatorExpr->expr->resultType->getString() + "`!",
                        prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
@@ -1419,6 +1441,8 @@ void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorE
         if (llvm::isa<ReferenceType>(checkType)) {
             auto referenceType = llvm::dyn_cast<ReferenceType>(checkType);
             prefixOperatorExpr->resultType = deepCopyAndSimplifyType(referenceType->referenceToType);
+            // A dereferenced value is an lvalue
+            prefixOperatorExpr->resultType->setIsLValue(true);
         } else {
             printError("[INTERNAL] expected reference type!", prefixOperatorExpr->expr->startPosition(), prefixOperatorExpr->expr->endPosition());
             return;
@@ -1460,28 +1484,30 @@ void DeclResolver::processUnresolvedTypeRefExpr(Expr *&expr) {
     delete unresolvedTypeRefExpr;
 }
 
-void DeclResolver::convertLValueToRValue(Expr*& potentialLValue) {
-    // TODO: IdentifierExpr isn't the only thing we will have to do this for, right?
+void DeclResolver::convertLValueToRValue(Expr*& potentialLValue, bool derefReferences) {
     Type* checkType = potentialLValue->resultType;
 
-    if (llvm::isa<MutType>(checkType)) {
-        checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
-    } else if (llvm::isa<ConstType>(checkType)) {
-        checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
-    } else if (llvm::isa<ImmutType>(checkType)) {
-        checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
+    if (derefReferences) {
+        if (llvm::isa<MutType>(checkType)) {
+            checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
+        } else if (llvm::isa<ConstType>(checkType)) {
+            checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
+        } else if (llvm::isa<ImmutType>(checkType)) {
+            checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
+        }
     }
 
-    if (llvm::isa<ReferenceType>(checkType)) {
+    // For references we convert the reference using the prefix operator `.deref`
+    if (derefReferences && llvm::isa<ReferenceType>(checkType)) {
         auto newPotentialReference = new PrefixOperatorExpr(potentialLValue->startPosition(), potentialLValue->endPosition(),
                                                             ".deref", potentialLValue);
         processPrefixOperatorExpr(newPotentialReference);
         potentialLValue = newPotentialReference;
-    } else if (llvm::isa<RefLocalVariableExpr>(potentialLValue) || llvm::isa<RefParameterExpr>(potentialLValue)) {
-        Expr* newRValue = new LValueToRValueExpr(potentialLValue->startPosition(), potentialLValue->endPosition(), potentialLValue);
+    } else if (potentialLValue->resultType->isLValue()) {
+        Expr *newRValue = new LValueToRValueExpr(potentialLValue->startPosition(), potentialLValue->endPosition(),
+                                                 potentialLValue);
         newRValue->resultType = deepCopyAndSimplifyType(potentialLValue->resultType);
+        newRValue->resultType->setIsLValue(false);
         potentialLValue = newRValue;
-    } else if (llvm::isa<IdentifierExpr>(potentialLValue)) {
-        printDebugWarning("Identifier found in `convertLValueToRValue`!");
     }
 }

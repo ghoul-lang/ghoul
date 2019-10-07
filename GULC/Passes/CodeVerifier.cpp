@@ -20,6 +20,7 @@
 #include <AST/Types/ConstType.hpp>
 #include <AST/Types/ImmutType.hpp>
 #include <AST/Types/MutType.hpp>
+#include <AST/Types/RValueReferenceType.hpp>
 #include "CodeVerifier.hpp"
 #include "DeclResolver.hpp"
 
@@ -643,6 +644,14 @@ bool CodeVerifier::checkParamsAreSame(std::vector<ParameterDecl *> &params1, std
             // If `i` is still within the range for both `param1` and `param2` then we check the equality of each param...
             Type* paramType1 = params1[i]->type;
             Type* paramType2 = params2[i]->type;
+
+            // A function that has a reference type is called exactly the same way as a function without a reference type
+            //  because of this we treat reference parameters exactly the same as non-reference parameters
+            if (llvm::isa<ReferenceType>(paramType1)) paramType1 = llvm::dyn_cast<ReferenceType>(paramType1)->referenceToType;
+            if (llvm::isa<RValueReferenceType>(paramType1)) paramType1 = llvm::dyn_cast<RValueReferenceType>(paramType1)->referenceToType;
+            if (llvm::isa<ReferenceType>(paramType2)) paramType2 = llvm::dyn_cast<ReferenceType>(paramType2)->referenceToType;
+            if (llvm::isa<RValueReferenceType>(paramType2)) paramType2 = llvm::dyn_cast<RValueReferenceType>(paramType2)->referenceToType;
+
 
             // All parameters are const by default, so we ignore the const qualifier...
             if (llvm::isa<ConstType>(paramType1)) paramType1 = llvm::dyn_cast<ConstType>(paramType1)->pointToType;
