@@ -668,7 +668,11 @@ void DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
             typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
         }
 
-        convertLValueToRValue(returnStmt->returnValue, !getTypeIsReference(returnType));
+        if (!getTypeIsReference(returnType)) {
+            dereferenceReferences(returnStmt->returnValue);
+            convertLValueToRValue(returnStmt->returnValue);
+        }
+
 
         if (!typesAreSame) {
             // We will handle this in the verifier.
@@ -858,18 +862,39 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
         Type* leftType = binaryOperatorExpr->leftValue->resultType;
         Type* rightType = binaryOperatorExpr->rightValue->resultType;
 
-        bool leftIsReference = getTypeIsReference(leftType);
-        bool rightIsReference = getTypeIsReference(rightType);
+        if (getTypeIsReference(leftType)) {
+            // If the left type is a reference and the left value is a local variable declaration then we set the left variable to the reference of what is on the right...
+            // If the left value ISN'T a local variable then we deref the left value and set it equal to the right value (with the right value being converted to an rvalue)
+            if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
+                // Right value must be either lvalue or reference
+                if (!(rightType->isLValue() || getTypeIsReference(rightType))) {
+                    printError("initial value for reference variable MUST be an lvalue!",
+                               binaryOperatorExpr->rightValue->startPosition(),
+                               binaryOperatorExpr->rightValue->endPosition());
+                    return;
+                }
 
-        // If the left side of the assignment isn't a reference then we convert the right side from an lvalue/reference to an rvalue
-        if (!leftIsReference) {
+                // If the right type isn't already a reference then make it one...
+                if (!getTypeIsReference(rightType)) {
+                    binaryOperatorExpr->rightValue = new PrefixOperatorExpr(
+                            binaryOperatorExpr->rightValue->startPosition(),
+                            binaryOperatorExpr->rightValue->endPosition(),
+                            ".ref", binaryOperatorExpr->rightValue);
+                    processExpr(binaryOperatorExpr->rightValue);
+                    rightType = binaryOperatorExpr->rightValue->resultType;
+                }
+            } else {
+                // This will dereference the left value
+                dereferenceReferences(binaryOperatorExpr->leftValue);
+                leftType = binaryOperatorExpr->leftValue->resultType;
+
+                // The right value here MUST be an rvalue...
+                convertLValueToRValue(binaryOperatorExpr->rightValue);
+                rightType = binaryOperatorExpr->rightValue->resultType;
+            }
+        } else {
+            // If the left value isn't a reference then the right value has to be an rvalue...
             convertLValueToRValue(binaryOperatorExpr->rightValue);
-            rightType = binaryOperatorExpr->rightValue->resultType;
-        } else if (!rightIsReference) {
-            binaryOperatorExpr->rightValue = new PrefixOperatorExpr(binaryOperatorExpr->rightValue->startPosition(),
-                                                                    binaryOperatorExpr->rightValue->endPosition(),
-                                                                    ".ref", binaryOperatorExpr->rightValue);
-            processExpr(binaryOperatorExpr->rightValue);
             rightType = binaryOperatorExpr->rightValue->resultType;
         }
 
@@ -883,6 +908,12 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
         binaryOperatorExpr->resultType = deepCopyAndSimplifyType(leftType);
 
         if (binaryOperatorExpr->operatorName() != "=") {
+            if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
+                printError("operator '" + binaryOperatorExpr->operatorName() + "' not supported in variable declaration!",
+                           binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+                return;
+            }
+
             std::string rightOperatorName;
 
             if (binaryOperatorExpr->operatorName() == ">>=") {
@@ -912,11 +943,13 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
                 return;
             }
 
+            Expr* leftValue = binaryOperatorExpr->leftValue;
+            convertLValueToRValue(leftValue);
             // We set a new right value with an `LValueToRValueExpr` that doesn't own the pointer. Making it so the left L2R expression doesn't delete the pointer since the binary operator owns it.
             auto newRightValue = new BinaryOperatorExpr(binaryOperatorExpr->startPosition(),
                                                         binaryOperatorExpr->endPosition(),
                                                         rightOperatorName,
-                                                        new LValueToRValueExpr({}, {}, binaryOperatorExpr->leftValue, false),
+                                                        leftValue,
                                                         binaryOperatorExpr->rightValue);
 
             newRightValue->resultType = deepCopyAndSimplifyType(leftType);
@@ -1052,6 +1085,8 @@ void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
 
         // We set the result type of this expression to the result type of the function being called.
         functionCallExpr->resultType = deepCopyAndSimplifyType(functionPointerType->resultType);
+        // This makes references technically rvalue references internally...
+        functionCallExpr->resultType->setIsLValue(false);
     } else {
         printError("expression is not a valid function reference!",
                    functionCallExpr->functionReference->startPosition(),
@@ -1104,6 +1139,8 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
             expr->resultType = deepCopyAndSimplifyType(functionLocalVariables[i]->resultType);
             // A local variable reference is an lvalue.
             expr->resultType->setIsLValue(true);
+            // We always dereference local variable calls if they are references...
+            dereferenceReferences(expr);
 
             delete identifierExpr;
 
@@ -1125,6 +1162,8 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                 expr->resultType = deepCopyAndSimplifyType((*functionParams)[paramIndex]->type);
                 // A parameter reference is an lvalue.
                 expr->resultType->setIsLValue(true);
+                // We always dereference local variable calls if they are references...
+                dereferenceReferences(expr);
 
                 delete identifierExpr;
 
@@ -1500,26 +1539,40 @@ void DeclResolver::processUnresolvedTypeRefExpr(Expr *&expr) {
     delete unresolvedTypeRefExpr;
 }
 
-void DeclResolver::convertLValueToRValue(Expr*& potentialLValue, bool derefReferences) {
-    Type* checkType = potentialLValue->resultType;
+void DeclResolver::dereferenceReferences(Expr*& potentialReference) {
+    Type* checkType = potentialReference->resultType;
 
-    if (derefReferences) {
-        if (llvm::isa<MutType>(checkType)) {
-            checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
-        } else if (llvm::isa<ConstType>(checkType)) {
-            checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
-        } else if (llvm::isa<ImmutType>(checkType)) {
-            checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
-        }
+    if (llvm::isa<MutType>(checkType)) {
+        checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
+    } else if (llvm::isa<ConstType>(checkType)) {
+        checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
+    } else if (llvm::isa<ImmutType>(checkType)) {
+        checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
     }
 
     // For references we convert the reference using the prefix operator `.deref`
-    if (derefReferences && llvm::isa<ReferenceType>(checkType)) {
-        auto newPotentialReference = new PrefixOperatorExpr(potentialLValue->startPosition(), potentialLValue->endPosition(),
-                                                            ".deref", potentialLValue);
-        processPrefixOperatorExpr(newPotentialReference);
-        potentialLValue = newPotentialReference;
-    } else if (potentialLValue->resultType->isLValue()) {
+    if (llvm::isa<ReferenceType>(checkType)) {
+        auto referenceType = llvm::dyn_cast<ReferenceType>(checkType);
+
+        if (referenceType->isLValue()) {
+            auto newPotentialReference = new PrefixOperatorExpr(potentialReference->startPosition(),
+                                                                potentialReference->endPosition(),
+                                                                ".deref", potentialReference);
+            processPrefixOperatorExpr(newPotentialReference);
+            //newPotentialReference->resultType->setIsLValue(potentialReference->resultType->isLValue());
+            potentialReference = newPotentialReference;
+        } else {
+            // TODO: This seems VERY hacky since the only `ReferenceType` with `isLValue` being false are function calls...
+            potentialReference->resultType = referenceType->referenceToType;
+            potentialReference->resultType->setIsLValue(true);
+            referenceType->referenceToType = nullptr;
+            delete referenceType;
+        }
+    }
+}
+
+void DeclResolver::convertLValueToRValue(Expr*& potentialLValue) {
+    if (potentialLValue->resultType->isLValue()) {
         Expr *newRValue = new LValueToRValueExpr(potentialLValue->startPosition(), potentialLValue->endPosition(),
                                                  potentialLValue);
         newRValue->resultType = deepCopyAndSimplifyType(potentialLValue->resultType);

@@ -69,7 +69,7 @@ gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
         //globalObject.print()
     }
 
-    //genModule->print(llvm::errs(), nullptr);
+    genModule->print(llvm::errs(), nullptr);
 
     funcPassManager->doFinalization();
     delete funcPassManager;
@@ -325,7 +325,7 @@ llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *fu
 
     // TODO: We might want to remove this.
     verifyFunction(*function);
-    funcPass->run(*function);
+    //funcPass->run(*function);
 
     // Reset the insertion point (this probably isn't needed but oh well)
     irBuilder->ClearInsertionPoint();
@@ -807,6 +807,7 @@ llvm::Value *gulc::CodeGen::generateFunctionCallExpr(const gulc::FunctionCallExp
     std::string funcName;
     llvm::Function* func = generateRefFunctionExpr(functionCallExpr->functionReference, &funcName);
 
+
     std::vector<llvm::Value*> llvmArgs{};
 
     if (functionCallExpr->hasArguments()) {
@@ -817,7 +818,16 @@ llvm::Value *gulc::CodeGen::generateFunctionCallExpr(const gulc::FunctionCallExp
         }
     }
 
-    return irBuilder->CreateCall(func, llvmArgs, funcName + "_result");
+    llvm::Value* result = irBuilder->CreateCall(func, llvmArgs, funcName + "_result");
+
+//    if (!func->getReturnType()->isVoidTy()) {
+//        llvm::AllocaInst *retValue = irBuilder->CreateAlloca(func->getReturnType(), nullptr, funcName + "_result");
+//        irBuilder->CreateStore(result, retValue);
+//        result = retValue;
+//    }
+
+
+    return result;
 }
 
 llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperatorExpr *prefixOperatorExpr) {
@@ -884,10 +894,10 @@ llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperato
         }
     } else if (llvm::isa<ReferenceType>(exprResultType)) {
         llvm::Value *lvalue = generateExpr(prefixOperatorExpr->expr);
-        llvm::Value *rvalue = irBuilder->CreateLoad(lvalue, "l2r");
 
         if (prefixOperatorExpr->operatorName() == ".deref") {
-            return irBuilder->CreateLoad(rvalue, "deref");
+            return irBuilder->CreateLoad(lvalue, "deref");
+            //return lvalue;
         } else if (prefixOperatorExpr->operatorName() == "++" || prefixOperatorExpr->operatorName() == "--") {
             // TODO: We need to know the size of a pointer to support this...
             printError("increment and decrement operators not yet supported on reference types!",

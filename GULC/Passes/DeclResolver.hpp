@@ -123,7 +123,8 @@ namespace gulc {
         void processTernaryExpr(TernaryExpr* ternaryExpr);
         void processUnresolvedTypeRefExpr(Expr*& expr);
 
-        void convertLValueToRValue(Expr*& potentialLValue, bool derefReferences = true);
+        void dereferenceReferences(Expr*& potentialReference);
+        void convertLValueToRValue(Expr*& potentialLValue);
 
         // Context management
         FileAST* currentFileAst;
