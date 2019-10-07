@@ -131,8 +131,6 @@ Decl *Parser::parseTopLevelDecl() {
     TextPosition startPosition = peekedToken.startPosition;
     TextPosition endPosition = peekedToken.endPosition;
 
-    // TODO: We need to remove `isConst` from here. We don't parse types this way.
-    bool isConst = false;
     bool isExtern = false;
     bool isVolatile = false;
     bool isAbstract = false;
@@ -161,12 +159,6 @@ Decl *Parser::parseTopLevelDecl() {
             case TokenType::OVERRIDE:
                 printError("'override' cannot be applied to top-level declarations!", peekedToken.startPosition, peekedToken.endPosition);
                 return nullptr;
-            case TokenType::CONST:
-                if (isConst) printWarning("duplicate 'const' specifier", peekedToken.startPosition, peekedToken.endPosition);
-
-                _lexer.consumeType(TokenType::CONST);
-                isConst = true;
-                break;
             case TokenType::EXTERN:
                 if (isExtern) printWarning("duplicate 'extern' specifier", peekedToken.startPosition, peekedToken.endPosition);
 
@@ -191,6 +183,11 @@ Decl *Parser::parseTopLevelDecl() {
                 _lexer.consumeType(TokenType::SEALED);
                 isSealed = true;
                 break;
+            case TokenType::CONST:
+            case TokenType::MUT:
+            case TokenType::IMMUT:
+                // We break from the loop if the token is `const`, `mut`, or `immut`
+                goto qualifierFound;
             default:
                 // TODO: Should this just be a warning instead?
                 printError("unknown modifier", peekedToken.startPosition, peekedToken.endPosition);
@@ -200,6 +197,8 @@ Decl *Parser::parseTopLevelDecl() {
         peekedToken = _lexer.peekToken();
         endPosition = peekedToken.endPosition;
     }
+
+qualifierFound:
 
     switch (peekedToken.tokenType) {
         case TokenType::NAMESPACE:
@@ -226,6 +225,9 @@ Decl *Parser::parseTopLevelDecl() {
             // TODO:
             printError("enums not yet supported!", startPosition, endPosition);
             return nullptr;
+        case TokenType::CONST:
+        case TokenType::MUT:
+        case TokenType::IMMUT:
         case TokenType::SYMBOL: {
             Type* resultType = parseType();
 

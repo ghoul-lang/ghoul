@@ -69,7 +69,7 @@ gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
         //globalObject.print()
     }
 
-    genModule->print(llvm::errs(), nullptr);
+    //genModule->print(llvm::errs(), nullptr);
 
     funcPassManager->doFinalization();
     delete funcPassManager;

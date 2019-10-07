@@ -513,6 +513,22 @@ void DeclResolver::processFunctionDecl(FunctionDecl *functionDecl) {
                    functionDecl->resultType->startPosition(), functionDecl->resultType->endPosition());
     }
 
+    if (llvm::isa<ConstType>(functionDecl->resultType)) {
+        printWarning("`const` qualifier unneeded on function result type, function return types are already `const` qualified!",
+                     functionDecl->startPosition(), functionDecl->endPosition());
+    } else if (llvm::isa<MutType>(functionDecl->resultType)) {
+        printWarning("`mut` does not apply to function return types, `mut` qualifier is ignored...",
+                     functionDecl->startPosition(), functionDecl->endPosition());
+
+        // We remove the `mut` qualifier to try to reduce any confusion...
+        auto mutType = llvm::dyn_cast<MutType>(functionDecl->resultType);
+        functionDecl->resultType = mutType->pointToType;
+        mutType->pointToType = nullptr;
+        delete mutType;
+    }
+    // The result type CAN be `immut` since `immut` has a requirement of NEVER being modified -
+    //  unlike `const` which can be modified in situations where the underlying type has a `mut` member variable...
+
     // Resolve the template parameter types (we allow `void func<typename T, T value>()`)
     for (TemplateParameterDecl*& templateParameterDecl : functionDecl->templateParameters) {
         if (templateParameterDecl->type->getTypeKind() == Type::Kind::Unresolved) {
