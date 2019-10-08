@@ -30,6 +30,7 @@
 #include <AST/Exprs/RefLocalVariableExpr.hpp>
 #include <AST/Exprs/RefParameterExpr.hpp>
 #include <AST/Exprs/RefFileFunctionExpr.hpp>
+#include <AST/Exprs/RefGlobalFileVariableExpr.hpp>
 #include "DeclResolver.hpp"
 
 using namespace gulc;
@@ -358,8 +359,11 @@ void DeclResolver::processDecl(Decl *decl) {
         case Decl::Kind::Function:
             processFunctionDecl(llvm::dyn_cast<FunctionDecl>(decl));
             break;
+        case Decl::Kind::GlobalVariable:
+            processGlobalVariableDecl(llvm::dyn_cast<GlobalVariableDecl>(decl));
+            break;
         case Decl::Kind::Parameter:
-        case Decl::Kind::TemplateParameterDecl:
+        case Decl::Kind::TemplateParameter:
         default:
             printDebugWarning("unhandled Decl in 'processDecl'!");
             break;
@@ -509,7 +513,7 @@ void DeclResolver::processFunctionDecl(FunctionDecl *functionDecl) {
 
     // Resolve function return type...
     if (!resolveType(functionDecl->resultType)) {
-        printError("could not find function return type!",
+        printError("could not find function return type `" + functionDecl->resultType->getString() + "`!",
                    functionDecl->resultType->startPosition(), functionDecl->resultType->endPosition());
     }
 
@@ -572,6 +576,44 @@ void DeclResolver::processFunctionDecl(FunctionDecl *functionDecl) {
     returnType = nullptr;
     functionParams = nullptr;
     functionTemplateParams = nullptr;
+}
+
+Expr *DeclResolver::solveConstExpression(Expr *expr) {
+    switch (expr->getExprKind()) {
+        case Expr::Kind::CharacterLiteral:
+        case Expr::Kind::FloatLiteral:
+        case Expr::Kind::IntegerLiteral:
+            return expr;
+        case Expr::Kind::Paren: {
+            // For paren we delete the old `ParenExpr` before passing the contained expression to the solver
+            auto paren = llvm::dyn_cast<ParenExpr>(expr);
+            Expr* contained = paren->containedExpr;
+            paren->containedExpr = nullptr;
+            delete paren;
+            return solveConstExpression(contained);
+        }
+        case Expr::Kind::BinaryOperator: {
+            printError("binary operators not yet supported for `constexpr`!",
+                       expr->startPosition(), expr->endPosition());
+            return nullptr;
+        }
+        default:
+            printError("unsupported expression, expected `constexpr`!", expr->startPosition(), expr->endPosition());
+            return nullptr;
+    }
+    return nullptr;
+}
+
+void DeclResolver::processGlobalVariableDecl(GlobalVariableDecl *globalVariableDecl) {
+    // Resolve global variable type...
+    if (!resolveType(globalVariableDecl->type)) {
+        printError("could not find function return type `" + globalVariableDecl->type->getString() + "`!",
+                   globalVariableDecl->type->startPosition(), globalVariableDecl->type->endPosition());
+    }
+
+    if (globalVariableDecl->hasInitialValue()) {
+        processExpr(globalVariableDecl->initialValue);
+    }
 }
 
 // Stmts
@@ -672,7 +714,6 @@ void DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
             dereferenceReferences(returnStmt->returnValue);
             convertLValueToRValue(returnStmt->returnValue);
         }
-
 
         if (!typesAreSame) {
             // We will handle this in the verifier.
@@ -1191,9 +1232,23 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
 
     for (const Decl* decl : currentFileAst->topLevelDecls()) {
         if (decl->name() == identifierExpr->name()) {
-            // This is currently the only `Decl` we support at the top level
-            if (llvm::isa<FunctionDecl>(decl)) {
-                // TODO: We need to set something in the context to allow us to know what the function calls current parameters are.
+            if (llvm::isa<GlobalVariableDecl>(decl)) {
+                auto variableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
+                auto globalVariableRef = new RefGlobalFileVariableExpr(identifierExpr->startPosition(),
+                                                                       identifierExpr->endPosition(),
+                                                                       variableDecl->name());
+
+                expr = globalVariableRef;
+
+                globalVariableRef->resultType = deepCopyAndSimplifyType(variableDecl->type);
+                // A global variable reference is an lvalue.
+                expr->resultType->setIsLValue(true);
+                // TODO: Should we dereference global variables? Can globals even be references?
+                //dereferenceReferences(expr);
+                delete identifierExpr;
+
+                return;
+            } else if (llvm::isa<FunctionDecl>(decl)) {
                 auto functionDecl = llvm::dyn_cast<FunctionDecl>(decl);
 
                 if (functionDecl->name() == identifierExpr->name()) {

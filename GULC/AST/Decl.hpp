@@ -31,7 +31,9 @@ namespace gulc {
             MemberFunction,
             MemberProperty,
             Parameter,
-            TemplateParameterDecl
+            TemplateParameter,
+
+            GlobalVariable
         };
 
         Kind getDeclKind() const { return _kind; }

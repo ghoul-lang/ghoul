@@ -23,11 +23,11 @@
 namespace gulc {
     class TemplateParameterDecl : public Decl {
     public:
-        static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::TemplateParameterDecl; }
+        static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::TemplateParameter; }
 
         TemplateParameterDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
                               Type* type, Expr* defaultArgument = nullptr)
-                : Decl(Kind::TemplateParameterDecl, std::move(name), std::move(sourceFile), startPosition, endPosition),
+                : Decl(Kind::TemplateParameter, std::move(name), std::move(sourceFile), startPosition, endPosition),
                   type(type), _defaultArgument(defaultArgument) {}
 
         Type* type;

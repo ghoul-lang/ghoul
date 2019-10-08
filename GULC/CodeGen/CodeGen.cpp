@@ -34,6 +34,7 @@
 #include <AST/Types/ConstType.hpp>
 #include <AST/Types/ImmutType.hpp>
 #include <AST/Types/MutType.hpp>
+#include <AST/Exprs/CharacterLiteralExpr.hpp>
 #include "CodeGen.hpp"
 
 gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
@@ -180,6 +181,8 @@ llvm::GlobalObject* gulc::CodeGen::generateDecl(const gulc::Decl *decl) {
     switch (decl->getDeclKind()) {
         case gulc::Decl::Kind::Function:
             return generateFunctionDecl(llvm::dyn_cast<gulc::FunctionDecl>(decl));
+        case gulc::Decl::Kind::GlobalVariable:
+            return generateGlobalVariableDecl(llvm::dyn_cast<gulc::GlobalVariableDecl>(decl));
         default:
             printError("internal - unsupported decl!",
                        decl->startPosition(), decl->endPosition());
@@ -287,6 +290,8 @@ llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
             return generateRefLocalVariableExpr(llvm::dyn_cast<RefLocalVariableExpr>(expr));
         case gulc::Expr::Kind::RefParameter:
             return generateRefParameterExpr(llvm::dyn_cast<RefParameterExpr>(expr));
+        case gulc::Expr::Kind::RefGlobalFileVariable:
+            return generateRefGlobalFileVariableExpr(llvm::dyn_cast<RefGlobalFileVariableExpr>(expr));
         default:
             printError("unexpected expression type in code generator!",
                        expr->startPosition(), expr->endPosition());
@@ -325,13 +330,28 @@ llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *fu
 
     // TODO: We might want to remove this.
     verifyFunction(*function);
-    //funcPass->run(*function);
+    funcPass->run(*function);
 
     // Reset the insertion point (this probably isn't needed but oh well)
     irBuilder->ClearInsertionPoint();
 	currentFunction = nullptr;
 
     return function;
+}
+
+llvm::GlobalVariable *gulc::CodeGen::generateGlobalVariableDecl(const gulc::GlobalVariableDecl *globalVariableDecl) {
+    llvm::Type* llvmType = generateLlvmType(globalVariableDecl->type);
+
+    bool isConstant = llvm::isa<ImmutType>(globalVariableDecl->type) || llvm::isa<ConstType>(globalVariableDecl->type);
+    llvm::Constant* initialValue = nullptr;
+
+    if (globalVariableDecl->hasInitialValue()) {
+        initialValue = generateConstant(globalVariableDecl->initialValue);
+    }
+
+    return new llvm::GlobalVariable(*module, llvmType, isConstant,
+                                    llvm::GlobalValue::LinkageTypes::InternalLinkage,
+                                    initialValue, globalVariableDecl->name());
 }
 
 // Stmts
@@ -612,6 +632,23 @@ void gulc::CodeGen::generateContinueStmt(const gulc::ContinueStmt *continueStmt)
 }
 
 // Exprs
+llvm::Constant *gulc::CodeGen::generateConstant(const Expr* expr) {
+    if (llvm::isa<gulc::CharacterLiteralExpr>(expr)) {
+        return llvm::ConstantInt::get(llvm::Type::getInt8Ty(*llvmContext),
+                                      llvm::dyn_cast<CharacterLiteralExpr>(expr)->characterValue());
+    } else if (llvm::isa<gulc::FloatLiteralExpr>(expr)) {
+        llvm::Type* type = generateLlvmType(expr->resultType);
+        return llvm::ConstantFP::get(type, llvm::dyn_cast<FloatLiteralExpr>(expr)->numberValue());
+    } else if (llvm::isa<gulc::IntegerLiteralExpr>(expr)) {
+        auto intLiteral = llvm::dyn_cast<IntegerLiteralExpr>(expr);
+        // TODO: Should we support other types here?...
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(*llvmContext), intLiteral->numberString, intLiteral->numberBase());
+    }
+
+    printError("unsupported constant in codegen!", expr->startPosition(), expr->endPosition());
+    return nullptr;
+}
+
 llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperatorExpr *binaryOperatorExpr) {
     llvm::Value* leftValue = generateExpr(binaryOperatorExpr->leftValue);
     llvm::Value* rightValue = generateExpr(binaryOperatorExpr->rightValue);
@@ -751,7 +788,7 @@ llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperato
 llvm::Value *gulc::CodeGen::generateIntegerLiteralExpr(const gulc::IntegerLiteralExpr *integerLiteralExpr) {
     if (auto builtInType = llvm::dyn_cast<BuiltInType>(integerLiteralExpr->resultType)) {
         unsigned int numOfBits = builtInType->size() * 8;
-        return llvm::ConstantInt::get(*llvmContext, llvm::APInt(numOfBits, integerLiteralExpr->numberString(), integerLiteralExpr->numberBase()));
+        return llvm::ConstantInt::get(*llvmContext, llvm::APInt(numOfBits, integerLiteralExpr->numberString, integerLiteralExpr->numberBase()));
     } else {
         printError("unknown integer literal type!",
                    integerLiteralExpr->startPosition(), integerLiteralExpr->endPosition());
@@ -971,6 +1008,11 @@ llvm::Value *gulc::CodeGen::generateRefParameterExpr(const gulc::RefParameterExp
     printError("[INTERNAL] parameter was not found!",
                refParameterExpr->startPosition(), refParameterExpr->endPosition());
     return nullptr;
+}
+
+llvm::Value *gulc::CodeGen::generateRefGlobalFileVariableExpr(const gulc::RefGlobalFileVariableExpr *refGlobalFileVariableExpr) {
+    // TODO: Should `AllowInternal` be true?
+    return module->getGlobalVariable(refGlobalFileVariableExpr->name(), true);
 }
 
 llvm::Function *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr, std::string *nameOut) {

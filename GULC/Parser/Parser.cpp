@@ -42,6 +42,7 @@
 #include <AST/Types/PointerType.hpp>
 #include <AST/Types/ReferenceType.hpp>
 #include <AST/Types/RValueReferenceType.hpp>
+#include <AST/Decls/GlobalVariableDecl.hpp>
 #include "Parser.hpp"
 
 using namespace gulc;
@@ -239,7 +240,7 @@ qualifierFound:
             // Parse the rest of the type and the name of the variable or function
             switch (peekedToken.tokenType) {
                 case TokenType::SYMBOL:
-                    // This is the function declaration name
+                    // This is the function or variable declaration name
                     name = peekedToken.currentSymbol;
                     _lexer.consumeType(TokenType::SYMBOL);
                     break;
@@ -268,11 +269,30 @@ qualifierFound:
 
                     return new FunctionDecl(name, _filePath, startPosition, endPosition, resultType, {}, parameters, compoundStmt);
                 }
-                case TokenType::EQUALS:
+                case TokenType::EQUALS: {
+                    _lexer.consumeType(TokenType::EQUALS);
+                    Expr *initialValue = parseExpr(false, false);
+
+                    endPosition = _lexer.peekToken().endPosition;
+
+                    if (!_lexer.consumeType(TokenType::SEMICOLON)) {
+                        printError("expected `;` after global variable declaration!",
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                        return nullptr;
+                    }
+
+                    return new GlobalVariableDecl(name, _filePath, startPosition, endPosition, resultType, initialValue);
+                }
                 case TokenType::SEMICOLON:
-                    // Variable
-                    printError("top-level variables not yet supported!", startPosition, endPosition);
-                    return nullptr;
+                    endPosition = _lexer.peekToken().endPosition;
+
+                    if (!_lexer.consumeType(TokenType::SEMICOLON)) {
+                        printError("expected `;` after global variable declaration!",
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                        return nullptr;
+                    }
+
+                    return new GlobalVariableDecl(name, _filePath, startPosition, endPosition, resultType, nullptr);
                 default:
                     printError("unexpected token in top-level declaration! (found '" + _lexer.peekToken().currentSymbol + "')", startPosition, endPosition);
                     return nullptr;

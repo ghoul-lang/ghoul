@@ -205,6 +205,9 @@ void CodeVerifier::verifyDecl(Decl *decl) {
         case Decl::Kind::Function:
             verifyFunctionDecl(llvm::dyn_cast<FunctionDecl>(decl));
             break;
+        case Decl::Kind::GlobalVariable:
+            verifyGlobalVariableDecl(llvm::dyn_cast<GlobalVariableDecl>(decl));
+            break;
         default:
             printDebugWarning("unhandled Decl in 'processDecl'!");
             break;
@@ -357,6 +360,18 @@ void CodeVerifier::verifyFunctionDecl(FunctionDecl *functionDecl) {
     currentFunctionReturnType = nullptr;
     currentFunctionTemplateParameters = nullptr;
     currentFunctionParameters = nullptr;
+}
+
+void CodeVerifier::verifyGlobalVariableDecl(GlobalVariableDecl *globalVariableDecl) {
+    if (checkDeclNameInUse(globalVariableDecl->name(), globalVariableDecl)) {
+        printError("redefinition of name `" + globalVariableDecl->name() + "` is not allowed!",
+                   globalVariableDecl->startPosition(), globalVariableDecl->endPosition());
+    }
+
+    // TODO: We also need to verify the initial value is a constant/literal value...
+    if (globalVariableDecl->hasInitialValue()) {
+        verifyExpr(globalVariableDecl->initialValue);
+    }
 }
 
 // Stmts
@@ -597,6 +612,20 @@ void CodeVerifier::verifyTernaryExpr(TernaryExpr *ternaryExpr) {
 void CodeVerifier::verifyUnresolvedTypeRefExpr(Expr *&expr) {
     printError("[INTERNAL] found `UnresolvedTypeRefExpr` in verifier, this is not supported!",
                expr->startPosition(), expr->endPosition());
+}
+
+bool CodeVerifier::checkDeclNameInUse(const std::string &name, Decl* ignoreDecl) {
+    // TODO: Check current class
+    // TODO: Check current namespace
+    // Check current file
+    for (Decl* checkDecl : currentFileAst->topLevelDecls()) {
+        if (ignoreDecl == checkDecl) continue;
+
+        if (checkDecl->name() == name) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool CodeVerifier::checkFunctionExists(FunctionDecl *function) {

@@ -44,6 +44,8 @@
 #include <AST/Exprs/RefFileFunctionExpr.hpp>
 #include <AST/Exprs/RefLocalVariableExpr.hpp>
 #include <AST/Exprs/RefParameterExpr.hpp>
+#include <AST/Decls/GlobalVariableDecl.hpp>
+#include <AST/Exprs/RefGlobalFileVariableExpr.hpp>
 #include "Module.hpp"
 
 namespace gulc {
@@ -71,6 +73,7 @@ namespace gulc {
 
         // Decls
         llvm::Function* generateFunctionDecl(const FunctionDecl* functionDecl);
+        llvm::GlobalVariable* generateGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl);
 
         // Stmts
         void generateCompoundStmt(const CompoundStmt* compoundStmt);
@@ -89,6 +92,8 @@ namespace gulc {
         std::vector<llvm::Type*> generateParamTypes(const std::vector<ParameterDecl*>& parameters);
 
         // Exprs
+        llvm::Constant* generateConstant(const Expr* expr);
+
         llvm::Value* generateBinaryOperatorExpr(const BinaryOperatorExpr* binaryOperatorExpr);
         llvm::Value* generateIntegerLiteralExpr(const IntegerLiteralExpr* integerLiteralExpr);
         llvm::Value* generateFloatLiteralExpr(const FloatLiteralExpr* floatLiteralExpr);
@@ -101,6 +106,7 @@ namespace gulc {
         llvm::Value* generatePostfixOperatorExpr(const PostfixOperatorExpr* postfixOperatorExpr);
         llvm::Value* generateRefLocalVariableExpr(const RefLocalVariableExpr* refLocalVariableExpr);
         llvm::Value* generateRefParameterExpr(const RefParameterExpr* refParameterExpr);
+        llvm::Value* generateRefGlobalFileVariableExpr(const RefGlobalFileVariableExpr* refGlobalFileVariableExpr);
 
         llvm::Function* generateRefFunctionExpr(const Expr* expr, std::string* nameOut);
         llvm::Function* generateRefFileFunctionExpr(const RefFileFunctionExpr* refFileFunctionExpr);

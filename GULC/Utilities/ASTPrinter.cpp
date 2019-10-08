@@ -417,7 +417,7 @@ void ASTPrinter::printIdentifierExpr(const IdentifierExpr *identifierExpr, const
 }
 
 void ASTPrinter::printIntegerLiteralExpr(const IntegerLiteralExpr *integerLiteralExpr, const std::string &prefix) {
-    std::cout << prefix << "| IntegerLiteralExpr (base: " << integerLiteralExpr->numberBase() << ", number: " << integerLiteralExpr->numberString() << ") " << std::endl;
+    std::cout << prefix << "| IntegerLiteralExpr (base: " << integerLiteralExpr->numberBase() << ", number: " << integerLiteralExpr->numberString << ") " << std::endl;
 }
 
 void ASTPrinter::printFunctionCallExpr(const FunctionCallExpr *functionCallExpr, const std::string &prefix) {

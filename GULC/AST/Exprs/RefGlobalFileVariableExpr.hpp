@@ -13,29 +13,26 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_INTEGERLITERALEXPR_HPP
-#define GULC_INTEGERLITERALEXPR_HPP
+#ifndef GULC_REFGLOBALFILEVARIABLEEXPR_HPP
+#define GULC_REFGLOBALFILEVARIABLEEXPR_HPP
 
 #include <AST/Expr.hpp>
-#include <string>
 
 namespace gulc {
-    class IntegerLiteralExpr : public Expr {
+    class RefGlobalFileVariableExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::IntegerLiteral; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::RefGlobalFileVariable; }
 
-        IntegerLiteralExpr(TextPosition startPosition, TextPosition endPosition,
-                           int numberBase, std::string numberString)
-                : Expr(Kind::IntegerLiteral, startPosition, endPosition),
-                  numberString(std::move(numberString)), _numberBase(numberBase) {}
+        RefGlobalFileVariableExpr(TextPosition startPosition, TextPosition endPosition, std::string name)
+                : Expr(Kind::RefGlobalFileVariable, startPosition, endPosition),
+                  _name(std::move(name)) {}
 
-        unsigned int numberBase() const { return _numberBase; }
-        std::string numberString;
+        std::string name() const { return _name; }
 
     private:
-        unsigned int _numberBase;
+        std::string _name;
 
     };
 }
 
-#endif //GULC_INTEGERLITERALEXPR_HPP
+#endif //GULC_REFGLOBALFILEVARIABLEEXPR_HPP

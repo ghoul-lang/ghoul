@@ -1,13 +1,5 @@
-int& test(int& i) {
-    return i;
-}
+int globalTest = 12;
 
 int main() {
-    int result = 2;
-    int& l = test(result);
-    l = 3;
-    test(result) = 30;
-    //return l;
-    //return test(result);
-    return result;
+    return globalTest;
 }

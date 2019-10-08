@@ -47,6 +47,7 @@
 #include <AST/Exprs/StringLiteralExpr.hpp>
 #include <AST/Exprs/TernaryExpr.hpp>
 #include <AST/Exprs/LValueToRValueExpr.hpp>
+#include <AST/Decls/GlobalVariableDecl.hpp>
 
 namespace gulc {
     class CodeVerifier {
@@ -60,6 +61,7 @@ namespace gulc {
         bool canCastType(Type* to, Type* from, bool isExplicit);
         bool typeIsAssignable(Type* checkType);
 
+        bool checkDeclNameInUse(const std::string& name, Decl* ignoreDecl);
         bool checkFunctionExists(FunctionDecl* function);
         bool checkParamsAreSame(std::vector<ParameterDecl*>& params1, std::vector<ParameterDecl*>& params2);
 
@@ -74,6 +76,7 @@ namespace gulc {
         // Decls
         // TODO: Support verifying that a function returns on every branch
         void verifyFunctionDecl(FunctionDecl* functionDecl);
+        void verifyGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
 
         // Stmts
         void verifyBreakStmt(BreakStmt* breakStmt);

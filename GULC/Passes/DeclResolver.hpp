@@ -53,6 +53,7 @@
 #include <AST/Exprs/StringLiteralExpr.hpp>
 #include <AST/Exprs/LocalVariableDeclExpr.hpp>
 #include <AST/FileAST.hpp>
+#include <AST/Decls/GlobalVariableDecl.hpp>
 
 namespace gulc {
     // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
@@ -85,6 +86,7 @@ namespace gulc {
         void processExpr(Expr*& expr);
 
         void processFunctionDecl(FunctionDecl* functionDecl);
+        void processGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
 
         void processBreakStmt(BreakStmt* breakStmt);
         void processCaseStmt(CaseStmt* caseStmt);
@@ -125,6 +127,8 @@ namespace gulc {
 
         void dereferenceReferences(Expr*& potentialReference);
         void convertLValueToRValue(Expr*& potentialLValue);
+
+        Expr* solveConstExpression(Expr* expr);
 
         // Context management
         FileAST* currentFileAst;

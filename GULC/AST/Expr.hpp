@@ -58,7 +58,8 @@ namespace gulc {
 
             RefLocalVariable,
             RefParameter,
-            RefFileFunction
+            RefFileFunction,
+            RefGlobalFileVariable
         };
 
         Kind getExprKind() const { return _kind; }
