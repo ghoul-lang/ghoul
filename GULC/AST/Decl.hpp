@@ -33,7 +33,10 @@ namespace gulc {
             Parameter,
             TemplateParameter,
 
-            GlobalVariable
+            GlobalVariable,
+
+            Enum,
+            EnumConstant
         };
 
         Kind getDeclKind() const { return _kind; }
@@ -41,6 +44,9 @@ namespace gulc {
         std::string sourceFile() const { return _sourceFile; }
         TextPosition startPosition() const { return _startPosition; }
         TextPosition endPosition() const { return _endPosition; }
+
+        std::string mangledName() const { return _mangledName; }
+        void setMangledName(std::string mangledName) { _mangledName = std::move(mangledName); }
 
         virtual ~Decl() = default;
 
@@ -55,6 +61,7 @@ namespace gulc {
         const std::string _sourceFile;
         const TextPosition _startPosition;
         const TextPosition _endPosition;
+        std::string _mangledName;
 
     };
 }

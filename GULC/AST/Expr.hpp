@@ -28,6 +28,7 @@ namespace gulc {
             BinaryOperator,
             PostfixOperator,
             PrefixOperator,
+            CustomPrefixOperator,
 
             Ternary,
 

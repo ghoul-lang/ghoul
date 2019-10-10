@@ -54,6 +54,7 @@
 #include <AST/Exprs/LocalVariableDeclExpr.hpp>
 #include <AST/FileAST.hpp>
 #include <AST/Decls/GlobalVariableDecl.hpp>
+#include <AST/Decls/EnumDecl.hpp>
 
 namespace gulc {
     // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
@@ -63,19 +64,22 @@ namespace gulc {
     public:
         DeclResolver()
                 : currentFileAst(nullptr), returnType(nullptr), functionTemplateParams(nullptr),
-                  functionParams(nullptr), functionCallArgs(nullptr), labelNames(),
+                  functionParams(nullptr), exprIsFunctionCall(false), functionCallArgs(nullptr), labelNames(),
                   functionLocalVariablesCount(0), functionLocalVariables() {}
 
         void processFile(FileAST& fileAst);
 
     private:
-        bool resolveType(Type*& type);
-
         static bool getTypesAreSame(const Type* type1, const Type* type2, bool ignoreQualifiers = false);
         bool shouldCastType(const Type* to, const Type* from);
         bool getTypeIsReference(const Type* check);
+        bool canImplicitCast(const Type* to, const Type* from);
 
-        Type* deepCopyAndSimplifyType(const Type* type);
+        /**
+         * Checks if the result types of `args` matches the input types of `params`
+         * If the result type of an `arg` requires an implicit cast to match `param` then `isExact` is set to false
+         */
+        bool argsMatchParams(const std::vector<ParameterDecl*>& params, const std::vector<Expr*>& args, bool* isExact);
 
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
         void printWarning(const std::string& message, TextPosition startPosition, TextPosition endPosition);
@@ -85,6 +89,7 @@ namespace gulc {
         void processStmt(Stmt*& stmt);
         void processExpr(Expr*& expr);
 
+        void processEnumDecl(EnumDecl* enumDecl);
         void processFunctionDecl(FunctionDecl* functionDecl);
         void processGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
 
@@ -135,6 +140,8 @@ namespace gulc {
         Type* returnType;
         const std::vector<TemplateParameterDecl*>* functionTemplateParams;
         const std::vector<ParameterDecl*>* functionParams;
+        // This is used to tell `processIdentifierExpr` to enable searching functions.
+        bool exprIsFunctionCall;
         const std::vector<Expr*>* functionCallArgs;
         // List of resolved and unresolved labels (if the boolean is true then it is resolved, else it isn't found)
         std::map<std::string, bool> labelNames;

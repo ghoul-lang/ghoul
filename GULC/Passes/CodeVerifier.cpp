@@ -202,6 +202,9 @@ void CodeVerifier::printDebugWarning(const std::string &message) {
 
 void CodeVerifier::verifyDecl(Decl *decl) {
     switch (decl->getDeclKind()) {
+        case Decl::Kind::Enum:
+            // I don't think we currently have anything to verify here
+            break;
         case Decl::Kind::Function:
             verifyFunctionDecl(llvm::dyn_cast<FunctionDecl>(decl));
             break;

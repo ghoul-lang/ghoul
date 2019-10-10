@@ -35,6 +35,7 @@
 #include <AST/Types/ImmutType.hpp>
 #include <AST/Types/MutType.hpp>
 #include <AST/Exprs/CharacterLiteralExpr.hpp>
+#include <AST/Types/EnumType.hpp>
 #include "CodeGen.hpp"
 
 gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
@@ -158,6 +159,10 @@ llvm::Type *gulc::CodeGen::generateLlvmType(const gulc::Type* type) {
             auto mutType = llvm::dyn_cast<MutType>(type);
             return generateLlvmType(mutType->pointToType);
         }
+        case gulc::Type::Kind::Enum: {
+            auto enumType = llvm::dyn_cast<EnumType>(type);
+            return generateLlvmType(enumType->baseType());
+        }
         default:
             printError("type '" + type->getString() + "' not yet supported!",
                        type->startPosition(), type->endPosition());
@@ -179,6 +184,9 @@ std::vector<llvm::Type*> gulc::CodeGen::generateParamTypes(const std::vector<Par
 
 llvm::GlobalObject* gulc::CodeGen::generateDecl(const gulc::Decl *decl) {
     switch (decl->getDeclKind()) {
+        case gulc::Decl::Kind::Enum:
+            // We don't generate any code for the enum declaration...
+            break;
         case gulc::Decl::Kind::Function:
             return generateFunctionDecl(llvm::dyn_cast<gulc::FunctionDecl>(decl));
         case gulc::Decl::Kind::GlobalVariable:
@@ -310,7 +318,7 @@ llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *fu
     std::vector<llvm::Type*> paramTypes = generateParamTypes(functionDecl->parameters);
     llvm::Type* returnType = generateLlvmType(functionDecl->resultType);
     llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
-    llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::CommonLinkage, functionDecl->name(), module);
+    llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::CommonLinkage, functionDecl->mangledName(), module);
 
     llvm::BasicBlock* funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", function);
     irBuilder->SetInsertPoint(funcBody);
@@ -351,7 +359,7 @@ llvm::GlobalVariable *gulc::CodeGen::generateGlobalVariableDecl(const gulc::Glob
 
     return new llvm::GlobalVariable(*module, llvmType, isConstant,
                                     llvm::GlobalValue::LinkageTypes::InternalLinkage,
-                                    initialValue, globalVariableDecl->name());
+                                    initialValue, globalVariableDecl->mangledName());
 }
 
 // Stmts
@@ -1012,7 +1020,7 @@ llvm::Value *gulc::CodeGen::generateRefParameterExpr(const gulc::RefParameterExp
 
 llvm::Value *gulc::CodeGen::generateRefGlobalFileVariableExpr(const gulc::RefGlobalFileVariableExpr *refGlobalFileVariableExpr) {
     // TODO: Should `AllowInternal` be true?
-    return module->getGlobalVariable(refGlobalFileVariableExpr->name(), true);
+    return module->getGlobalVariable(refGlobalFileVariableExpr->mangledName(), true);
 }
 
 llvm::Function *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr, std::string *nameOut) {
@@ -1031,7 +1039,7 @@ llvm::Function *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr, s
 
 llvm::Function *gulc::CodeGen::generateRefFileFunctionExpr(const gulc::RefFileFunctionExpr *refFileFunctionExpr) {
     // NOTE: All error checking is should be handled before the code generator
-    return module->getFunction(refFileFunctionExpr->name());
+    return module->getFunction(refFileFunctionExpr->mangledName());
 }
 
 void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& value) {

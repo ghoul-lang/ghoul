@@ -25,12 +25,14 @@ namespace gulc {
         static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::RefFileFunction; }
 
         RefFileFunctionExpr(TextPosition startPosition, TextPosition endPosition,
-                            std::string name, std::vector<Expr*> templateArguments)
+                            std::string name, std::vector<Expr*> templateArguments, std::string mangledName)
                 : Expr(Kind::RefFileFunction, startPosition, endPosition),
-                  templateArguments(std::move(templateArguments)), _name(std::move(name)) {}
+                  templateArguments(std::move(templateArguments)), _name(std::move(name)),
+                  _mangledName(std::move(mangledName)) {}
 
         std::vector<Expr*> templateArguments;
         std::string name() const { return _name; }
+        std::string mangledName() const { return _mangledName; }
 
         bool hasTemplateArguments() const { return !templateArguments.empty(); }
 
@@ -42,6 +44,7 @@ namespace gulc {
 
     private:
         std::string _name;
+        std::string _mangledName;
 
     };
 }

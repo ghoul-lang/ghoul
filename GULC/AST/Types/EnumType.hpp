@@ -13,29 +13,35 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_REFGLOBALFILEVARIABLEEXPR_HPP
-#define GULC_REFGLOBALFILEVARIABLEEXPR_HPP
+#ifndef GULC_ENUMTYPE_HPP
+#define GULC_ENUMTYPE_HPP
 
-#include <AST/Expr.hpp>
+#include <AST/Type.hpp>
 
 namespace gulc {
-    class RefGlobalFileVariableExpr : public Expr {
+    class EnumType : public Type {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::RefGlobalFileVariable; }
+        static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::Enum; }
 
-        RefGlobalFileVariableExpr(TextPosition startPosition, TextPosition endPosition,
-                                  std::string name, std::string mangledName)
-                : Expr(Kind::RefGlobalFileVariable, startPosition, endPosition),
-                  _name(std::move(name)), _mangledName(std::move(mangledName)) {}
+        EnumType(TextPosition startPosition, TextPosition endPosition,
+                 std::string name, Type* baseType)
+                : Type(Kind::Enum, startPosition, endPosition),
+                  _name(std::move(name)), _baseType(baseType) {}
 
         std::string name() const { return _name; }
-        std::string mangledName() const { return _mangledName; }
+        Type* baseType() const { return _baseType; }
+        
+        std::string getString() const override { return _name; }
+
+        ~EnumType() override {
+            delete _baseType;
+        }
 
     private:
         std::string _name;
-        std::string _mangledName;
+        Type* _baseType;
 
     };
 }
 
-#endif //GULC_REFGLOBALFILEVARIABLEEXPR_HPP
+#endif //GULC_ENUMTYPE_HPP

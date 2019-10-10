@@ -43,6 +43,8 @@
 #include <AST/Types/ReferenceType.hpp>
 #include <AST/Types/RValueReferenceType.hpp>
 #include <AST/Decls/GlobalVariableDecl.hpp>
+#include <AST/Decls/EnumConstantDecl.hpp>
+#include <AST/Decls/EnumDecl.hpp>
 #include "Parser.hpp"
 
 using namespace gulc;
@@ -222,10 +224,68 @@ qualifierFound:
             // TODO:
             printError("interfaces not yet supported!", startPosition, endPosition);
             return nullptr;
-        case TokenType::ENUM:
-            // TODO:
-            printError("enums not yet supported!", startPosition, endPosition);
-            return nullptr;
+        case TokenType::ENUM: {
+            _lexer.consumeType(TokenType::ENUM);
+
+            std::string name = _lexer.peekToken().currentSymbol;
+
+            if (!_lexer.consumeType(TokenType::SYMBOL)) {
+                printError("expected enum name after `enum` keyword, found '" + name + "'!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            Type* baseType = nullptr;
+
+            if (_lexer.peekType() == TokenType::COLON) {
+                _lexer.consumeType(TokenType::COLON);
+                baseType = parseType(true);
+            }
+
+            if (!_lexer.consumeType(TokenType::LCURLY)) {
+                printError("expected opening '{', found '" + _lexer.peekToken().currentSymbol + "'!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            std::vector<EnumConstantDecl*> constants{};
+
+            while (_lexer.peekType() != TokenType::RCURLY && _lexer.peekType() != TokenType::ENDOFFILE) {
+                std::string constantName = _lexer.peekToken().currentSymbol;
+                TextPosition constantStartPosition = _lexer.peekToken().startPosition;
+                TextPosition constantEndPosition = _lexer.peekToken().endPosition;
+
+                if (!_lexer.consumeType(TokenType::SYMBOL)) {
+                    printError("expected enum constant name, found '" + constantName + "'!",
+                               constantStartPosition, constantEndPosition);
+                    return nullptr;
+                }
+
+                Expr* constantValue = nullptr;
+
+                if (_lexer.peekType() == TokenType::EQUALS) {
+                    _lexer.consumeType(TokenType::EQUALS);
+
+                    constantValue = parseExpr(false, false);
+                }
+
+                constants.push_back(new EnumConstantDecl(constantName, _filePath,
+                                                         constantStartPosition, constantEndPosition,
+                                                         constantValue));
+
+                if (!_lexer.consumeType(TokenType::COMMA)) break;
+            }
+
+            endPosition = _lexer.peekToken().endPosition;
+
+            if (!_lexer.consumeType(TokenType::RCURLY)) {
+                printError("expected enum closing '}', found '" + _lexer.peekToken().currentSymbol + "'!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            return new EnumDecl(name, _filePath, startPosition, endPosition, baseType, constants);
+        }
         case TokenType::CONST:
         case TokenType::MUT:
         case TokenType::IMMUT:
@@ -1210,13 +1270,12 @@ TryStmt *Parser::parseTryStmt() {
 
             _lexer.consumeType(TokenType::CATCH);
 
-            UnresolvedTypeRefExpr* unresolvedTypeRefExpr = nullptr;
+            Type* catchType = nullptr;
             std::string exceptionVarName;
 
             // If there is a '(' then we will parse the exception variable, if not that is okay. There doesn't have to be one.
             if (_lexer.consumeType(TokenType::LPAREN)) {
-                Type* type = parseType();
-                unresolvedTypeRefExpr = new UnresolvedTypeRefExpr(type->startPosition(), type->endPosition(), type);
+                catchType = parseType();
 
                 if (_lexer.peekType() == TokenType::SYMBOL) {
                     exceptionVarName = _lexer.peekToken().currentSymbol;
@@ -1234,7 +1293,7 @@ TryStmt *Parser::parseTryStmt() {
             CompoundStmt* compoundStmt = parseCompoundStmt();
             catchEndPosition = compoundStmt->endPosition();
 
-            catchStmts.push_back(new TryCatchStmt(catchStartPosition, catchEndPosition, unresolvedTypeRefExpr, exceptionVarName, compoundStmt));
+            catchStmts.push_back(new TryCatchStmt(catchStartPosition, catchEndPosition, catchType, exceptionVarName, compoundStmt));
 
             endPosition = catchEndPosition;
         } else if (_lexer.peekType() == TokenType::FINALLY) {

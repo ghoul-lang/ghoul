@@ -1,5 +1,24 @@
-int globalTest = 12;
+enum Color
+{
+    Red = 100,
+    Green = 010,
+    Blue = 001,
+}
 
-int main() {
-    return globalTest;
+const int globalTest = 12;
+Color vgaColor;
+
+int test(short i)
+{
+    return i + 1;
+}
+
+int test(int i)
+{
+    return i + 2;
+}
+
+int main()
+{
+    return test(globalTest);
 }

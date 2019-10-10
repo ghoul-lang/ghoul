@@ -19,6 +19,9 @@
 #include <ObjGen/ObjGen.hpp>
 #include <Linker/Linker.hpp>
 #include <Passes/CodeVerifier.hpp>
+#include <Passes/TypeResolver.hpp>
+#include <Passes/NameMangler.hpp>
+#include <NameMangling/ItaniumMangler.hpp>
 
 using namespace gulc;
 
@@ -26,6 +29,14 @@ int main() {
     // Parse our file in
     Parser parser("Examples/FunctionTest.gul");
     FileAST fileAst(parser.parseFile());
+
+    // Resolve types
+    TypeResolver typeResolver{};
+    typeResolver.processFile(fileAst);
+
+    // Mangle names (for overloading support)
+    NameMangler nameMangler(new ItaniumMangler());
+    nameMangler.processFile(fileAst);
 
     // Resolve declarations
     DeclResolver declResolver;

@@ -380,10 +380,8 @@ void ASTPrinter::printTryCatchStmt(const TryCatchStmt *tryCatchStmt, const std::
         std::cout << prefix << "\\ ExceptionDecl: ";
 
         if (!tryCatchStmt->exceptionVarName.empty()) {
-            std::cout << "(name: `" << tryCatchStmt->exceptionVarName << "`)" << std::endl;
+            std::cout << "(type: `" << tryCatchStmt->exceptionType->getString() << "`, name: " << tryCatchStmt->exceptionVarName << "`)" << std::endl;
         }
-
-        printExpr(tryCatchStmt->exceptionType, prefix + "  ");
     }
 
     printStmt(tryCatchStmt->handlerStmt, prefix + "  ");
