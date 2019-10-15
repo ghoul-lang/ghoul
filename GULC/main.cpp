@@ -22,6 +22,7 @@
 #include <Passes/TypeResolver.hpp>
 #include <Passes/NameMangler.hpp>
 #include <NameMangling/ItaniumMangler.hpp>
+#include <Passes/NamespacePrototyper.hpp>
 
 using namespace gulc;
 
@@ -30,8 +31,12 @@ int main() {
     Parser parser("Examples/FunctionTest.gul");
     FileAST fileAst(parser.parseFile());
 
+    // Generate namespace map
+    NamespacePrototyper namespacePrototyper;
+    std::vector<NamespaceDecl*> prototypes = namespacePrototyper.generatePrototypes(fileAst);
+
     // Resolve types
-    TypeResolver typeResolver{};
+    TypeResolver typeResolver(prototypes);
     typeResolver.processFile(fileAst);
 
     // Mangle names (for overloading support)

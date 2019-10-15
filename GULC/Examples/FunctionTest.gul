@@ -1,4 +1,19 @@
-enum Color
+namespace std.testing
+{
+    enum Color
+    {
+        Red = 100,
+        Green = 010,
+        Blue = 001,
+    }
+
+    int test(int h)
+    {
+        return h + 12;
+    }
+}
+
+enum FColor
 {
     Red = 100,
     Green = 010,
@@ -6,19 +21,20 @@ enum Color
 }
 
 const int globalTest = 12;
-Color vgaColor;
+FColor vgaColor = FColor.Red;
 
-int test(short i)
+int test(int h)
 {
-    return i + 1;
+    return 12;
 }
 
-int test(int i)
+int test(FColor t)
 {
-    return i + 2;
+    return 100;
 }
 
 int main()
 {
-    return test(globalTest);
+    FColor c = FColor.Green;
+    return test(c);
 }

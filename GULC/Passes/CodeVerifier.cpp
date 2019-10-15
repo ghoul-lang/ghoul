@@ -211,6 +211,9 @@ void CodeVerifier::verifyDecl(Decl *decl) {
         case Decl::Kind::GlobalVariable:
             verifyGlobalVariableDecl(llvm::dyn_cast<GlobalVariableDecl>(decl));
             break;
+        case Decl::Kind::Namespace:
+            verifyNamespaceDecl(llvm::dyn_cast<NamespaceDecl>(decl));
+            break;
         default:
             printDebugWarning("unhandled Decl in 'processDecl'!");
             break;
@@ -375,6 +378,17 @@ void CodeVerifier::verifyGlobalVariableDecl(GlobalVariableDecl *globalVariableDe
     if (globalVariableDecl->hasInitialValue()) {
         verifyExpr(globalVariableDecl->initialValue);
     }
+}
+
+void CodeVerifier::verifyNamespaceDecl(NamespaceDecl *namespaceDecl) {
+    NamespaceDecl* oldNamespace = currentNamespace;
+    currentNamespace = namespaceDecl;
+
+    for (Decl* decl : namespaceDecl->nestedDecls()) {
+        verifyDecl(decl);
+    }
+
+    currentNamespace = oldNamespace;
 }
 
 // Stmts
@@ -633,7 +647,28 @@ bool CodeVerifier::checkDeclNameInUse(const std::string &name, Decl* ignoreDecl)
 
 bool CodeVerifier::checkFunctionExists(FunctionDecl *function) {
     // TODO: Check current class
-    // TODO: Check current namespace
+    // Check current namespace
+    if (currentNamespace != nullptr) {
+        for (Decl* checkDecl : currentNamespace->nestedDecls()) {
+            if (function == checkDecl) continue;
+
+            if (llvm::isa<FunctionDecl>(checkDecl)) {
+                auto functionDecl = llvm::dyn_cast<FunctionDecl>(checkDecl);
+
+                if (checkDecl->name() == function->name()) {
+                    // If the parameters are the same then we return saying the function exists...
+                    if (checkParamsAreSame(functionDecl->parameters, function->parameters)) {
+                        return true;
+                    }
+                    // Else we keep searching...
+                }
+            }
+        }
+
+        // If the current namespace isn't null then we don't check the current file, we can differentiate between file and namespace functions when calling...
+        return false;
+    }
+
     // Check current file
     for (Decl* checkDecl : currentFileAst->topLevelDecls()) {
         // Skip if the `checkDecl` IS the `function` we're supposed to be checking...

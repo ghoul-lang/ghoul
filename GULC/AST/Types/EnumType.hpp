@@ -17,6 +17,8 @@
 #define GULC_ENUMTYPE_HPP
 
 #include <AST/Type.hpp>
+#include <AST/Decls/NamespaceDecl.hpp>
+#include <AST/Decls/EnumDecl.hpp>
 
 namespace gulc {
     class EnumType : public Type {
@@ -24,22 +26,33 @@ namespace gulc {
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::Enum; }
 
         EnumType(TextPosition startPosition, TextPosition endPosition,
-                 std::string name, Type* baseType)
+                 std::string name, Type* baseType, EnumDecl* decl)
+                : EnumType(startPosition, endPosition, std::move(name), baseType, decl, nullptr) {}
+
+        EnumType(TextPosition startPosition, TextPosition endPosition,
+                 std::string name, Type* baseType, EnumDecl* decl, NamespaceDecl* owningPrototype)
                 : Type(Kind::Enum, startPosition, endPosition),
-                  _name(std::move(name)), _baseType(baseType) {}
+                  _name(std::move(name)), _baseType(baseType), _decl(decl), _owningPrototype(owningPrototype) {}
 
         std::string name() const { return _name; }
         Type* baseType() const { return _baseType; }
         
         std::string getString() const override { return _name; }
 
+        EnumDecl* decl() const { return _decl; }
+        NamespaceDecl* owningPrototype() const { return _owningPrototype; }
+
         ~EnumType() override {
+            // We don't own `_decl` so we don't delete it
+            // We don't own `_owningPrototype` so we don't delete it
             delete _baseType;
         }
 
     private:
         std::string _name;
         Type* _baseType;
+        EnumDecl* _decl;
+        NamespaceDecl* _owningPrototype;
 
     };
 }

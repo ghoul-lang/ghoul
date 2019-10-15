@@ -32,6 +32,9 @@
 #include <AST/Exprs/RefFileFunctionExpr.hpp>
 #include <AST/Exprs/RefGlobalFileVariableExpr.hpp>
 #include <AST/Types/EnumType.hpp>
+#include <AST/Exprs/TempNamespaceRefExpr.hpp>
+#include <AST/Exprs/RefNamespaceVariableExpr.hpp>
+#include <AST/Exprs/RefNamespaceFunctionExpr.hpp>
 #include "DeclResolver.hpp"
 #include "TypeResolver.hpp"
 
@@ -73,6 +76,12 @@ bool DeclResolver::getTypesAreSame(const Type* type1, const Type* type2, bool ig
                 auto builtInType2 = llvm::dyn_cast<BuiltInType>(type2);
 
                 return builtInType1->name() == builtInType2->name();
+            }
+            case Type::Kind::Enum: {
+                auto enumType1 = llvm::dyn_cast<EnumType>(type1);
+                auto enumType2 = llvm::dyn_cast<EnumType>(type2);
+
+                return enumType1->name() == enumType2->name();
             }
             case Type::Kind::FunctionTemplateTypenameRef: {
                 auto pointerType1 = llvm::dyn_cast<PointerType>(type1);
@@ -196,14 +205,17 @@ void DeclResolver::printDebugWarning(const std::string &message) {
 
 void DeclResolver::processDecl(Decl *decl) {
     switch (decl->getDeclKind()) {
+        case Decl::Kind::Enum:
+            processEnumDecl(llvm::dyn_cast<EnumDecl>(decl));
+            break;
         case Decl::Kind::Function:
             processFunctionDecl(llvm::dyn_cast<FunctionDecl>(decl));
             break;
         case Decl::Kind::GlobalVariable:
             processGlobalVariableDecl(llvm::dyn_cast<GlobalVariableDecl>(decl));
             break;
-        case Decl::Kind::Enum:
-            processEnumDecl(llvm::dyn_cast<EnumDecl>(decl));
+        case Decl::Kind::Namespace:
+            processNamespaceDecl(llvm::dyn_cast<NamespaceDecl>(decl));
             break;
         case Decl::Kind::Parameter:
         case Decl::Kind::TemplateParameter:
@@ -305,7 +317,7 @@ void DeclResolver::processExpr(Expr *&expr) {
             processLocalVariableDeclOrPrefixOperatorCallExpr(expr);
             break;
         case Expr::Kind::MemberAccessCall:
-            processMemberAccessCallExpr(llvm::dyn_cast<MemberAccessCallExpr>(expr));
+            processMemberAccessCallExpr(expr);
             break;
         case Expr::Kind::Paren:
             processParenExpr(llvm::dyn_cast<ParenExpr>(expr));
@@ -402,12 +414,13 @@ Expr *DeclResolver::solveConstExpression(Expr *expr) {
             return solveConstExpression(contained);
         }
         case Expr::Kind::BinaryOperator: {
-            printError("binary operators not yet supported for `constexpr`!",
-                       expr->startPosition(), expr->endPosition());
+            std::cerr << "gulc error: binary operators not yet supported for `constexpr`!" << std::endl;
+            std::exit(1);
             return nullptr;
         }
         default:
-            printError("unsupported expression, expected `constexpr`!", expr->startPosition(), expr->endPosition());
+            std::cerr << "gulc error: unsupported expression, expected `constexpr`!" << std::endl;
+            std::exit(1);
             return nullptr;
     }
     return nullptr;
@@ -417,6 +430,17 @@ void DeclResolver::processGlobalVariableDecl(GlobalVariableDecl *globalVariableD
     if (globalVariableDecl->hasInitialValue()) {
         processExpr(globalVariableDecl->initialValue);
     }
+}
+
+void DeclResolver::processNamespaceDecl(NamespaceDecl *namespaceDecl) {
+    NamespaceDecl* oldNamespace = currentNamespace;
+    currentNamespace = namespaceDecl;
+
+    for (Decl* decl : namespaceDecl->nestedDecls()) {
+        processDecl(decl);
+    }
+
+    currentNamespace = oldNamespace;
 }
 
 // Stmts
@@ -608,10 +632,10 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
                                                               varName);
 
             processLocalVariableDeclExpr(localVarDeclExpr);
-            expr = localVarDeclExpr;
 
             // Delete the binary operator expression (this will delete the left and right expressions)
             delete binaryOperatorExpr;
+            expr = localVarDeclExpr;
 
             return;
         } else if (binaryOperatorExpr->operatorName() == "&") {
@@ -645,10 +669,11 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
                                                               varName);
 
             processLocalVariableDeclExpr(localVarDeclExpr);
-            expr = localVarDeclExpr;
 
             // Delete the binary operator expression (this will delete the left and right expressions)
             delete binaryOperatorExpr;
+
+            expr = localVarDeclExpr;
 
             return;
         } else if (binaryOperatorExpr->operatorName() == "&&") {
@@ -682,10 +707,11 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
                                                               varName);
 
             processLocalVariableDeclExpr(localVarDeclExpr);
-            expr = localVarDeclExpr;
 
             // Delete the binary operator expression (this will delete the left and right expressions)
             delete binaryOperatorExpr;
+
+            expr = localVarDeclExpr;
 
             return;
         } else {
@@ -963,17 +989,20 @@ bool DeclResolver::canImplicitCast(const Type* to, const Type* from) {
         if (llvm::isa<BuiltInType>(from)) {
             // If `to` and `from` are both built in types then they CAN be implicitly casted...
             return true;
-        } else if (llvm::isa<EnumType>(from)) {
-            auto enumType = llvm::dyn_cast<EnumType>(from);
-            return canImplicitCast(to, enumType->baseType());
         }
-    } else if (llvm::isa<EnumType>(to)) {
-        auto enumType = llvm::dyn_cast<EnumType>(to);
-
-        if (llvm::isa<BuiltInType>(from)) {
-            // TODO: This might need to be changed...
-            return canImplicitCast(enumType->baseType(), from);
-        }
+        // TODO: Should we support implicit casting to/from enums
+//        else if (llvm::isa<EnumType>(from)) {
+//            auto enumType = llvm::dyn_cast<EnumType>(from);
+//            return canImplicitCast(to, enumType->baseType());
+//        }
+    // TODO: Should we support implicit casting to/from enums
+//    } else if (llvm::isa<EnumType>(to)) {
+//        auto enumType = llvm::dyn_cast<EnumType>(to);
+//
+//        if (llvm::isa<BuiltInType>(from)) {
+//            // TODO: This might need to be changed...
+//            return canImplicitCast(enumType->baseType(), from);
+//        }
     } else if (llvm::isa<PointerType>(to)) {
         auto toPtr = llvm::dyn_cast<PointerType>(to);
 
@@ -1039,6 +1068,37 @@ bool DeclResolver::argsMatchParams(const std::vector<ParameterDecl*> &params, co
     return true;
 }
 
+bool DeclResolver::checkFunctionMatchesCall(const FunctionDecl*& currentFoundFunction, const FunctionDecl* checkFunction,
+                                            bool* isExactMatch, bool* isAmbiguous) {
+    bool checkIsExactMatch = false;
+
+    // We check if the args are a match with the function parameters
+    if (argsMatchParams(checkFunction->parameters, *functionCallArgs, &checkIsExactMatch)) {
+        // If the current found function is an exact match and the checked function is exact then there is an ambiguity...
+        if (*isExactMatch && checkIsExactMatch) {
+            // We have to immediately exit if two functions are exact matches...
+            return false;
+        // If neither found function is an exact match then there is an ambiguity...
+        //  BUT this kind of ambiguity can be solved if we find an exact match...
+        } else if (!(*isExactMatch || checkIsExactMatch)) {
+            if (currentFoundFunction == nullptr) {
+                currentFoundFunction = checkFunction;
+            } else {
+                *isAmbiguous = true;
+            }
+        } else if (!*isExactMatch) {
+            // If the new function is an exact match then `isAmbiguous` is now false
+            if (checkIsExactMatch) {
+                *isAmbiguous = false;
+            }
+            currentFoundFunction = checkFunction;
+            *isExactMatch = checkIsExactMatch;
+        }
+    }
+
+    return true;
+}
+
 /**
  * Try to find the `IdentifierExpr` within the current context by searching local variables, params, decls, etc.
  */
@@ -1077,15 +1137,17 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                            identifierExpr->startPosition(), identifierExpr->endPosition());
             }
 
-            expr = new RefLocalVariableExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
-                                            identifierExpr->name());
-            expr->resultType = TypeResolver::deepCopy(functionLocalVariables[i]->resultType);
+            Expr* refLocal = new RefLocalVariableExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
+                                                      identifierExpr->name());
+            refLocal->resultType = TypeResolver::deepCopy(functionLocalVariables[i]->resultType);
             // A local variable reference is an lvalue.
-            expr->resultType->setIsLValue(true);
+            refLocal->resultType->setIsLValue(true);
             // We always dereference local variable calls if they are references...
-            dereferenceReferences(expr);
+            dereferenceReferences(refLocal);
 
             delete identifierExpr;
+
+            expr = refLocal;
 
             return;
         }
@@ -1100,15 +1162,18 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                                identifierExpr->startPosition(), identifierExpr->endPosition());
                 }
 
-                expr = new RefParameterExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
-                                            paramIndex);
-                expr->resultType = TypeResolver::deepCopy((*functionParams)[paramIndex]->type);
+                Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
+                                                      identifierExpr->endPosition(),
+                                                      paramIndex);
+                refParam->resultType = TypeResolver::deepCopy((*functionParams)[paramIndex]->type);
                 // A parameter reference is an lvalue.
-                expr->resultType->setIsLValue(true);
+                refParam->resultType->setIsLValue(true);
                 // We always dereference local variable calls if they are references...
-                dereferenceReferences(expr);
+                dereferenceReferences(refParam);
 
                 delete identifierExpr;
+
+                expr = refParam;
 
                 return;
             }
@@ -1134,7 +1199,7 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
     // `isExactMatch` is used to check for ambiguity
     bool isExactMatch = false;
     bool isAmbiguous = false;
-    // TODO: We need to also support return type overloading (only on `const`, `mut`, `immut`)
+    // TODO: We need to also support function qualifier overloading (`const`, `mut`, `immut` like `int test() const {}`)
 
     for (const Decl* decl : currentFileAst->topLevelDecls()) {
         if (decl->name() == identifierExpr->name()) {
@@ -1145,50 +1210,31 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                                                                        variableDecl->name(),
                                                                        variableDecl->mangledName());
 
-                expr = globalVariableRef;
-
                 globalVariableRef->resultType = TypeResolver::deepCopy(variableDecl->type);
                 // A global variable reference is an lvalue.
-                expr->resultType->setIsLValue(true);
+                globalVariableRef->resultType->setIsLValue(true);
                 // TODO: Should we dereference global variables? Can globals even be references?
-                //dereferenceReferences(expr);
+                //dereferenceReferences(globalVariableRef);
                 delete identifierExpr;
+
+                expr = globalVariableRef;
 
                 return;
             } else if (llvm::isa<FunctionDecl>(decl)) {
                 auto functionDecl = llvm::dyn_cast<FunctionDecl>(decl);
 
                 if (functionDecl->name() == identifierExpr->name()) {
-                    bool checkIsExactMatch = false;
-
-                    // We check if the args are a match with the function parameters
-                    if (argsMatchParams(functionDecl->parameters, *functionCallArgs, &checkIsExactMatch)) {
-                        // If the current found function is an exact match and the checked function is exact then there is an ambiguity...
-                        if (isExactMatch && checkIsExactMatch) {
-                            // We have to immediately exit if two functions are exact matches...
-                            printError("function call is ambiguous!",
-                                       identifierExpr->startPosition(), identifierExpr->endPosition());
-                        // If neither found function is an exact match then there is an ambiguity...
-                        //  BUT this kind of ambiguity can be solved if we find an exact match...
-                        } else if (!(isExactMatch || checkIsExactMatch)) {
-                            if (foundFunction == nullptr) {
-                                foundFunction = functionDecl;
-                            } else {
-                                isAmbiguous = true;
-                            }
-                        } else if (!isExactMatch) {
-                            // If the new function is an exact match then `isAmbiguous` is now false
-                            if (checkIsExactMatch) {
-                                isAmbiguous = false;
-                            }
-                            foundFunction = functionDecl;
-                            isExactMatch = checkIsExactMatch;
-                        }
+                    if (!checkFunctionMatchesCall(foundFunction, functionDecl, &isExactMatch, &isAmbiguous)) {
+                        printError("function call is ambiguous!",
+                                   identifierExpr->startPosition(), identifierExpr->endPosition());
                     }
                 }
             }
         }
     }
+
+    // TODO: then current namespace
+    // TODO: then imports.
 
     if (foundFunction) {
         // If the found function is ambiguous then we have to error, it means there are multiple functions that all require some type of implicit cast to work...
@@ -1205,18 +1251,17 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         }
 
         // TODO: the tempalte arguments need to be processed
-        expr = new RefFileFunctionExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
-                                       identifierExpr->name(), identifierExpr->templateArguments,
-                                       foundFunction->mangledName());
-        expr->resultType = new FunctionPointerType({}, {}, resultTypeCopy, paramTypeCopy);
+        Expr* refFileFunc = new RefFileFunctionExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
+                                                    identifierExpr->name(), identifierExpr->templateArguments,
+                                                    foundFunction->mangledName());
+        refFileFunc->resultType = new FunctionPointerType({}, {}, resultTypeCopy, paramTypeCopy);
 
         delete identifierExpr;
 
+        expr = refFileFunc;
+
         return;
     }
-
-    // TODO: then current namespace
-    // TODO: then imports.
 
     // if we've made it to this point the identifier cannot be found, error and tell the user.
     printError("identifier '" + identifierExpr->name() + "' was not found in the current context!",
@@ -1267,12 +1312,85 @@ void DeclResolver::processLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr)
                expr->startPosition(), expr->endPosition());
 }
 
-void DeclResolver::processMemberAccessCallExpr(MemberAccessCallExpr *memberAccessCallExpr) {
+void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
+    auto memberAccessCallExpr = llvm::dyn_cast<MemberAccessCallExpr>(expr);
+
     // TODO: Support operator overloading the `.` and `->` operators
     // TODO: `public override T operator.() => return this.whatever_T_is;` this can ONLY be supported when the implementing class/struct has NO public facing functions
     // TODO: MemberAccessCallExpr can ALSO be a namespace path to a type. We will need to take this into account at some point.
 //    processExpr(memberAccessCallExpr->objectRef);
 //    processIdentifierExpr(memberAccessCallExpr->member);
+    if (llvm::isa<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef)) {
+        auto namespaceRef = llvm::dyn_cast<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef);
+
+        const FunctionDecl* foundFunction = nullptr;
+        bool isExactMatch = false;
+        bool isAmbiguous = false;
+
+        for (Decl* checkDecl : namespaceRef->namespaceDecl()->nestedDecls()) {
+            if (checkDecl->name() == memberAccessCallExpr->member->name()) {
+                if (llvm::isa<GlobalVariableDecl>(checkDecl)) {
+                    auto globalVariable = llvm::dyn_cast<GlobalVariableDecl>(checkDecl);
+
+                    currentFileAst->addImportExtern(checkDecl);
+
+                    auto refNamespaceVariable = new RefNamespaceVariableExpr(memberAccessCallExpr->startPosition(),
+                                                                             memberAccessCallExpr->endPosition(),
+                                                                             globalVariable->name(),
+                                                                             globalVariable->mangledName());
+
+                    delete memberAccessCallExpr;
+
+                    expr = refNamespaceVariable;
+
+                    return;
+                } else if (llvm::isa<FunctionDecl>(checkDecl)) {
+                    auto function = llvm::dyn_cast<FunctionDecl>(checkDecl);
+
+                    if (!checkFunctionMatchesCall(foundFunction, function, &isExactMatch, &isAmbiguous)) {
+                        printError("namespace function call is ambiguous!",
+                                   memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+                    }
+                } else {
+                    printError("unknown namespace member access call!",
+                               memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+                    return;
+                }
+            }
+        }
+
+        if (foundFunction) {
+            if (isAmbiguous) {
+                printError("namespace function call is ambiguous!",
+                           memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+            }
+
+            Type* resultTypeCopy = TypeResolver::deepCopy(foundFunction->resultType);
+            std::vector<Type*> paramTypeCopy{};
+
+            for (const ParameterDecl* param : foundFunction->parameters) {
+                paramTypeCopy.push_back(TypeResolver::deepCopy(param->type));
+            }
+
+            // Add the referenced function to a list of potentially imported externs
+            currentFileAst->addImportExtern(foundFunction);
+
+            // TODO: the tempalte arguments need to be processed
+            auto refNamespaceFunction = new RefNamespaceFunctionExpr(memberAccessCallExpr->startPosition(),
+                                                                     memberAccessCallExpr->endPosition(),
+                                                                     memberAccessCallExpr->member->name(),
+                                                                     memberAccessCallExpr->member->templateArguments,
+                                                                     foundFunction->mangledName());
+            refNamespaceFunction->resultType = new FunctionPointerType({}, {}, resultTypeCopy, paramTypeCopy);
+
+            delete expr;
+
+            expr = refNamespaceFunction;
+
+            return;
+        }
+    }
+
     printError("member access calls not yet supported!", memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
 }
 

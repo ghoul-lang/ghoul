@@ -46,13 +46,18 @@
 #include <AST/Exprs/RefParameterExpr.hpp>
 #include <AST/Decls/GlobalVariableDecl.hpp>
 #include <AST/Exprs/RefGlobalFileVariableExpr.hpp>
+#include <AST/Decls/EnumConstantDecl.hpp>
+#include <AST/Exprs/RefEnumConstantExpr.hpp>
+#include <AST/Decls/NamespaceDecl.hpp>
+#include <AST/Exprs/RefNamespaceFunctionExpr.hpp>
 #include "Module.hpp"
 
 namespace gulc {
     class CodeGen {
     public:
         CodeGen()
-                : currentFileAst(nullptr), llvmContext(nullptr), irBuilder(nullptr), module(nullptr), funcPass(nullptr),
+                : currentFileAst(nullptr), currentNamespace(nullptr), llvmContext(nullptr), irBuilder(nullptr),
+                  module(nullptr), funcPass(nullptr),
                   loopNameNumber(0),
                   currentFunction(nullptr), currentFunctionParameters(), entryBlockBuilder(nullptr),
                   currentFunctionLabels(), currentFunctionLocalVariablesCount(0),  currentFunctionLocalVariables(),
@@ -64,6 +69,7 @@ namespace gulc {
     private:
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
 
+        void generateImportExtern(const Decl* decl);
         llvm::GlobalObject* generateDecl(const Decl* decl);
         void generateStmt(const Stmt* stmt, const std::string& stmtName = "");
         llvm::Value* generateExpr(const Expr* expr);
@@ -71,9 +77,14 @@ namespace gulc {
         // Helpers
         void addBlockAndSetInsertionPoint(llvm::BasicBlock* basicBlock);
 
+        // Externs
+        void generateExternFunctionDecl(const FunctionDecl* functionDecl);
+        void generateExternGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl);
+
         // Decls
         llvm::Function* generateFunctionDecl(const FunctionDecl* functionDecl);
         llvm::GlobalVariable* generateGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl);
+        void generateNamespace(const NamespaceDecl* namespaceDecl);
 
         // Stmts
         void generateCompoundStmt(const CompoundStmt* compoundStmt);
@@ -93,6 +104,7 @@ namespace gulc {
 
         // Exprs
         llvm::Constant* generateConstant(const Expr* expr);
+        llvm::Constant* generateRefEnumConstant(const RefEnumConstantExpr* expr);
 
         llvm::Value* generateBinaryOperatorExpr(const BinaryOperatorExpr* binaryOperatorExpr);
         llvm::Value* generateIntegerLiteralExpr(const IntegerLiteralExpr* integerLiteralExpr);
@@ -110,11 +122,13 @@ namespace gulc {
 
         llvm::Function* generateRefFunctionExpr(const Expr* expr, std::string* nameOut);
         llvm::Function* generateRefFileFunctionExpr(const RefFileFunctionExpr* refFileFunctionExpr);
+        llvm::Function* generateRefNamespaceFunctionExpr(const RefNamespaceFunctionExpr* refNamespaceFunctionExpr);
 
         void castValue(gulc::Type* to, gulc::Type* from, llvm::Value*& value);
 
         // Context info
         FileAST* currentFileAst;
+        const NamespaceDecl* currentNamespace;
         llvm::LLVMContext* llvmContext;
         llvm::IRBuilder<>* irBuilder;
         llvm::Module* module;

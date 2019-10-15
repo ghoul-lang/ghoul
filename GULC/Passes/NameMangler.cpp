@@ -35,5 +35,10 @@ void NameMangler::processDecl(Decl *decl) {
             globalVariable->setMangledName(_manglerBase->mangle(globalVariable));
             break;
         }
+        case Decl::Kind::Namespace: {
+            auto namespaceDecl = llvm::dyn_cast<NamespaceDecl>(decl);
+            _manglerBase->mangle(namespaceDecl);
+            break;
+        }
     }
 }

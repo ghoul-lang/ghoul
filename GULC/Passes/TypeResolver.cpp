@@ -29,6 +29,8 @@
 #include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
 #include <AST/Exprs/CustomPrefixOperatorExpr.hpp>
 #include <AST/Exprs/PotentialExplicitCastExpr.hpp>
+#include <AST/Exprs/RefEnumConstantExpr.hpp>
+#include <AST/Exprs/TempNamespaceRefExpr.hpp>
 #include "TypeResolver.hpp"
 
 using namespace gulc;
@@ -67,59 +69,117 @@ void TypeResolver::printDebugWarning(const std::string &message) {
 
 bool TypeResolver::resolveType(Type *&type) {
     if (type->getTypeKind() == Type::Kind::Unresolved) {
-        // TODO: Take 'namespacePath' into consideration. If there is a namespace path we obviously don't have to worry about the template params
+        // TODO: Take 'namespacePath' into consideration
         auto unresolvedType = llvm::dyn_cast<UnresolvedType>(type);
 
-        if (BuiltInType::isBuiltInType(unresolvedType->name())) {
-            // TODO: Support template overloading. Allow someone to implement `struct int<T> {}` that will be found if there are template arguments
-            if (unresolvedType->hasTemplateArguments()) {
-                printError("built in types do not support templating!",
-                           unresolvedType->startPosition(), unresolvedType->endPosition());
+        if (!unresolvedType->namespacePath().empty()) {
+            std::size_t checkIndex = 0;
+
+            for (NamespaceDecl* checkNamespace : _namespacePrototypes) {
+                if (checkNamespace->name() == unresolvedType->namespacePath()[0]) {
+                    ++checkIndex;
+
+                    for (const std::string& checkPathName = unresolvedType->namespacePath()[checkIndex];
+                         checkIndex < unresolvedType->namespacePath().size();
+                         ++checkIndex) {
+                        for (Decl* checkDecl : checkNamespace->nestedDecls()) {
+                            if (checkDecl->name() == unresolvedType->namespacePath()[checkIndex]) {
+                                if (llvm::isa<NamespaceDecl>(checkDecl)) {
+                                    checkNamespace = llvm::dyn_cast<NamespaceDecl>(checkDecl);
+                                    // Named loops are awesome... too bad C++ doesn't have them
+                                    goto continue_path_lookup;
+                                }
+                            }
+                        }
+
+                        // You have to `continue` the loop manually, if you don't then it is assumed a namespace wasn't found.
+                        return false;
+
+                    continue_path_lookup:
+                        continue;
+                    }
+
+
+                    for (Decl* checkDecl : checkNamespace->nestedDecls()) {
+                        // TODO: We should abstract this out...
+                        if (checkDecl->name() == unresolvedType->name()) {
+                            if (llvm::isa<EnumDecl>(checkDecl)) {
+                                auto enumDecl = llvm::dyn_cast<EnumDecl>(checkDecl);
+                                Type *baseType;
+
+                                if (enumDecl->hasBaseType()) {
+                                    baseType = deepCopy(enumDecl->baseType);
+                                } else {
+                                    // Default type for enum is uint32
+                                    baseType = new BuiltInType(type->startPosition(), type->endPosition(), "uint32");
+                                }
+
+                                Type *oldType = type;
+                                type = new EnumType(oldType->startPosition(), oldType->endPosition(), enumDecl->name(),
+                                                    baseType, enumDecl, checkNamespace);
+
+                                delete oldType;
+                                return true;
+                            }
+                        }
+                    }
+
+                    break;
+                }
+            }
+        } else {
+            if (BuiltInType::isBuiltInType(unresolvedType->name())) {
+                // TODO: Support template overloading. Allow someone to implement `struct int<T> {}` that will be found if there are template arguments
+                if (unresolvedType->hasTemplateArguments()) {
+                    printError("built in types do not support templating!",
+                               unresolvedType->startPosition(), unresolvedType->endPosition());
+                }
+
+                Type *oldType = type;
+                type = new BuiltInType(oldType->startPosition(), oldType->endPosition(), unresolvedType->name());
+                delete oldType;
+                return true;
             }
 
-            Type *oldType = type;
-            type = new BuiltInType(oldType->startPosition(), oldType->endPosition(), unresolvedType->name());
-            delete oldType;
-            return true;
-        }
-
-        // We check the function templates first...
-        // Function template params can't be templated themselves?
-        if (!unresolvedType->hasTemplateArguments() && functionTemplateParams) {
-            for (TemplateParameterDecl *templateParameterDecl : *functionTemplateParams) {
-                if (templateParameterDecl->type->getTypeKind() == Type::Kind::TemplateTypename) {
-                    if (templateParameterDecl->name() == unresolvedType->name()) {
-                        Type *oldType = type;
-                        type = new FunctionTemplateTypenameRefType(oldType->startPosition(), oldType->endPosition(),
-                                                                   templateParameterDecl->name());
-                        delete oldType;
-                        return true;
+            // We check the function templates first...
+            // Function template params can't be templated themselves?
+            if (!unresolvedType->hasTemplateArguments() && functionTemplateParams) {
+                for (TemplateParameterDecl *templateParameterDecl : *functionTemplateParams) {
+                    if (templateParameterDecl->type->getTypeKind() == Type::Kind::TemplateTypename) {
+                        if (templateParameterDecl->name() == unresolvedType->name()) {
+                            Type *oldType = type;
+                            type = new FunctionTemplateTypenameRefType(oldType->startPosition(), oldType->endPosition(),
+                                                                       templateParameterDecl->name());
+                            delete oldType;
+                            return true;
+                        }
                     }
                 }
             }
-        }
 
-        // Check the file decls...
-        for (Decl* checkDecl : currentFileAst->topLevelDecls()) {
-            if (checkDecl->name() == unresolvedType->name()) {
-                // TODO: Take templates into consideration
-                //  `class Example<T> where T : Widget` and `class Example<T> where T : Window` should be supported
-                if (llvm::isa<EnumDecl>(checkDecl)) {
-                    auto enumDecl = llvm::dyn_cast<EnumDecl>(checkDecl);
-                    Type* baseType;
+            // Check the file decls...
+            for (Decl *checkDecl : currentFileAst->topLevelDecls()) {
+                if (checkDecl->name() == unresolvedType->name()) {
+                    // TODO: Take templates into consideration
+                    //  `class Example<T> where T : Widget` and `class Example<T> where T : Window` should be supported
+                    if (llvm::isa<EnumDecl>(checkDecl)) {
+                        auto enumDecl = llvm::dyn_cast<EnumDecl>(checkDecl);
+                        Type *baseType;
 
-                    if (enumDecl->hasBaseType()) {
-                        baseType = deepCopy(enumDecl->baseType);
-                    } else {
-                        // Default type for enum is uint32
-                        baseType = new BuiltInType(type->startPosition(), type->endPosition(), "uint32");
+                        if (enumDecl->hasBaseType()) {
+                            baseType = deepCopy(enumDecl->baseType);
+                        } else {
+                            // Default type for enum is uint32
+                            baseType = new BuiltInType(type->startPosition(), type->endPosition(), "uint32");
+                        }
+
+                        Type *oldType = type;
+                        type = new EnumType(oldType->startPosition(), oldType->endPosition(), enumDecl->name(),
+                                            baseType, enumDecl);
+
+                        delete oldType;
+                        return true;
                     }
-
-                    Type* oldType = type;
-                    type = new EnumType(oldType->startPosition(), oldType->endPosition(), enumDecl->name(), baseType);
-
-                    delete oldType;
-                    return true;
                 }
             }
         }
@@ -190,6 +250,11 @@ Type *TypeResolver::deepCopy(const Type *type) {
         case Type::Kind::BuiltIn: {
             auto builtInType = llvm::dyn_cast<BuiltInType>(type);
             return new BuiltInType(builtInType->startPosition(), builtInType->endPosition(), builtInType->name());
+        }
+        case Type::Kind::Enum: {
+            auto enumType = llvm::dyn_cast<EnumType>(type);
+            return new EnumType(enumType->startPosition(), enumType->endPosition(), enumType->name(),
+                                deepCopy(enumType->baseType()), enumType->decl(), enumType->owningPrototype());
         }
         case Type::Kind::FunctionTemplateTypenameRef: {
             auto functionTemplateTypenameRef = llvm::dyn_cast<FunctionTemplateTypenameRefType>(type);
@@ -262,6 +327,9 @@ void TypeResolver::processDecl(Decl *decl) {
             break;
         case Decl::Kind::Enum:
             processEnumDecl(llvm::dyn_cast<EnumDecl>(decl));
+            break;
+        case Decl::Kind::Namespace:
+            processNamespaceDecl(llvm::dyn_cast<NamespaceDecl>(decl));
             break;
         case Decl::Kind::Parameter:
         case Decl::Kind::TemplateParameter:
@@ -354,7 +422,7 @@ void TypeResolver::processExpr(Expr *&expr) {
             processLocalVariableDeclOrPrefixOperatorCallExpr(expr);
             break;
         case Expr::Kind::MemberAccessCall:
-            processMemberAccessCallExpr(llvm::dyn_cast<MemberAccessCallExpr>(expr));
+            processMemberAccessCallExpr(expr);
             break;
         case Expr::Kind::Paren:
             processParenExpr(llvm::dyn_cast<ParenExpr>(expr));
@@ -461,9 +529,24 @@ void TypeResolver::processFunctionDecl(FunctionDecl *functionDecl) {
 void TypeResolver::processGlobalVariableDecl(GlobalVariableDecl *globalVariableDecl) {
     // Resolve global variable type...
     if (!resolveType(globalVariableDecl->type)) {
-        printError("could not find function return type `" + globalVariableDecl->type->getString() + "`!",
+        printError("could not find variable type `" + globalVariableDecl->type->getString() + "`!",
                    globalVariableDecl->type->startPosition(), globalVariableDecl->type->endPosition());
     }
+
+    if (globalVariableDecl->hasInitialValue()) {
+        processExpr(globalVariableDecl->initialValue);
+    }
+}
+
+void TypeResolver::processNamespaceDecl(NamespaceDecl *namespaceDecl) {
+    NamespaceDecl* oldNamespace = currentNamespace;
+    currentNamespace = namespaceDecl;
+
+    for (Decl* decl : namespaceDecl->nestedDecls()) {
+        processDecl(decl);
+    }
+
+    currentNamespace = oldNamespace;
 }
 
 // Stmts
@@ -613,7 +696,7 @@ void TypeResolver::processIdentifierExpr(Expr*& expr) {
     }
 
     // Check the file for types...
-    for (const Decl* decl : currentFileAst->topLevelDecls()) {
+    for (Decl* decl : currentFileAst->topLevelDecls()) {
         if (decl->name() == identifierExpr->name()) {
             // TODO: Add all Decls that can be types as they're added...
             if (llvm::isa<EnumDecl>(decl)) {
@@ -626,7 +709,7 @@ void TypeResolver::processIdentifierExpr(Expr*& expr) {
                 }
 
                 Type *resolvedType = new EnumType(expr->startPosition(), expr->endPosition(), identifierExpr->name(),
-                                                  deepCopy(enumDecl->baseType));
+                                                  deepCopy(enumDecl->baseType), enumDecl);
 
                 delete identifierExpr;
 
@@ -634,6 +717,13 @@ void TypeResolver::processIdentifierExpr(Expr*& expr) {
                 expr->resultType = deepCopy(resolvedType);
                 return;
             }
+        }
+    }
+
+    for (NamespaceDecl* checkNamespace : _namespacePrototypes) {
+        if (checkNamespace->name() == identifierExpr->name()) {
+            delete identifierExpr;
+            expr = new TempNamespaceRefExpr({}, {}, checkNamespace);
         }
     }
 
@@ -716,19 +806,85 @@ void TypeResolver::processLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr)
     expr = customPrefixOperator;
 }
 
-void TypeResolver::processMemberAccessCallExpr(MemberAccessCallExpr *memberAccessCallExpr) {
-    // TODO: We need to account for if `objectRef` is converted to a Type ref or a Namespace ref...
+
+
+void TypeResolver::processMemberAccessCallExpr(Expr*& expr) {
+    auto memberAccessCallExpr = llvm::dyn_cast<MemberAccessCallExpr>(expr);
+
     processExpr(memberAccessCallExpr->objectRef);
 
-    gulc::Expr* workingExpr = memberAccessCallExpr->member;
-    processIdentifierExpr(workingExpr);
+    if (llvm::isa<ResolvedTypeRefExpr>(memberAccessCallExpr->objectRef)) {
+        auto typeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(memberAccessCallExpr->objectRef);
 
-    if (!llvm::dyn_cast<IdentifierExpr>(workingExpr)) {
-        printError("[INTERNAL] member expression converted away from IdentifierExpr, cannot continue...",
+        if (llvm::isa<EnumType>(typeRef->resolvedType)) {
+            auto enumType = llvm::dyn_cast<EnumType>(typeRef->resolvedType);
+
+            if (memberAccessCallExpr->isArrowCall()) {
+                printError("arrow access operator `->` not supported on enum types!",
+                           memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+                return;
+            }
+
+            if (memberAccessCallExpr->member->hasTemplateArguments()) {
+                printError("enum constants do not support template arguments!",
+                           memberAccessCallExpr->member->startPosition(), memberAccessCallExpr->member->endPosition());
+                return;
+            }
+
+            IdentifierExpr *member = memberAccessCallExpr->member;
+
+            auto refEnumConstant = new RefEnumConstantExpr(memberAccessCallExpr->startPosition(),
+                                                           memberAccessCallExpr->endPosition(),
+                                                           enumType->decl()->name(), member->name());
+            refEnumConstant->resultType = deepCopy(enumType);
+
+            delete memberAccessCallExpr;
+
+            expr = refEnumConstant;
+
+            return;
+        } else {
+            printError("unsupported member access call!",
+                       memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+            return;
+        }
+    } else if (llvm::isa<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef)) {
+        auto tempNamespaceRef = llvm::dyn_cast<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef);
+
+        for (Decl* checkDecl : tempNamespaceRef->namespaceDecl()->nestedDecls()) {
+            // TODO: This should probably be improved...
+            if (checkDecl->name() == memberAccessCallExpr->member->name()) {
+                if (llvm::isa<EnumDecl>(checkDecl)) {
+                    auto enumDecl = llvm::dyn_cast<EnumDecl>(checkDecl);
+                    auto enumType = new EnumType(memberAccessCallExpr->objectRef->startPosition(),
+                                                 memberAccessCallExpr->objectRef->endPosition(),
+                                                 enumDecl->name(), deepCopy(enumDecl->baseType),
+                                                 enumDecl, tempNamespaceRef->namespaceDecl());
+                    auto resolvedTypeRef = new ResolvedTypeRefExpr(enumType->startPosition(), enumDecl->endPosition(),
+                                                                   enumType);
+
+                    delete memberAccessCallExpr;
+
+                    expr = resolvedTypeRef;
+
+                    return;
+                } else if (llvm::isa<NamespaceDecl>(checkDecl)) {
+                    auto namespaceDecl = llvm::dyn_cast<NamespaceDecl>(checkDecl);
+
+                    delete memberAccessCallExpr;
+                    //delete tempNamespaceRef;
+
+                    expr = new TempNamespaceRefExpr({}, {}, namespaceDecl);
+
+                    return;
+                }
+            }
+        }
+    } else {
+        printError("unsupported member access call!",
                    memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+        return;
     }
-
-    memberAccessCallExpr->member = llvm::dyn_cast<IdentifierExpr>(workingExpr);
 }
 
 void TypeResolver::processParenExpr(ParenExpr *parenExpr) {
@@ -753,13 +909,16 @@ void TypeResolver::processPotentialExplicitCastExpr(Expr *&expr) {
     auto resolvedTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(potentialExplicitCastExpr->castType);
     Type* resolvedType = resolvedTypeRef->resolvedType;
 
-    expr = new ExplicitCastExpr(potentialExplicitCastExpr->startPosition(), potentialExplicitCastExpr->endPosition(),
-                                resolvedType, potentialExplicitCastExpr->castee);
+    Expr* explicitCast = new ExplicitCastExpr(potentialExplicitCastExpr->startPosition(),
+                                              potentialExplicitCastExpr->endPosition(),
+                                              resolvedType, potentialExplicitCastExpr->castee);
 
     // Set the values we steal to nullptr then delete the old expression
     resolvedTypeRef->resolvedType = nullptr;
     potentialExplicitCastExpr->castee = nullptr;
     delete potentialExplicitCastExpr;
+
+    expr = explicitCast;
 }
 
 void TypeResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorExpr) {

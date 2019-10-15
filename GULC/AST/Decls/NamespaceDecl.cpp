@@ -13,23 +13,4 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_MANGLERBASE_HPP
-#define GULC_MANGLERBASE_HPP
-
-#include <string>
-#include <AST/Decls/FunctionDecl.hpp>
-#include <AST/Decls/GlobalVariableDecl.hpp>
-#include <AST/Decls/NamespaceDecl.hpp>
-
-namespace gulc {
-    class ManglerBase {
-    public:
-        virtual std::string mangle(FunctionDecl* functionDecl) = 0;
-        virtual std::string mangle(GlobalVariableDecl* globalVariableDecl) = 0;
-        virtual void mangle(NamespaceDecl* namespaceDecl, const std::string& prefix = "") = 0;
-
-        virtual ~ManglerBase() = default;
-    };
-}
-
-#endif //GULC_MANGLERBASE_HPP
+#include "NamespaceDecl.hpp"

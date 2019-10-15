@@ -55,6 +55,7 @@
 #include <AST/FileAST.hpp>
 #include <AST/Decls/GlobalVariableDecl.hpp>
 #include <AST/Decls/EnumDecl.hpp>
+#include <AST/Decls/NamespaceDecl.hpp>
 
 namespace gulc {
     // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
@@ -63,11 +64,13 @@ namespace gulc {
 
     public:
         DeclResolver()
-                : currentFileAst(nullptr), returnType(nullptr), functionTemplateParams(nullptr),
-                  functionParams(nullptr), exprIsFunctionCall(false), functionCallArgs(nullptr), labelNames(),
-                  functionLocalVariablesCount(0), functionLocalVariables() {}
+                : currentFileAst(nullptr), currentNamespace(nullptr), returnType(nullptr),
+                  functionTemplateParams(nullptr), functionParams(nullptr), exprIsFunctionCall(false),
+                  functionCallArgs(nullptr), labelNames(), functionLocalVariablesCount(0), functionLocalVariables() {}
 
         void processFile(FileAST& fileAst);
+
+        static Expr* solveConstExpression(Expr* expr);
 
     private:
         static bool getTypesAreSame(const Type* type1, const Type* type2, bool ignoreQualifiers = false);
@@ -80,6 +83,9 @@ namespace gulc {
          * If the result type of an `arg` requires an implicit cast to match `param` then `isExact` is set to false
          */
         bool argsMatchParams(const std::vector<ParameterDecl*>& params, const std::vector<Expr*>& args, bool* isExact);
+        /// Returns false on error
+        bool checkFunctionMatchesCall(const FunctionDecl*& currentFoundFunction, const FunctionDecl* checkFunction,
+                                      bool* isExactMatch, bool* isAmbiguous);
 
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
         void printWarning(const std::string& message, TextPosition startPosition, TextPosition endPosition);
@@ -92,6 +98,7 @@ namespace gulc {
         void processEnumDecl(EnumDecl* enumDecl);
         void processFunctionDecl(FunctionDecl* functionDecl);
         void processGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
+        void processNamespaceDecl(NamespaceDecl* namespaceDecl);
 
         void processBreakStmt(BreakStmt* breakStmt);
         void processCaseStmt(CaseStmt* caseStmt);
@@ -120,7 +127,7 @@ namespace gulc {
         void processIntegerLiteralExpr(IntegerLiteralExpr* integerLiteralExpr);
         void processLocalVariableDeclExpr(LocalVariableDeclExpr* localVariableDeclExpr);
         void processLocalVariableDeclOrPrefixOperatorCallExpr(Expr*& expr);
-        void processMemberAccessCallExpr(MemberAccessCallExpr* memberAccessCallExpr);
+        void processMemberAccessCallExpr(Expr*& expr);
         void processParenExpr(ParenExpr* parenExpr);
         void processPostfixOperatorExpr(PostfixOperatorExpr* postfixOperatorExpr);
         void processPotentialExplicitCastExpr(Expr*& expr);
@@ -133,10 +140,9 @@ namespace gulc {
         void dereferenceReferences(Expr*& potentialReference);
         void convertLValueToRValue(Expr*& potentialLValue);
 
-        Expr* solveConstExpression(Expr* expr);
-
         // Context management
         FileAST* currentFileAst;
+        NamespaceDecl* currentNamespace;
         Type* returnType;
         const std::vector<TemplateParameterDecl*>* functionTemplateParams;
         const std::vector<ParameterDecl*>* functionParams;

@@ -45,6 +45,7 @@
 #include <AST/Decls/GlobalVariableDecl.hpp>
 #include <AST/Decls/EnumConstantDecl.hpp>
 #include <AST/Decls/EnumDecl.hpp>
+#include <AST/Decls/NamespaceDecl.hpp>
 #include "Parser.hpp"
 
 using namespace gulc;
@@ -204,10 +205,66 @@ Decl *Parser::parseTopLevelDecl() {
 qualifierFound:
 
     switch (peekedToken.tokenType) {
-        case TokenType::NAMESPACE:
-            // TODO:
-            printError("namespaces not yet supported!", startPosition, endPosition);
-            return nullptr;
+        case TokenType::NAMESPACE: {
+            _lexer.consumeType(TokenType::NAMESPACE);
+
+            std::string name = _lexer.peekToken().currentSymbol;
+
+            endPosition = _lexer.peekToken().endPosition;
+
+            if (!_lexer.consumeType(TokenType::SYMBOL)) {
+                printError("expected namespace name, found '" + name + "'!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            auto resultNamespace = new NamespaceDecl(name, _filePath, startPosition, endPosition);
+            auto workingNamespace = resultNamespace;
+
+            while (_lexer.peekType() == TokenType::PERIOD) {
+                _lexer.consumeType(TokenType::PERIOD);
+
+                TextPosition namespaceStartPosition = _lexer.peekToken().startPosition;
+                endPosition = _lexer.peekToken().endPosition;
+
+                std::string nestedName = _lexer.peekToken().currentSymbol;
+
+                if (!_lexer.consumeType(TokenType::SYMBOL)) {
+                    printError("expected namespace name after `.`, found '" + nestedName + "'!",
+                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                    return nullptr;
+                }
+
+                auto newWorkingNamespace = new NamespaceDecl(nestedName, _filePath,
+                                                             namespaceStartPosition, endPosition);
+
+                // We nest the new working namespace into the current one...
+                workingNamespace->addNestedDecl(newWorkingNamespace);
+                // Then set the current working namespace to be the new one
+                // This makes it so `namespace std.io` -> `namespace std { namespace io {} }`
+                workingNamespace = newWorkingNamespace;
+            }
+
+            if (!_lexer.consumeType(TokenType::LCURLY)) {
+                printError("expected namespace beginning `{`, found '" + _lexer.peekToken().currentSymbol + "'!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            while (_lexer.peekType() != TokenType::RCURLY &&
+                   _lexer.peekType() != TokenType::ENDOFFILE) {
+                workingNamespace->addNestedDecl(parseTopLevelDecl());
+            }
+
+            if (!_lexer.consumeType(TokenType::RCURLY)) {
+                printError("expected namespace ending `}`, found '" + _lexer.peekToken().currentSymbol + "'!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            // Return the root namespace...
+            return resultNamespace;
+        }
         case TokenType::CLASS:
             // TODO:
             printError("classes not yet supported!", startPosition, endPosition);
@@ -591,8 +648,22 @@ Type* Parser::parseType(bool parseSuffix) {
             break;
         }
         case TokenType::SYMBOL: {
+            std::vector<std::string> namespacePath{};
             std::string typeName = peekedToken.currentSymbol;
             _lexer.consumeType(TokenType::SYMBOL);
+
+            while (_lexer.peekType() == TokenType::PERIOD) {
+                _lexer.consumeType(TokenType::PERIOD);
+                namespacePath.push_back(typeName);
+
+                typeName = _lexer.peekToken().currentSymbol;
+
+                if (!_lexer.consumeType(TokenType::SYMBOL)) {
+                    printError("expected namespace or type identifier after `.`, found '" + typeName + "'!",
+                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                    return nullptr;
+                }
+            }
 
             std::vector<Expr*> templateArguments{};
 
@@ -622,7 +693,8 @@ Type* Parser::parseType(bool parseSuffix) {
                 _lexer.setRightShiftState(oldRightShiftEnabledValue);
             }
 
-            result = new UnresolvedType(peekedToken.startPosition, peekedToken. endPosition, {}, typeName, templateArguments);
+            result = new UnresolvedType(peekedToken.startPosition, peekedToken. endPosition,
+                                        std::move(namespacePath), typeName, templateArguments);
             break;
         }
         default:

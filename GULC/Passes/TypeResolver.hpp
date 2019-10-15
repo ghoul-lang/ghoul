@@ -45,6 +45,7 @@
 #include <AST/Exprs/ResolvedTypeRefExpr.hpp>
 #include <AST/Exprs/StringLiteralExpr.hpp>
 #include <AST/Exprs/TernaryExpr.hpp>
+#include <AST/Decls/NamespaceDecl.hpp>
 
 namespace gulc {
     /**
@@ -54,6 +55,10 @@ namespace gulc {
      */
     class TypeResolver {
     public:
+        explicit TypeResolver(std::vector<NamespaceDecl*>& namespacePrototypes)
+                : _namespacePrototypes(namespacePrototypes), currentFileAst(nullptr), functionTemplateParams(nullptr),
+                  currentNamespace(nullptr) {}
+
         void processFile(FileAST& fileAst);
 
         static Type* deepCopy(const Type* type);
@@ -72,6 +77,7 @@ namespace gulc {
         void processEnumDecl(EnumDecl* enumDecl);
         void processFunctionDecl(FunctionDecl* functionDecl);
         void processGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
+        void processNamespaceDecl(NamespaceDecl* namespaceDecl);
 
         void processCaseStmt(CaseStmt* caseStmt);
         void processCompoundStmt(CompoundStmt* compoundStmt);
@@ -97,7 +103,7 @@ namespace gulc {
         void processIntegerLiteralExpr(IntegerLiteralExpr* integerLiteralExpr);
         void processLocalVariableDeclExpr(LocalVariableDeclExpr* localVariableDeclExpr);
         void processLocalVariableDeclOrPrefixOperatorCallExpr(Expr*& expr);
-        void processMemberAccessCallExpr(MemberAccessCallExpr* memberAccessCallExpr);
+        void processMemberAccessCallExpr(Expr*& expr);
         void processParenExpr(ParenExpr* parenExpr);
         void processPostfixOperatorExpr(PostfixOperatorExpr* postfixOperatorExpr);
         void processPotentialExplicitCastExpr(Expr*& expr);
@@ -108,8 +114,10 @@ namespace gulc {
         void processUnresolvedTypeRefExpr(Expr*& expr);
 
         // Context management
+        std::vector<NamespaceDecl*>& _namespacePrototypes;
         FileAST* currentFileAst;
         const std::vector<TemplateParameterDecl*>* functionTemplateParams;
+        NamespaceDecl* currentNamespace;
 
     };
 }

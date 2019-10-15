@@ -36,7 +36,9 @@ namespace gulc {
             GlobalVariable,
 
             Enum,
-            EnumConstant
+            EnumConstant,
+
+            Namespace
         };
 
         Kind getDeclKind() const { return _kind; }

@@ -48,12 +48,15 @@
 #include <AST/Exprs/TernaryExpr.hpp>
 #include <AST/Exprs/LValueToRValueExpr.hpp>
 #include <AST/Decls/GlobalVariableDecl.hpp>
+#include <AST/Decls/NamespaceDecl.hpp>
 
 namespace gulc {
     class CodeVerifier {
     public:
         CodeVerifier()
-                : currentFileAst(nullptr) {}
+                : currentFileAst(nullptr), currentNamespace(nullptr), currentFunctionReturnType(nullptr),
+                  currentFunctionTemplateParameters(nullptr), currentFunctionParameters(nullptr),
+                  currentFunctionLocalVariablesCount(0), currentFunctionLocalVariables() {}
 
         void verifyFile(FileAST& fileAst);
 
@@ -77,6 +80,7 @@ namespace gulc {
         // TODO: Support verifying that a function returns on every branch
         void verifyFunctionDecl(FunctionDecl* functionDecl);
         void verifyGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
+        void verifyNamespaceDecl(NamespaceDecl* namespaceDecl);
 
         // Stmts
         void verifyBreakStmt(BreakStmt* breakStmt);
@@ -120,6 +124,7 @@ namespace gulc {
 
         // Context
         FileAST* currentFileAst;
+        NamespaceDecl* currentNamespace;
         Type* currentFunctionReturnType;
         std::vector<TemplateParameterDecl*>* currentFunctionTemplateParameters;
         std::vector<ParameterDecl*>* currentFunctionParameters;

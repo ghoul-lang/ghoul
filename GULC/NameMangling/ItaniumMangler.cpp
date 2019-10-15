@@ -29,10 +29,7 @@ using namespace gulc;
 
 std::string ItaniumMangler::mangle(FunctionDecl *functionDecl) {
     // All mangled names start with "_Z"...
-    std::string mangledName = "_Z";
-
-    // We currently don't have namespaces so we only support <unscoped-name>
-    mangledName += sourceName(functionDecl->name());
+    std::string mangledName = "_Z" + unqualifiedName(functionDecl);
 
     // We only have to use <bare-function-name> since there isn't a namespace yet.
     mangledName += bareFunctionType(functionDecl->parameters);
@@ -42,12 +39,31 @@ std::string ItaniumMangler::mangle(FunctionDecl *functionDecl) {
 
 std::string ItaniumMangler::mangle(GlobalVariableDecl *globalVariableDecl) {
     // All mangled names start with "_Z"...
-    std::string mangledName = "_Z";
+    return "_Z" + unqualifiedName(globalVariableDecl);
+}
 
-    // We currently don't have namespaces so we only support <unscoped-name>
-    mangledName += sourceName(globalVariableDecl->name());
+void ItaniumMangler::mangle(NamespaceDecl *namespaceDecl, const std::string& prefix) {
+    std::string nPrefix = prefix + sourceName(namespaceDecl->name());
 
-    return mangledName;
+    for (Decl* decl : namespaceDecl->nestedDecls()) {
+        if (llvm::isa<FunctionDecl>(decl)) {
+            auto functionDecl = llvm::dyn_cast<FunctionDecl>(decl);
+            functionDecl->setMangledName("_ZN" + nPrefix + unqualifiedName(functionDecl) + "E" + bareFunctionType(functionDecl->parameters));
+        } else if (llvm::isa<GlobalVariableDecl>(decl)) {
+            auto globalVariableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
+            globalVariableDecl->setMangledName("_ZN" + nPrefix + unqualifiedName(globalVariableDecl));
+        } else if (llvm::isa<NamespaceDecl>(decl)) {
+            mangle(llvm::dyn_cast<NamespaceDecl>(decl), nPrefix);
+        }
+    }
+}
+
+std::string ItaniumMangler::unqualifiedName(FunctionDecl *functionDecl) {
+    return sourceName(functionDecl->name());
+}
+
+std::string ItaniumMangler::unqualifiedName(GlobalVariableDecl *globalVariableDecl) {
+    return sourceName(globalVariableDecl->name());
 }
 
 std::string ItaniumMangler::bareFunctionType(std::vector<ParameterDecl*> &params) {
@@ -85,7 +101,7 @@ std::string ItaniumMangler::typeName(gulc::Type *type) {
         }
     } else if (llvm::isa<EnumType>(type)) {
         auto enumType = llvm::dyn_cast<EnumType>(type);
-        return "Te" + enumType->name();
+        return "Te" + sourceName(enumType->name());
     } else if (llvm::isa<PointerType>(type)) {
         return "P" + typeName(llvm::dyn_cast<PointerType>(type)->pointToType);
     } else if (llvm::isa<ReferenceType>(type)) {

@@ -36,6 +36,7 @@
 #include <AST/Types/MutType.hpp>
 #include <AST/Exprs/CharacterLiteralExpr.hpp>
 #include <AST/Types/EnumType.hpp>
+#include <AST/Decls/EnumDecl.hpp>
 #include "CodeGen.hpp"
 
 gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
@@ -64,6 +65,11 @@ gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
     this->irBuilder = &irBuilder;
     this->module = genModule;
     this->funcPass = funcPassManager;
+
+    // Add the externs that have been imported...
+    for (const gulc::Decl* decl : file.importExterns()) {
+        generateImportExtern(decl);
+    }
 
     for (const gulc::Decl* decl : file.topLevelDecls()) {
         generateDecl(decl);
@@ -182,6 +188,24 @@ std::vector<llvm::Type*> gulc::CodeGen::generateParamTypes(const std::vector<Par
     return paramTypes;
 }
 
+void gulc::CodeGen::generateImportExtern(const gulc::Decl *decl) {
+    switch (decl->getDeclKind()) {
+        case gulc::Decl::Kind::Enum:
+            // We don't generate any code for the enum declaration...
+            break;
+        case gulc::Decl::Kind::Function:
+            generateExternFunctionDecl(llvm::dyn_cast<FunctionDecl>(decl));
+            break;
+        case gulc::Decl::Kind::GlobalVariable:
+            generateExternGlobalVariableDecl(llvm::dyn_cast<GlobalVariableDecl>(decl));
+            break;
+        default:
+            printError("internal - unsupported imported extern decl!",
+                       decl->startPosition(), decl->endPosition());
+            break;
+    }
+}
+
 llvm::GlobalObject* gulc::CodeGen::generateDecl(const gulc::Decl *decl) {
     switch (decl->getDeclKind()) {
         case gulc::Decl::Kind::Enum:
@@ -191,6 +215,10 @@ llvm::GlobalObject* gulc::CodeGen::generateDecl(const gulc::Decl *decl) {
             return generateFunctionDecl(llvm::dyn_cast<gulc::FunctionDecl>(decl));
         case gulc::Decl::Kind::GlobalVariable:
             return generateGlobalVariableDecl(llvm::dyn_cast<gulc::GlobalVariableDecl>(decl));
+        case gulc::Decl::Kind::Namespace:
+            generateNamespace(llvm::dyn_cast<gulc::NamespaceDecl>(decl));
+            // TODO: Should `generateDecl` even return anything at this point?
+            return nullptr;
         default:
             printError("internal - unsupported decl!",
                        decl->startPosition(), decl->endPosition());
@@ -300,6 +328,8 @@ llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
             return generateRefParameterExpr(llvm::dyn_cast<RefParameterExpr>(expr));
         case gulc::Expr::Kind::RefGlobalFileVariable:
             return generateRefGlobalFileVariableExpr(llvm::dyn_cast<RefGlobalFileVariableExpr>(expr));
+        case gulc::Expr::Kind::RefEnumConstant:
+            return generateRefEnumConstant(llvm::dyn_cast<gulc::RefEnumConstantExpr>(expr));
         default:
             printError("unexpected expression type in code generator!",
                        expr->startPosition(), expr->endPosition());
@@ -313,12 +343,29 @@ void gulc::CodeGen::addBlockAndSetInsertionPoint(llvm::BasicBlock* basicBlock) {
     irBuilder->SetInsertPoint(basicBlock);
 }
 
+// Externs
+void gulc::CodeGen::generateExternFunctionDecl(const FunctionDecl* functionDecl) {
+    std::vector<llvm::Type*> paramTypes = generateParamTypes(functionDecl->parameters);
+    llvm::Type* returnType = generateLlvmType(functionDecl->resultType);
+    llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
+    llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::ExternalLinkage, functionDecl->mangledName(), module);
+}
+
+void gulc::CodeGen::generateExternGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl) {
+    printError("[INTERNAL] namespace variables not yet supported!",
+               globalVariableDecl->startPosition(), globalVariableDecl->endPosition());
+}
+
 // Decls
 llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *functionDecl) {
     std::vector<llvm::Type*> paramTypes = generateParamTypes(functionDecl->parameters);
     llvm::Type* returnType = generateLlvmType(functionDecl->resultType);
     llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
-    llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::CommonLinkage, functionDecl->mangledName(), module);
+    llvm::Function* function = module->getFunction(functionDecl->mangledName());
+
+    if (!function) {
+        function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::CommonLinkage, functionDecl->mangledName(), module);
+    }
 
     llvm::BasicBlock* funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", function);
     irBuilder->SetInsertPoint(funcBody);
@@ -360,6 +407,17 @@ llvm::GlobalVariable *gulc::CodeGen::generateGlobalVariableDecl(const gulc::Glob
     return new llvm::GlobalVariable(*module, llvmType, isConstant,
                                     llvm::GlobalValue::LinkageTypes::InternalLinkage,
                                     initialValue, globalVariableDecl->mangledName());
+}
+
+void gulc::CodeGen::generateNamespace(const gulc::NamespaceDecl *namespaceDecl) {
+    const NamespaceDecl* oldNamespace = currentNamespace;
+    currentNamespace = namespaceDecl;
+
+    for (const Decl* decl : namespaceDecl->nestedDecls()) {
+        generateDecl(decl);
+    }
+
+    currentNamespace = oldNamespace;
 }
 
 // Stmts
@@ -651,10 +709,34 @@ llvm::Constant *gulc::CodeGen::generateConstant(const Expr* expr) {
         auto intLiteral = llvm::dyn_cast<IntegerLiteralExpr>(expr);
         // TODO: Should we support other types here?...
         return llvm::ConstantInt::get(llvm::Type::getInt32Ty(*llvmContext), intLiteral->numberString, intLiteral->numberBase());
+    } else if (llvm::isa<gulc::RefEnumConstantExpr>(expr)) {
+        return generateRefEnumConstant(llvm::dyn_cast<gulc::RefEnumConstantExpr>(expr));
     }
 
     printError("unsupported constant in codegen!", expr->startPosition(), expr->endPosition());
     return nullptr;
+}
+
+llvm::Constant *gulc::CodeGen::generateRefEnumConstant(const gulc::RefEnumConstantExpr *expr) {
+    if (llvm::isa<EnumType>(expr->resultType)) {
+        auto enumType = llvm::dyn_cast<EnumType>(expr->resultType);
+
+        if (enumType->decl()->hasConstants()) {
+            for (gulc::EnumConstantDecl *enumConstantDecl : enumType->decl()->enumConstants()) {
+                if (enumConstantDecl->name() == expr->constantName()) {
+                    return generateConstant(enumConstantDecl->constantValue);
+                }
+            }
+        }
+
+        printError("enum `" + expr->enumName() + "` does not have constant named `" + expr->constantName() + "`!",
+                   expr->startPosition(), expr->endPosition());
+        return nullptr;
+    } else {
+        printError("[INTERNAL] enum expression does not have enum return type",
+                   expr->startPosition(), expr->endPosition());
+        return nullptr;
+    }
 }
 
 llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperatorExpr *binaryOperatorExpr) {
@@ -670,6 +752,11 @@ llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperato
         resultType = llvm::dyn_cast<ImmutType>(resultType)->pointToType;
     } else if (llvm::isa<MutType>(resultType)) {
         resultType = llvm::dyn_cast<MutType>(resultType)->pointToType;
+    }
+
+    // We handle the binary operators based on the result type...
+    if (llvm::isa<EnumType>(resultType)) {
+        resultType = llvm::dyn_cast<EnumType>(resultType)->baseType();
     }
 
     // TODO: Support the `PointerType`
@@ -1030,6 +1117,11 @@ llvm::Function *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr, s
             *nameOut = refFileFunction->name();
             return generateRefFileFunctionExpr(refFileFunction);
         }
+        case gulc::Expr::Kind::RefNamespaceFunction: {
+            auto refNamespaceFunction = llvm::dyn_cast<RefNamespaceFunctionExpr>(expr);
+            *nameOut = refNamespaceFunction->name();
+            return generateRefNamespaceFunctionExpr(refNamespaceFunction);
+        }
         default:
             printError("[INTERNAL] unsupported function reference!",
                        expr->startPosition(), expr->endPosition());
@@ -1040,6 +1132,11 @@ llvm::Function *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr, s
 llvm::Function *gulc::CodeGen::generateRefFileFunctionExpr(const gulc::RefFileFunctionExpr *refFileFunctionExpr) {
     // NOTE: All error checking is should be handled before the code generator
     return module->getFunction(refFileFunctionExpr->mangledName());
+}
+
+llvm::Function *gulc::CodeGen::generateRefNamespaceFunctionExpr(const gulc::RefNamespaceFunctionExpr *refNamespaceFunctionExpr) {
+    // NOTE: There should be an extern function already in the module...
+    return module->getFunction(refNamespaceFunctionExpr->mangledName());
 }
 
 void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& value) {

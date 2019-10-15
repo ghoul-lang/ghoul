@@ -18,6 +18,7 @@
 
 #include <AST/FileAST.hpp>
 #include <NameMangling/ManglerBase.hpp>
+#include <AST/Decls/NamespaceDecl.hpp>
 
 namespace gulc {
     class NameMangler {

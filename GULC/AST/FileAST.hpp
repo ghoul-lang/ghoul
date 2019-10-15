@@ -16,6 +16,7 @@
 #ifndef GULC_FILEAST_HPP
 #define GULC_FILEAST_HPP
 
+#include <algorithm>
 #include <string>
 #include <vector>
 #include "Decl.hpp"
@@ -25,7 +26,7 @@ namespace gulc {
     class FileAST {
     public:
         explicit FileAST(std::string filePath)
-                : _filePath(std::move(filePath)), _topLevelDecls() {}
+                : _filePath(std::move(filePath)), _importExterns(), _topLevelDecls() {}
 
 		FileAST& operator=(FileAST&& other) noexcept = default;
 		FileAST(FileAST&& other) noexcept = default;
@@ -33,6 +34,15 @@ namespace gulc {
         std::string filePath() const { return _filePath; }
         const std::vector<Decl*>& topLevelDecls() const { return _topLevelDecls; }
         void addTopLevelDecl(Decl* decl) { _topLevelDecls.push_back(decl); }
+
+        std::vector<const Decl*>& importExterns() { return _importExterns; };
+        const std::vector<const Decl*>& importExterns() const { return _importExterns; };
+
+        void addImportExtern(const Decl* decl) {
+            if (std::find(_importExterns.begin(), _importExterns.end(), decl) == _importExterns.end()) {
+                _importExterns.push_back(decl);
+            }
+        }
 
         virtual ~FileAST() {
             for (Decl* topLevelDecl : _topLevelDecls) {
@@ -42,6 +52,8 @@ namespace gulc {
 
     private:
         std::string _filePath;
+        // We don't own these so we don't delete them.
+        std::vector<const Decl*> _importExterns;
         std::vector<Decl*> _topLevelDecls;
 
     };

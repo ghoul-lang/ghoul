@@ -13,23 +13,29 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_MANGLERBASE_HPP
-#define GULC_MANGLERBASE_HPP
+#ifndef GULC_TEMPNAMESPACEREFEXPR_HPP
+#define GULC_TEMPNAMESPACEREFEXPR_HPP
 
-#include <string>
-#include <AST/Decls/FunctionDecl.hpp>
-#include <AST/Decls/GlobalVariableDecl.hpp>
+#include <AST/Expr.hpp>
 #include <AST/Decls/NamespaceDecl.hpp>
 
 namespace gulc {
-    class ManglerBase {
+    class TempNamespaceRefExpr : public Expr {
     public:
-        virtual std::string mangle(FunctionDecl* functionDecl) = 0;
-        virtual std::string mangle(GlobalVariableDecl* globalVariableDecl) = 0;
-        virtual void mangle(NamespaceDecl* namespaceDecl, const std::string& prefix = "") = 0;
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::TempNamespaceRef; }
 
-        virtual ~ManglerBase() = default;
+        TempNamespaceRefExpr(TextPosition startPosition, TextPosition endPosition, NamespaceDecl* namespacePrototype)
+                : Expr(Kind::TempNamespaceRef, startPosition, endPosition),
+                  _namespacePrototype(namespacePrototype) {}
+
+        NamespaceDecl* namespaceDecl() { return _namespacePrototype; }
+
+        // We don't own `_namespacePrototype`. We don't free it.
+
+    private:
+        NamespaceDecl* _namespacePrototype;
+
     };
 }
 
-#endif //GULC_MANGLERBASE_HPP
+#endif //GULC_TEMPNAMESPACEREFEXPR_HPP
