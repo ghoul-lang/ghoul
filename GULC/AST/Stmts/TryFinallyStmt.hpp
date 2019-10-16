@@ -31,6 +31,11 @@ namespace gulc {
 
         CompoundStmt* handlerStmt;
 
+        Stmt* deepCopy() const override {
+            return new TryFinallyStmt(startPosition(), endPosition(),
+                                      static_cast<CompoundStmt*>(handlerStmt->deepCopy()));
+        }
+
         ~TryFinallyStmt() override {
             delete handlerStmt;
         }

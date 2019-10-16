@@ -43,6 +43,17 @@ namespace gulc {
             return result + ")";
         }
 
+        Type* deepCopy() const override {
+            std::vector<Type*> copiedParamTypes;
+
+            for (Type* paramType : paramTypes) {
+                copiedParamTypes.push_back(paramType->deepCopy());
+            }
+
+            return new FunctionPointerType(startPosition(), endPosition(),
+                                           resultType->deepCopy(), std::move(copiedParamTypes));
+        }
+
         ~FunctionPointerType() override {
             delete resultType;
 

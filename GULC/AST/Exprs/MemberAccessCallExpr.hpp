@@ -33,6 +33,12 @@ namespace gulc {
         Expr* objectRef;
         IdentifierExpr* member;
 
+        Expr* deepCopy() const override {
+            return new MemberAccessCallExpr(startPosition(), endPosition(),
+                                            _isArrowCall, objectRef->deepCopy(),
+                                            static_cast<IdentifierExpr*>(member->deepCopy()));
+        }
+
         ~MemberAccessCallExpr() override {
             delete objectRef;
             delete member;

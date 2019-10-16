@@ -54,6 +54,19 @@ namespace gulc {
         bool hasCatchStmts() const { return !_catchStmts.empty(); }
         bool hasFinallyStmt() const { return finallyStmt != nullptr; }
 
+        Stmt* deepCopy() const override {
+            std::vector<TryCatchStmt*> copiedCatchStmts;
+
+            for (TryCatchStmt* catchStmt : _catchStmts) {
+                copiedCatchStmts.push_back(static_cast<TryCatchStmt*>(catchStmt->deepCopy()));
+            }
+
+            return new TryStmt(startPosition(), endPosition(),
+                               static_cast<CompoundStmt*>(encapsulatedStmt->deepCopy()),
+                               std::move(copiedCatchStmts),
+                               static_cast<TryFinallyStmt*>(finallyStmt->deepCopy()));
+        }
+
         ~TryStmt() override {
             for (TryCatchStmt* tryCatchStmt : _catchStmts) {
                 delete tryCatchStmt;

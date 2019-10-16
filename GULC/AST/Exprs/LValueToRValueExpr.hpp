@@ -30,6 +30,11 @@ namespace gulc {
 
         Expr* lvalue;
 
+        Expr* deepCopy() const override {
+            return new LValueToRValueExpr(startPosition(), endPosition(),
+                                          lvalue->deepCopy(), _deletePointer);
+        }
+
         ~LValueToRValueExpr() override {
             if (_deletePointer) {
                 delete lvalue;

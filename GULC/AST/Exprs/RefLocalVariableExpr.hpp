@@ -29,6 +29,10 @@ namespace gulc {
 
         std::string name() const { return _name; }
 
+        Expr* deepCopy() const override {
+            return new RefLocalVariableExpr(startPosition(), endPosition(), _name);
+        }
+
     private:
         std::string _name;
 

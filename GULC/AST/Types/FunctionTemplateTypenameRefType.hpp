@@ -31,6 +31,11 @@ namespace gulc {
         std::string name() const { return _name; }
         std::string getString() const override { return _name; }
 
+        Type* deepCopy() const override {
+            return new FunctionTemplateTypenameRefType(startPosition(), endPosition(),
+                                                       _name);
+        }
+
     private:
         std::string _name;
 

@@ -32,6 +32,11 @@ namespace gulc {
         std::string operatorName() const { return _operatorName; }
         Expr* expr;
 
+        Expr* deepCopy() const override {
+            return new PostfixOperatorExpr(startPosition(), endPosition(),
+                                           _operatorName, expr->deepCopy());
+        }
+
         ~PostfixOperatorExpr() override {
             delete expr;
         }

@@ -28,6 +28,11 @@ namespace gulc {
                 : Type(Kind::TemplateTypename, startPosition, endPosition) {}
 
         std::string getString() const override { return "typename"; }
+
+        Type* deepCopy() const override {
+            return new TemplateTypenameType(startPosition(), endPosition());
+        }
+
     };
 }
 

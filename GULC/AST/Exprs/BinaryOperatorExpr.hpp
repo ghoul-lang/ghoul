@@ -50,6 +50,12 @@ namespace gulc {
                     _operatorName == "&=" || _operatorName == "|=" || _operatorName == "^=";
         }
 
+        Expr* deepCopy() const override {
+            return new BinaryOperatorExpr(startPosition(), endPosition(),
+                                          _operatorName,
+                                          leftValue->deepCopy(), rightValue->deepCopy());
+        }
+
         ~BinaryOperatorExpr() override {
             delete leftValue;
             delete rightValue;

@@ -31,6 +31,7 @@ namespace gulc {
                 _isBool = true;
             }
 
+            // TODO: Change all `int#` and `float#` to `i#`, `u#`, and `f#`
             // TODO: Remove the names that aren't `int#` and `float32`/`float64`
             if (_name == "void") {
                 _sizeInBytes = 0;
@@ -74,6 +75,10 @@ namespace gulc {
                    name == "int16" || name == "uint16" || name == "float16" || name == "short" || name == "ushort" ||
                    name == "int32" || name == "uint32" || name == "float32" || name == "int" || name == "uint" || name == "float" ||
                    name == "int64" || name == "uint64" || name == "float64" || name == "long" || name == "ulong" || name == "double";
+        }
+
+        Type* deepCopy() const override {
+            return new BuiltInType(startPosition(), endPosition(), _name);
         }
 
     private:

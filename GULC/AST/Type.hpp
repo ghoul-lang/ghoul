@@ -45,6 +45,8 @@ namespace gulc {
         virtual bool isLValue() const { return _isLValue; }
         virtual void setIsLValue(bool isLValue) { _isLValue = isLValue; }
 
+        virtual Type* deepCopy() const = 0;
+
         virtual ~Type() = default;
 
     protected:

@@ -36,6 +36,17 @@ namespace gulc {
 
         bool hasTemplateArguments() const { return !templateArguments.empty(); }
 
+        Expr* deepCopy() const override {
+            std::vector<Expr*> copiedTemplateArguments;
+
+            for (Expr* templateArgument : templateArguments) {
+                copiedTemplateArguments.push_back(templateArgument->deepCopy());
+            }
+
+            return new RefNamespaceFunctionExpr(startPosition(), endPosition(), _name,
+                                                std::move(copiedTemplateArguments), _mangledName);
+        }
+
         ~RefNamespaceFunctionExpr() override {
             for (Expr*& templateArgument : templateArguments) {
                 delete templateArgument;

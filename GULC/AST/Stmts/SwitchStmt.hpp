@@ -35,6 +35,17 @@ namespace gulc {
         std::vector<CaseStmt*>& cases() { return _cases; }
         const std::vector<CaseStmt*>& cases() const { return _cases; }
 
+        Stmt* deepCopy() const override {
+            std::vector<CaseStmt*> copiedCases;
+
+            for (CaseStmt* caseStmt : _cases) {
+                copiedCases.push_back(static_cast<CaseStmt*>(caseStmt->deepCopy()));
+            }
+
+            return new SwitchStmt(startPosition(), endPosition(), condition->deepCopy(),
+                                  std::move(copiedCases));
+        }
+
         ~SwitchStmt() override {
             delete condition;
 

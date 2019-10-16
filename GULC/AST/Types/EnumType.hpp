@@ -42,6 +42,11 @@ namespace gulc {
         EnumDecl* decl() const { return _decl; }
         NamespaceDecl* owningPrototype() const { return _owningPrototype; }
 
+        Type* deepCopy() const override {
+            return new EnumType(startPosition(), endPosition(), _name,
+                                _baseType->deepCopy(), _decl, _owningPrototype);
+        }
+
         ~EnumType() override {
             // We don't own `_decl` so we don't delete it
             // We don't own `_owningPrototype` so we don't delete it

@@ -32,6 +32,11 @@ namespace gulc {
         Expr* type;
         std::string name() const { return _name; }
 
+        Expr* deepCopy() const override {
+            return new LocalVariableDeclExpr(startPosition(), endPosition(),
+                                             type->deepCopy(), name());
+        }
+
         ~LocalVariableDeclExpr() override {
             delete type;
         }

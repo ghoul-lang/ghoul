@@ -30,6 +30,11 @@ namespace gulc {
 
         std::string numberValue() const { return _numberValue; }
 
+        Expr* deepCopy() const override {
+            return new FloatLiteralExpr(startPosition(), endPosition(),
+                                        _numberValue);
+        }
+
     private:
         std::string _numberValue;
 

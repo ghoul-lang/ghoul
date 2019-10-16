@@ -73,6 +73,8 @@ namespace gulc {
         // This is the type of this expression. I.e `(float)i + 1` will make the resultType of the 'BinaryOperatorExpr' 'float'
         Type* resultType;
 
+        virtual Expr* deepCopy() const = 0;
+
         ~Expr() override {
             delete resultType;
         }

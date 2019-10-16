@@ -31,12 +31,15 @@ namespace gulc {
         Expr* castType;
         Expr* castee;
 
+        Expr* deepCopy() const override {
+            return new PotentialExplicitCastExpr(startPosition(), endPosition(),
+                                                 castType->deepCopy(), castee->deepCopy());
+        }
+
         ~PotentialExplicitCastExpr() override {
             delete castType;
             delete castee;
         }
-
-    private:
 
     };
 }

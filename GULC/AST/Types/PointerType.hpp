@@ -30,6 +30,11 @@ namespace gulc {
         Type* pointToType;
         std::string getString() const override { return pointToType->getString() + "*"; }
 
+        Type* deepCopy() const override {
+            return new PointerType(startPosition(), endPosition(),
+                                   pointToType->deepCopy());
+        }
+
         ~PointerType() override {
             delete pointToType;
         }

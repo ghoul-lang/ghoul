@@ -35,6 +35,23 @@ namespace gulc {
 
         void addNestedDecl(Decl* decl) { _nestedDecls.push_back(decl); }
 
+        Decl* deepCopy() const override {
+            NamespaceDecl* result = new NamespaceDecl(name(), sourceFile(),
+                                                      startPosition(), endPosition());
+
+            if (_isPrototype) {
+                result->makePrototype();
+            }
+
+            std::vector<Decl*>& newNestedDecls = result->nestedDecls();
+
+            for (Decl* nestedDecl : _nestedDecls) {
+                newNestedDecls.push_back(nestedDecl->deepCopy());
+            }
+
+            return result;
+        }
+
         ~NamespaceDecl() override {
             for (Decl* decl : _nestedDecls) {
                 if (_isPrototype && !llvm::isa<NamespaceDecl>(decl)) {

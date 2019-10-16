@@ -48,6 +48,8 @@ namespace gulc {
         TextPosition startPosition() const { return _startPosition; }
         TextPosition endPosition() const { return _endPosition; }
 
+        virtual Stmt* deepCopy() const = 0;
+
         virtual ~Stmt() = default;
 
     protected:

@@ -33,6 +33,12 @@ namespace gulc {
 
         bool hasConstantValue() const { return constantValue != nullptr; }
 
+        Decl* deepCopy() const override {
+            return new EnumConstantDecl(name(), sourceFile(),
+                                        startPosition(), endPosition(),
+                                        constantValue->deepCopy());
+        }
+
         ~EnumConstantDecl() override {
             delete constantValue;
         }

@@ -30,6 +30,11 @@ namespace gulc {
         Type* pointToType;
         std::string getString() const override { return pointToType->getString() + " immut"; }
 
+        Type* deepCopy() const override {
+            return new ImmutType(startPosition(), endPosition(),
+                                 pointToType->deepCopy());
+        }
+
         ~ImmutType() override {
             delete pointToType;
         }

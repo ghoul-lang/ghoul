@@ -32,6 +32,11 @@ namespace gulc {
         Expr* condition;
         Stmt* loopStmt;
 
+        Stmt* deepCopy() const override {
+            return new DoStmt(startPosition(), endPosition(), condition->deepCopy(),
+                              loopStmt->deepCopy());
+        }
+
         ~DoStmt() override {
             delete condition;
             delete loopStmt;

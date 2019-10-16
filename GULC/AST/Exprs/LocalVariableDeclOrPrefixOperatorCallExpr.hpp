@@ -31,12 +31,16 @@ namespace gulc {
         Expr* typeOrPrefixOperator;
         Expr* nameOrExpr;
 
+        Expr* deepCopy() const override {
+            return new LocalVariableDeclOrPrefixOperatorCallExpr(startPosition(), endPosition(),
+                                                                 typeOrPrefixOperator->deepCopy(),
+                                                                 nameOrExpr->deepCopy());
+        }
+
         ~LocalVariableDeclOrPrefixOperatorCallExpr() override {
             delete typeOrPrefixOperator;
             delete nameOrExpr;
         }
-
-    private:
 
     };
 }

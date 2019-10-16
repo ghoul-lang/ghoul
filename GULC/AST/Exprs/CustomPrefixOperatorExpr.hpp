@@ -31,6 +31,11 @@ namespace gulc {
         Expr* operatorReference;
         Expr* expr;
 
+        Expr* deepCopy() const override {
+            return new CustomPrefixOperatorExpr(startPosition(), endPosition(),
+                                                operatorReference->deepCopy(), expr->deepCopy());
+        }
+
         ~CustomPrefixOperatorExpr() override {
             delete operatorReference;
             delete expr;

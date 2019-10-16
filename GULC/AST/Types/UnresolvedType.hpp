@@ -54,6 +54,22 @@ namespace gulc {
             return result;
         }
 
+        Type* deepCopy() const override {
+            std::vector<std::string> copiedNamespacePath;
+            std::vector<Expr*> copiedTemplateArguments;
+
+            for (std::string namespacePathPart : _namespacePath) {
+                copiedNamespacePath.push_back(std::move(namespacePathPart));
+            }
+
+            for (Expr* templateArgument : _templateArguments) {
+                copiedTemplateArguments.push_back(templateArgument->deepCopy());
+            }
+
+            return new UnresolvedType(startPosition(), endPosition(),
+                                      std::move(copiedNamespacePath), _name, std::move(copiedTemplateArguments));
+        }
+
         ~UnresolvedType() override {
             for (Expr* templateArgument : _templateArguments) {
                 delete templateArgument;

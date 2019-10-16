@@ -29,6 +29,10 @@ namespace gulc {
 
         std::size_t paramIndex() const { return _paramIndex; }
 
+        Expr* deepCopy() const override {
+            return new RefParameterExpr(startPosition(), endPosition(), _paramIndex);
+        }
+
     private:
         std::size_t _paramIndex;
 

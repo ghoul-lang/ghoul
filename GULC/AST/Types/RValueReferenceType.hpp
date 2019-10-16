@@ -30,6 +30,11 @@ namespace gulc {
 
         std::string getString() const override { return referenceToType->getString() + "&"; }
 
+        Type* deepCopy() const override {
+            return new RValueReferenceType(startPosition(), endPosition(),
+                                           referenceToType->deepCopy());
+        }
+
         ~RValueReferenceType() override {
             delete referenceToType;
         }

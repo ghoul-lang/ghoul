@@ -35,6 +35,11 @@ namespace gulc {
         Stmt* trueStmt;
         bool hasCondition() const { return condition != nullptr; }
 
+        Stmt* deepCopy() const override {
+            return new CaseStmt(startPosition(), endPosition(),
+                                condition->deepCopy(), trueStmt->deepCopy(), _isDefault);
+        }
+
         ~CaseStmt() override {
             delete condition;
             delete trueStmt;

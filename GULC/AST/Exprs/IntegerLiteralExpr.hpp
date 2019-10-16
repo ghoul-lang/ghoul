@@ -25,12 +25,17 @@ namespace gulc {
         static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::IntegerLiteral; }
 
         IntegerLiteralExpr(TextPosition startPosition, TextPosition endPosition,
-                           int numberBase, std::string numberString)
+                           unsigned int numberBase, std::string numberString)
                 : Expr(Kind::IntegerLiteral, startPosition, endPosition),
                   numberString(std::move(numberString)), _numberBase(numberBase) {}
 
         unsigned int numberBase() const { return _numberBase; }
         std::string numberString;
+
+        Expr* deepCopy() const override {
+            return new IntegerLiteralExpr(startPosition(), endPosition(),
+                                          _numberBase, numberString);
+        }
 
     private:
         unsigned int _numberBase;

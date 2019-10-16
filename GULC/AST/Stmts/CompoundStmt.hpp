@@ -30,6 +30,16 @@ namespace gulc {
         const std::vector<Stmt*>& statements() const { return _statements; }
         std::vector<Stmt*>& statements() { return _statements; }
 
+        Stmt* deepCopy() const override {
+            std::vector<Stmt*> copiedStatements;
+
+            for (Stmt* statement : _statements) {
+                copiedStatements.push_back(statement->deepCopy());
+            }
+
+            return new CompoundStmt(startPosition(), endPosition(), std::move(copiedStatements));
+        }
+
     private:
         std::vector<Stmt*> _statements;
 

@@ -43,6 +43,24 @@ namespace gulc {
         bool hasTemplateParameters() const { return !templateParameters.empty(); }
         bool hasParameters() const { return !parameters.empty(); }
 
+        Decl* deepCopy() const override {
+            std::vector<TemplateParameterDecl*> copiedTemplateParameters;
+            std::vector<ParameterDecl*> copiedParameters;
+
+            for (TemplateParameterDecl* templateParameter : templateParameters) {
+                copiedTemplateParameters.push_back(static_cast<TemplateParameterDecl*>(templateParameter->deepCopy()));
+            }
+
+            for (ParameterDecl* parameter : parameters) {
+                copiedParameters.push_back(static_cast<ParameterDecl*>(parameter->deepCopy()));
+            }
+
+            return new FunctionDecl(name(), sourceFile(),
+                                    startPosition(), endPosition(),
+                                    resultType->deepCopy(), std::move(copiedTemplateParameters),
+                                    std::move(copiedParameters), static_cast<CompoundStmt*>(_body->deepCopy()));
+        }
+
         ~FunctionDecl() override {
             for (ParameterDecl* parameterDecl : parameters) {
                 delete parameterDecl;

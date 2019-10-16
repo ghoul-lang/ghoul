@@ -30,6 +30,11 @@ namespace gulc {
         Type* pointToType;
         std::string getString() const override { return pointToType->getString() + " mut"; }
 
+        Type* deepCopy() const override {
+            return new MutType(startPosition(), endPosition(),
+                               pointToType->deepCopy());
+        }
+
         ~MutType() override {
             delete pointToType;
         }

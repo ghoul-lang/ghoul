@@ -30,6 +30,10 @@ namespace gulc {
 
         std::string label() const { return _label; }
 
+        Stmt* deepCopy() const override {
+            return new GotoStmt(startPosition(), endPosition(), _label);
+        }
+
     private:
         std::string _label;
 

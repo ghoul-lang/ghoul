@@ -37,6 +37,20 @@ namespace gulc {
 
         bool hasConstants() const { return !_enumConstants.empty(); }
 
+        Decl* deepCopy() const override {
+            std::vector<EnumConstantDecl*> copiedConstants{};
+            copiedConstants.reserve(_enumConstants.size());
+
+            for (EnumConstantDecl* enumConstantDecl : _enumConstants) {;
+                // `deepCopy` for `EnumConstantDecl` is guaranteed to return `EnumConstantDecl*`
+                copiedConstants.push_back(static_cast<EnumConstantDecl*>(enumConstantDecl->deepCopy()));
+            }
+
+            return new EnumDecl(name(), sourceFile(),
+                                startPosition(), endPosition(),
+                                baseType->deepCopy(), std::move(copiedConstants));
+        }
+
         ~EnumDecl() override {
             delete baseType;
 

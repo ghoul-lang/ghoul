@@ -32,6 +32,11 @@ namespace gulc {
         Type* castType;
         Expr* castee;
 
+        Expr* deepCopy() const override {
+            return new ImplicitCastExpr(startPosition(), endPosition(),
+                                        castType->deepCopy(), castee->deepCopy());
+        }
+
         ~ImplicitCastExpr() override {
             delete castType;
             delete castee;

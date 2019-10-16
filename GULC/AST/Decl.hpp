@@ -50,6 +50,8 @@ namespace gulc {
         std::string mangledName() const { return _mangledName; }
         void setMangledName(std::string mangledName) { _mangledName = std::move(mangledName); }
 
+        virtual Decl* deepCopy() const = 0;
+
         virtual ~Decl() = default;
 
     protected:

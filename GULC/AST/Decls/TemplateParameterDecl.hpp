@@ -34,6 +34,13 @@ namespace gulc {
         const Expr* defaultArgument() const { return _defaultArgument; }
         bool hasDefaultArgument() const { return _defaultArgument != nullptr; }
 
+        Decl* deepCopy() const override {
+            return new TemplateParameterDecl(name(), sourceFile(),
+                                             startPosition(), endPosition(),
+                                             type->deepCopy(),
+                                             _defaultArgument ? _defaultArgument->deepCopy() : nullptr);
+        }
+
         ~TemplateParameterDecl() override {
             delete type;
             delete _defaultArgument;

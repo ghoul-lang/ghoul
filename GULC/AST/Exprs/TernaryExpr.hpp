@@ -32,13 +32,17 @@ namespace gulc {
         Expr* trueExpr;
         Expr* falseExpr;
 
+        Expr* deepCopy() const override {
+            return new TernaryExpr(startPosition(), endPosition(),
+                                   condition->deepCopy(),
+                                   trueExpr->deepCopy(), falseExpr->deepCopy());
+        }
+
         ~TernaryExpr() override {
             delete condition;
             delete trueExpr;
             delete falseExpr;
         }
-
-    private:
 
     };
 }

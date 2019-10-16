@@ -33,6 +33,17 @@ namespace gulc {
         std::vector<Expr*> arguments;
         bool hasArguments() const { return !arguments.empty(); }
 
+        Expr* deepCopy() const override {
+            std::vector<Expr*> copiedArguments;
+
+            for (Expr* arg : arguments) {
+                copiedArguments.push_back(arg->deepCopy());
+            }
+
+            return new FunctionCallExpr(startPosition(), endPosition(),
+                                        functionReference, std::move(copiedArguments));
+        }
+
         ~FunctionCallExpr() override {
             delete functionReference;
 

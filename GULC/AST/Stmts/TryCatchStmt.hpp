@@ -38,6 +38,12 @@ namespace gulc {
         CompoundStmt* handlerStmt;
         bool hasExceptionDecl() const { return exceptionType != nullptr; }
 
+        Stmt* deepCopy() const override {
+            return new TryCatchStmt(startPosition(), endPosition(),
+                                    exceptionType->deepCopy(), exceptionVarName,
+                                    static_cast<CompoundStmt*>(handlerStmt->deepCopy()));
+        }
+
         ~TryCatchStmt() override {
             delete exceptionType;
             delete handlerStmt;

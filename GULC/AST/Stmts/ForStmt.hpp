@@ -35,6 +35,12 @@ namespace gulc {
         Expr* iterationExpr;
         Stmt* loopStmt;
 
+        Stmt* deepCopy() const override {
+            return new ForStmt(startPosition(), endPosition(), preLoop->deepCopy(),
+                               condition->deepCopy(), iterationExpr->deepCopy(),
+                               loopStmt->deepCopy());
+        }
+
         ~ForStmt() override {
             delete preLoop;
             delete condition;

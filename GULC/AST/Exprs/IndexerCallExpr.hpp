@@ -25,7 +25,7 @@ namespace gulc {
         static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::IndexerCall; }
 
         IndexerCallExpr(TextPosition startPosition, TextPosition endPosition,
-                Expr* indexerReference, std::vector<Expr*> arguments)
+                        Expr* indexerReference, std::vector<Expr*> arguments)
                 : Expr(Kind::IndexerCall, startPosition, endPosition),
                   indexerReference(indexerReference), _arguments(std::move(arguments)) {}
 
@@ -33,6 +33,17 @@ namespace gulc {
         std::vector<Expr*>& arguments() { return _arguments; }
         const std::vector<Expr*>& arguments() const { return _arguments; }
         bool hasArguments() const { return !_arguments.empty(); }
+
+        Expr* deepCopy() const override {
+            std::vector<Expr*> copiedArguments;
+
+            for (Expr* argument : _arguments) {
+                copiedArguments.push_back(argument->deepCopy());
+            }
+
+            return new IndexerCallExpr(startPosition(), endPosition(),
+                                       indexerReference->deepCopy(), std::move(copiedArguments));
+        }
 
         ~IndexerCallExpr() override {
             delete indexerReference;

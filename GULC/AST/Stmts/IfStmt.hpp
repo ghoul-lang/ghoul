@@ -34,6 +34,11 @@ namespace gulc {
         Stmt* falseStmt;
         bool hasFalseStmt() const { return falseStmt != nullptr; }
 
+        Stmt* deepCopy() const override {
+            return new IfStmt(startPosition(), endPosition(), condition->deepCopy(),
+                              trueStmt->deepCopy(), falseStmt ? falseStmt->deepCopy() : nullptr);
+        }
+
         ~IfStmt() override  {
             delete condition;
             delete trueStmt;

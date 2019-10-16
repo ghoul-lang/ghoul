@@ -30,11 +30,14 @@ namespace gulc {
         Expr* returnValue;
         bool hasReturnValue() const { return returnValue != nullptr; }
 
+        Stmt* deepCopy() const override {
+            return new ReturnStmt(startPosition(), endPosition(),
+                                  returnValue ? returnValue->deepCopy() : nullptr);
+        }
+
         ~ReturnStmt() override {
             delete returnValue;
         }
-
-    private:
 
     };
 }

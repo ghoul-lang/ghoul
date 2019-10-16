@@ -24,12 +24,17 @@ namespace gulc {
         static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::RefNamespaceVariable; }
 
         RefNamespaceVariableExpr(TextPosition startPosition, TextPosition endPosition,
-                std::string name, std::string mangledName)
+                                 std::string name, std::string mangledName)
                 : Expr(Kind::RefNamespaceVariable, startPosition, endPosition),
                   _name(std::move(name)), _mangledName(std::move(mangledName)) {}
 
         std::string name() const { return _name; }
         std::string mangledName() const { return _mangledName; }
+
+        Expr* deepCopy() const override {
+            return new RefNamespaceVariableExpr(startPosition(), endPosition(),
+                                                _name, _mangledName);
+        }
 
     private:
         std::string _name;

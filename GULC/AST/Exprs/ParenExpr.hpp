@@ -29,11 +29,14 @@ namespace gulc {
 
         Expr* containedExpr;
 
+        Expr* deepCopy() const override {
+            return new ParenExpr(startPosition(), endPosition(),
+                                 containedExpr->deepCopy());
+        }
+
         ~ParenExpr() override {
             delete containedExpr;
         }
-
-    private:
 
     };
 }

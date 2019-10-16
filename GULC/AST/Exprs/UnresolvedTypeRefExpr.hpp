@@ -33,6 +33,11 @@ namespace gulc {
 
         Type* unresolvedType;
 
+        Expr* deepCopy() const override {
+            return new UnresolvedTypeRefExpr(startPosition(), endPosition(),
+                                             unresolvedType->deepCopy());
+        }
+
         ~UnresolvedTypeRefExpr() override {
             delete unresolvedType;
         }
