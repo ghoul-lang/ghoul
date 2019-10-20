@@ -53,9 +53,28 @@ void ItaniumMangler::mangle(NamespaceDecl *namespaceDecl, const std::string& pre
             functionDecl->setMangledName("_ZN" + nPrefix + unqualifiedName(functionDecl) + "E" + bareFunctionType(functionDecl->parameters));
         } else if (llvm::isa<GlobalVariableDecl>(decl)) {
             auto globalVariableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
-            globalVariableDecl->setMangledName("_ZN" + nPrefix + unqualifiedName(globalVariableDecl));
+            globalVariableDecl->setMangledName("_ZN" + nPrefix + unqualifiedName(globalVariableDecl) + "E");
         } else if (llvm::isa<NamespaceDecl>(decl)) {
             mangle(llvm::dyn_cast<NamespaceDecl>(decl), nPrefix);
+        } else if (llvm::isa<TemplateFunctionDecl>(decl)) {
+            auto templateFunctionDecl = llvm::dyn_cast<TemplateFunctionDecl>(decl);
+
+            for (FunctionDecl* implementedFunction : templateFunctionDecl->implementedFunctions()) {
+                std::string templatePrefix = unqualifiedName(implementedFunction);
+                std::string templateArgsStr = templateArgs(templateFunctionDecl->templateParameters,
+                                                           implementedFunction->templateArguments);
+                std::string funcType = bareFunctionType(implementedFunction->parameters);
+
+                std::string mangledName = "_ZN" + nPrefix;
+                mangledName += templatePrefix;
+                mangledName += templateArgsStr + "E";
+                // NOTE: I can't seem to find where in the Itanium spec it says we do this, but GCC and clang both put the
+                //  function result type before the function type on template functions? But not normal functions?
+                mangledName += typeName(implementedFunction->resultType);
+                mangledName += funcType;
+
+                implementedFunction->setMangledName(mangledName);
+            }
         }
     }
 }
@@ -63,27 +82,15 @@ void ItaniumMangler::mangle(NamespaceDecl *namespaceDecl, const std::string& pre
 void ItaniumMangler::mangle(TemplateFunctionDecl *templateFunctionDecl) {
     for (FunctionDecl* implementedFunction : templateFunctionDecl->implementedFunctions()) {
         std::string templatePrefix = unqualifiedName(implementedFunction);
-
-        std::string templateArgs = "I";
-
-        for (std::size_t i = 0; i < templateFunctionDecl->templateParameters.size(); ++i) {
-            const Expr* templateArgExpr = nullptr;
-
-            if (i >= implementedFunction->templateArguments.size()) {
-                templateArgExpr = templateFunctionDecl->templateParameters[i]->defaultArgument();
-            } else {
-                templateArgExpr = implementedFunction->templateArguments[i];
-            }
-
-            templateArgs += templateArg(templateArgExpr);
-        }
-
-        templateArgs += "E";
-
+        std::string templateArgsStr = templateArgs(templateFunctionDecl->templateParameters,
+                                                   implementedFunction->templateArguments);
         std::string funcType = bareFunctionType(implementedFunction->parameters);;
 
         std::string mangledName = "_Z" + templatePrefix;
-        mangledName += templateArgs;
+        mangledName += templateArgsStr;
+        // NOTE: I can't seem to find where in the Itanium spec it says we do this, but GCC and clang both put the
+        //  function result type before the function type on template functions? But not normal functions?
+        mangledName += typeName(implementedFunction->resultType);
         mangledName += funcType;
 
         implementedFunction->setMangledName(mangledName);
@@ -100,6 +107,10 @@ std::string ItaniumMangler::unqualifiedName(GlobalVariableDecl *globalVariableDe
 
 std::string ItaniumMangler::bareFunctionType(std::vector<ParameterDecl*> &params) {
     std::string result;
+
+    if (params.empty()) {
+        return "v";
+    }
 
     for (ParameterDecl* param : params) {
         // Parameters that reference template type parameters have to use the template reference strings `T_` and `T{n}_`
@@ -166,6 +177,25 @@ std::string ItaniumMangler::typeName(gulc::Type *type) {
 
 std::string ItaniumMangler::sourceName(const std::string& s) {
     return std::to_string(s.length()) + s;
+}
+
+std::string ItaniumMangler::templateArgs(std::vector<TemplateParameterDecl*>& templateParams,
+                                         std::vector<Expr*>& templateArgs) {
+    std::string result = "I";
+
+    for (std::size_t i = 0; i < templateParams.size(); ++i) {
+        const Expr* templateArgExpr = nullptr;
+
+        if (i >= templateArgs.size()) {
+            templateArgExpr = templateParams[i]->defaultArgument();
+        } else {
+            templateArgExpr = templateArgs[i];
+        }
+
+        result += templateArg(templateArgExpr);
+    }
+
+    return result + "E";
 }
 
 std::string ItaniumMangler::templateArg(const Expr *expr) {

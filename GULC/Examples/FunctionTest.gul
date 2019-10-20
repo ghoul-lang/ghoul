@@ -1,3 +1,16 @@
+namespace std
+{
+    int test<T>(T i)
+    {
+        return i;
+    }
+
+    int testing<int hm>()
+    {
+        return hm;
+    }
+}
+
 int test<T>(T i)
 {
     return i;
@@ -10,5 +23,5 @@ int test2<int argTest>()
 
 int main()
 {
-    return test2<12>();
+    return std.testing<44>();
 }

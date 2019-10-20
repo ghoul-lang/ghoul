@@ -1439,6 +1439,12 @@ void DeclResolver::processLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr)
 void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
     auto memberAccessCallExpr = llvm::dyn_cast<MemberAccessCallExpr>(expr);
 
+    if (memberAccessCallExpr->member->hasTemplateArguments()) {
+        for (Expr*& templateArg : memberAccessCallExpr->member->templateArguments) {
+            processExpr(templateArg);
+        }
+    }
+
     // TODO: Support operator overloading the `.` and `->` operators
     // TODO: `public override T operator.() => return this.whatever_T_is;` this can ONLY be supported when the implementing class/struct has NO public facing functions
     // TODO: MemberAccessCallExpr can ALSO be a namespace path to a type. We will need to take this into account at some point.
@@ -1446,6 +1452,8 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
 //    processIdentifierExpr(memberAccessCallExpr->member);
     if (llvm::isa<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef)) {
         auto namespaceRef = llvm::dyn_cast<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef);
+
+        bool hasTemplateArgs = memberAccessCallExpr->member->hasTemplateArguments();
 
         FunctionDecl* foundFunction = nullptr;
         bool isExactMatch = false;
@@ -1473,6 +1481,18 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
                     if (!checkFunctionMatchesCall(foundFunction, function, &isExactMatch, &isAmbiguous)) {
                         printError("namespace function call is ambiguous!",
                                    memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+                    }
+                } else if (llvm::isa<TemplateFunctionDecl>(checkDecl)) {
+                    // TODO: We should support implicit template typing (i.e. `int test<T>(T p);` calling `test(12);` == `test<int>(12);`
+                    if (!hasTemplateArgs) continue;
+
+                    auto templateFunctionDecl = llvm::dyn_cast<TemplateFunctionDecl>(checkDecl);
+
+                    if (templateFunctionDecl->name() == memberAccessCallExpr->member->name()) {
+                        if (!checkTemplateFunctionMatchesCall(foundFunction, templateFunctionDecl, &isExactMatch, &isAmbiguous, memberAccessCallExpr->member->templateArguments)) {
+                            printError("namespace function call is ambiguous!",
+                                       memberAccessCallExpr->member->startPosition(), memberAccessCallExpr->member->endPosition());
+                        }
                     }
                 } else {
                     printError("unknown namespace member access call!",

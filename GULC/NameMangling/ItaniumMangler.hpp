@@ -34,6 +34,7 @@ namespace gulc {
         std::string bareFunctionType(std::vector<ParameterDecl*>& params);
         std::string typeName(gulc::Type* type);
 
+        std::string templateArgs(std::vector<TemplateParameterDecl*>& templateParams, std::vector<Expr*>& templateArgs);
         std::string templateArg(const Expr* expr);
         std::string exprPrimary(const Expr* expr);
 

@@ -801,6 +801,12 @@ void TypeResolver::processMemberAccessCallExpr(Expr*& expr) {
 
     processExpr(memberAccessCallExpr->objectRef);
 
+    if (memberAccessCallExpr->member->hasTemplateArguments()) {
+        for (Expr*& templateArgs : memberAccessCallExpr->member->templateArguments) {
+            processExpr(templateArgs);
+        }
+    }
+
     if (llvm::isa<ResolvedTypeRefExpr>(memberAccessCallExpr->objectRef)) {
         auto typeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(memberAccessCallExpr->objectRef);
 
