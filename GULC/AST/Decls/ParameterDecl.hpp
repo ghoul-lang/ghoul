@@ -28,11 +28,11 @@ namespace gulc {
         ParameterDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
                       Type* type, Expr* defaultArgument = nullptr)
                 : Decl(Kind::Parameter, std::move(name), std::move(sourceFile), startPosition, endPosition),
-                  type(type), _defaultArgument(defaultArgument) {}
+                  type(type), typeTemplateParamNumber(0), _defaultArgument(defaultArgument) {}
 
         // TODO: Support 'Modifiers' and default modifiers like 'in' and 'out'
         Type* type;
-        const Expr* defaultArgument() const { return _defaultArgument; }
+        Expr* defaultArgument() const { return _defaultArgument; }
         bool hasDefaultArgument() const { return _defaultArgument != nullptr; }
 
         Decl* deepCopy() const override {
@@ -46,6 +46,9 @@ namespace gulc {
             delete type;
             delete _defaultArgument;
         }
+
+        // This is needed for the Itanium name mangler. We have to know what the template param number is in reference to the total template parameter list...
+        unsigned int typeTemplateParamNumber;
 
     private:
         // TODO: Should this be 'ConstExpr'?

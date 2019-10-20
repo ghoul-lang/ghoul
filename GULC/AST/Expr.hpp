@@ -59,11 +59,9 @@ namespace gulc {
 
             RefLocalVariable,
             RefParameter,
-            RefFileFunction,
-            RefGlobalFileVariable,
+            RefFunction,
+            RefGlobalVariable,
             RefEnumConstant,
-            RefNamespaceVariable,
-            RefNamespaceFunction,
 
             TempNamespaceRef
         };

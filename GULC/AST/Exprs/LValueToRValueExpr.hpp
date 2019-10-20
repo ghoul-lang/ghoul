@@ -31,8 +31,12 @@ namespace gulc {
         Expr* lvalue;
 
         Expr* deepCopy() const override {
-            return new LValueToRValueExpr(startPosition(), endPosition(),
-                                          lvalue->deepCopy(), _deletePointer);
+            auto result = new LValueToRValueExpr(startPosition(), endPosition(),
+                                                 lvalue->deepCopy(), _deletePointer);
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
         ~LValueToRValueExpr() override {

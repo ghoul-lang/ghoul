@@ -32,8 +32,12 @@ namespace gulc {
         Expr* castee;
 
         Expr* deepCopy() const override {
-            return new PotentialExplicitCastExpr(startPosition(), endPosition(),
-                                                 castType->deepCopy(), castee->deepCopy());
+            auto result = new PotentialExplicitCastExpr(startPosition(), endPosition(),
+                                                        castType->deepCopy(), castee->deepCopy());
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
         ~PotentialExplicitCastExpr() override {

@@ -51,9 +51,13 @@ namespace gulc {
         }
 
         Expr* deepCopy() const override {
-            return new BinaryOperatorExpr(startPosition(), endPosition(),
-                                          _operatorName,
-                                          leftValue->deepCopy(), rightValue->deepCopy());
+            auto result = new BinaryOperatorExpr(startPosition(), endPosition(),
+                                                 _operatorName,
+                                                 leftValue->deepCopy(), rightValue->deepCopy());
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
         ~BinaryOperatorExpr() override {

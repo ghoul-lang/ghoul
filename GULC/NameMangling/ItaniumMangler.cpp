@@ -26,6 +26,8 @@
 
 using namespace gulc;
 //https://itanium-cxx-abi.github.io/cxx-abi/abi.html
+// TODO: If we every want to allow `extern` to a `C++` function we will need to support substitution.
+//  Even in the areas where substitution makes the result function longer than it would be without substitution using clang v6 and gcc v7.4.0
 
 std::string ItaniumMangler::mangle(FunctionDecl *functionDecl) {
     // All mangled names start with "_Z"...
@@ -58,6 +60,36 @@ void ItaniumMangler::mangle(NamespaceDecl *namespaceDecl, const std::string& pre
     }
 }
 
+void ItaniumMangler::mangle(TemplateFunctionDecl *templateFunctionDecl) {
+    for (FunctionDecl* implementedFunction : templateFunctionDecl->implementedFunctions()) {
+        std::string templatePrefix = unqualifiedName(implementedFunction);
+
+        std::string templateArgs = "I";
+
+        for (std::size_t i = 0; i < templateFunctionDecl->templateParameters.size(); ++i) {
+            const Expr* templateArgExpr = nullptr;
+
+            if (i >= implementedFunction->templateArguments.size()) {
+                templateArgExpr = templateFunctionDecl->templateParameters[i]->defaultArgument();
+            } else {
+                templateArgExpr = implementedFunction->templateArguments[i];
+            }
+
+            templateArgs += templateArg(templateArgExpr);
+        }
+
+        templateArgs += "E";
+
+        std::string funcType = bareFunctionType(implementedFunction->parameters);;
+
+        std::string mangledName = "_Z" + templatePrefix;
+        mangledName += templateArgs;
+        mangledName += funcType;
+
+        implementedFunction->setMangledName(mangledName);
+    }
+}
+
 std::string ItaniumMangler::unqualifiedName(FunctionDecl *functionDecl) {
     return sourceName(functionDecl->name());
 }
@@ -70,6 +102,17 @@ std::string ItaniumMangler::bareFunctionType(std::vector<ParameterDecl*> &params
     std::string result;
 
     for (ParameterDecl* param : params) {
+        // Parameters that reference template type parameters have to use the template reference strings `T_` and `T{n}_`
+        if (param->typeTemplateParamNumber > 0) {
+            if (param->typeTemplateParamNumber - 1 == 0) {
+                result += "T_";
+            } else {
+                result += "T" + std::to_string(param->typeTemplateParamNumber - 2) + "_";
+            }
+
+            continue;
+        }
+
         Type* genType = param->type;
 
         // TODO: Should we ignore `mut` and `immut` here?
@@ -123,4 +166,31 @@ std::string ItaniumMangler::typeName(gulc::Type *type) {
 
 std::string ItaniumMangler::sourceName(const std::string& s) {
     return std::to_string(s.length()) + s;
+}
+
+std::string ItaniumMangler::templateArg(const Expr *expr) {
+    if (llvm::isa<ResolvedTypeRefExpr>(expr)) {
+        auto resolvedType = llvm::dyn_cast<ResolvedTypeRefExpr>(expr);
+        return typeName(resolvedType->resolvedType);
+    } else if (llvm::isa<IntegerLiteralExpr>(expr) || llvm::isa<FloatLiteralExpr>(expr)) {
+        return exprPrimary(expr);
+    } else {
+        std::cerr << "[INTERNAL NAME MANGLING ERROR] template argument not supported!" << std::endl;
+        std::exit(1);
+    }
+}
+
+std::string ItaniumMangler::exprPrimary(const Expr *expr) {
+    if (llvm::isa<IntegerLiteralExpr>(expr)) {
+        auto integerLiteral = llvm::dyn_cast<IntegerLiteralExpr>(expr);
+        // TODO: If the integer is negative it needs to be lead by an `n`
+        // TODO: We need to convert to decimal if number base isn't 10
+        return "L" + typeName(integerLiteral->resultType) + integerLiteral->numberString + "E";
+    } else if (llvm::isa<FloatLiteralExpr>(expr)) {
+        auto floatLiteral = llvm::dyn_cast<FloatLiteralExpr>(expr);
+        return "L" + typeName(floatLiteral->resultType) + floatLiteral->numberValue() + "E";
+    } else {
+        std::cerr << "[INTERNAL NAME MANGLING ERROR] expr-primary not supported!" << std::endl;
+        std::exit(1);
+    }
 }

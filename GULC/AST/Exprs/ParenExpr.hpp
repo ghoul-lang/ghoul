@@ -30,8 +30,12 @@ namespace gulc {
         Expr* containedExpr;
 
         Expr* deepCopy() const override {
-            return new ParenExpr(startPosition(), endPosition(),
-                                 containedExpr->deepCopy());
+            auto result = new ParenExpr(startPosition(), endPosition(),
+                                        containedExpr->deepCopy());
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
         ~ParenExpr() override {

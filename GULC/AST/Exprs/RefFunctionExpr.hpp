@@ -13,42 +13,36 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_LOCALVARIABLEDECLEXPR_HPP
-#define GULC_LOCALVARIABLEDECLEXPR_HPP
+#ifndef GULC_REFFUNCTIONEXPR_HPP
+#define GULC_REFFUNCTIONEXPR_HPP
 
 #include <AST/Expr.hpp>
-#include <string>
+#include <vector>
+#include <AST/Decls/FunctionDecl.hpp>
 
 namespace gulc {
-    class LocalVariableDeclExpr : public Expr {
+    class RefFunctionExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::LocalVariableDecl; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::RefFunction; }
 
-        LocalVariableDeclExpr(TextPosition startPosition, TextPosition endPosition,
-                              Expr* type, std::string name)
-                : Expr(Kind::LocalVariableDecl, startPosition, endPosition),
-                  type(type), _name(std::move(name)) {}
+        RefFunctionExpr(TextPosition startPosition, TextPosition endPosition, FunctionDecl* function)
+                : Expr(Kind::RefFunction, startPosition, endPosition), _function(function) {}
 
-        Expr* type;
-        std::string name() const { return _name; }
+        FunctionDecl* function() const { return _function; }
 
         Expr* deepCopy() const override {
-            auto result = new LocalVariableDeclExpr(startPosition(), endPosition(),
-                                                    type->deepCopy(), name());
+            auto result = new RefFunctionExpr(startPosition(), endPosition(), _function);
             if (resultType) {
                 result->resultType = resultType->deepCopy();
             }
             return result;
         }
 
-        ~LocalVariableDeclExpr() override {
-            delete type;
-        }
-
     private:
-        std::string _name;
+        // We don't own this so we don't delete it...
+        FunctionDecl* _function;
 
     };
 }
 
-#endif //GULC_LOCALVARIABLEDECLEXPR_HPP
+#endif //GULC_REFFUNCTIONEXPR_HPP

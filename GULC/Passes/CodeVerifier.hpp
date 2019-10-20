@@ -49,6 +49,7 @@
 #include <AST/Exprs/LValueToRValueExpr.hpp>
 #include <AST/Decls/GlobalVariableDecl.hpp>
 #include <AST/Decls/NamespaceDecl.hpp>
+#include <AST/Decls/TemplateFunctionDecl.hpp>
 
 namespace gulc {
     class CodeVerifier {
@@ -64,7 +65,7 @@ namespace gulc {
         bool canCastType(Type* to, Type* from, bool isExplicit);
         bool typeIsAssignable(Type* checkType);
 
-        bool checkDeclNameInUse(const std::string& name, Decl* ignoreDecl);
+        bool checkDeclNameInUse(const std::string& name, Decl* ignoreDecl, bool ignoreFunctions = false);
         bool checkFunctionExists(FunctionDecl* function);
         bool checkParamsAreSame(std::vector<ParameterDecl*>& params1, std::vector<ParameterDecl*>& params2);
 
@@ -81,6 +82,7 @@ namespace gulc {
         void verifyFunctionDecl(FunctionDecl* functionDecl);
         void verifyGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
         void verifyNamespaceDecl(NamespaceDecl* namespaceDecl);
+        void verifyTemplateFunctionDecl(TemplateFunctionDecl* templateFunctionDecl);
 
         // Stmts
         void verifyBreakStmt(BreakStmt* breakStmt);

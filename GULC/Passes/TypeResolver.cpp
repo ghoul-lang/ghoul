@@ -108,7 +108,7 @@ bool TypeResolver::resolveType(Type *&type) {
                                 Type *baseType;
 
                                 if (enumDecl->hasBaseType()) {
-                                    baseType = deepCopy(enumDecl->baseType);
+                                    baseType = enumDecl->baseType->deepCopy();
                                 } else {
                                     // Default type for enum is uint32
                                     baseType = new BuiltInType(type->startPosition(), type->endPosition(), "uint32");
@@ -167,7 +167,7 @@ bool TypeResolver::resolveType(Type *&type) {
                         Type *baseType;
 
                         if (enumDecl->hasBaseType()) {
-                            baseType = deepCopy(enumDecl->baseType);
+                            baseType = enumDecl->baseType->deepCopy();
                         } else {
                             // Default type for enum is uint32
                             baseType = new BuiltInType(type->startPosition(), type->endPosition(), "uint32");
@@ -240,81 +240,11 @@ bool TypeResolver::resolveType(Type *&type) {
     } else if (type->getTypeKind() == Type::Kind::Reference) {
         auto referenceType = llvm::dyn_cast<ReferenceType>(type);
         return resolveType(referenceType->referenceToType);
+    } else if (type->getTypeKind() == Type::Kind::TemplateTypename) {
+        return true;
     }
 
     return false;
-}
-
-Type *TypeResolver::deepCopy(const Type *type) {
-    switch (type->getTypeKind()) {
-        case Type::Kind::BuiltIn: {
-            auto builtInType = llvm::dyn_cast<BuiltInType>(type);
-            return new BuiltInType(builtInType->startPosition(), builtInType->endPosition(), builtInType->name());
-        }
-        case Type::Kind::Enum: {
-            auto enumType = llvm::dyn_cast<EnumType>(type);
-            return new EnumType(enumType->startPosition(), enumType->endPosition(), enumType->name(),
-                                deepCopy(enumType->baseType()), enumType->decl(), enumType->owningPrototype());
-        }
-        case Type::Kind::FunctionTemplateTypenameRef: {
-            auto functionTemplateTypenameRef = llvm::dyn_cast<FunctionTemplateTypenameRefType>(type);
-            return new FunctionTemplateTypenameRefType(functionTemplateTypenameRef->startPosition(),
-                                                       functionTemplateTypenameRef->endPosition(),
-                                                       functionTemplateTypenameRef->name());
-        }
-        case Type::Kind::Const: {
-            auto constType = llvm::dyn_cast<ConstType>(type);
-            return new ConstType(constType->startPosition(), constType->endPosition(), deepCopy(constType->pointToType));
-        }
-        case Type::Kind::Mut: {
-            auto mutType = llvm::dyn_cast<MutType>(type);
-            return new MutType(mutType->startPosition(), mutType->endPosition(), deepCopy(mutType->pointToType));
-        }
-        case Type::Kind::Immut: {
-            auto immutType = llvm::dyn_cast<ImmutType>(type);
-            return new ImmutType(immutType->startPosition(), immutType->endPosition(), deepCopy(immutType->pointToType));
-        }
-        case Type::Kind::Pointer: {
-            auto pointerType = llvm::dyn_cast<PointerType>(type);
-            return new PointerType(pointerType->startPosition(), pointerType->endPosition(), deepCopy(pointerType->pointToType));
-        }
-        case Type::Kind::FunctionPointer: {
-            auto functionPointer = llvm::dyn_cast<FunctionPointerType>(type);
-            Type* resultType = deepCopy(functionPointer->resultType);
-            std::vector<Type*> paramTypes{};
-
-            if (!functionPointer->paramTypes.empty()) {
-                paramTypes.reserve(functionPointer->paramTypes.size());
-
-                for (const Type* paramType : functionPointer->paramTypes) {
-                    paramTypes.emplace_back(deepCopy(paramType));
-                }
-            }
-
-            return new FunctionPointerType(functionPointer->startPosition(), functionPointer->endPosition(), resultType, paramTypes);
-        }
-        case Type::Kind::TemplateTypename: {
-            auto templateTypenameType = llvm::dyn_cast<TemplateTypenameType>(type);
-            return new TemplateTypenameType(templateTypenameType->startPosition(), templateTypenameType->endPosition());
-        }
-        case Type::Kind::Reference: {
-            auto referenceType = llvm::dyn_cast<ReferenceType>(type);
-            return new ReferenceType(referenceType->startPosition(), referenceType->endPosition(), deepCopy(referenceType->referenceToType));
-        }
-        case Type::Kind::RValueReference: {
-            auto rvalueReferenceType = llvm::dyn_cast<RValueReferenceType>(type);
-            return new ReferenceType(rvalueReferenceType->startPosition(), rvalueReferenceType->endPosition(), deepCopy(rvalueReferenceType->referenceToType));
-        }
-        case Type::Kind::Unresolved: {
-            std::cout << "gulc [INTERNAL] resolver error: attempted to deep copy unresolved type, operation not supported!" << std::endl;
-            std::exit(1);
-        }
-        default:
-            std::cout << "gulc [INTERNAL] resolver error: attempted to deep copy an unsupported type!" << std::endl;
-            std::exit(1);
-    }
-    // MSVC apparently doesn't take 'std::exit' into account and thinks we don't return on all code paths...
-    return nullptr;
 }
 
 void TypeResolver::processDecl(Decl *decl) {
@@ -330,6 +260,9 @@ void TypeResolver::processDecl(Decl *decl) {
             break;
         case Decl::Kind::Namespace:
             processNamespaceDecl(llvm::dyn_cast<NamespaceDecl>(decl));
+            break;
+        case Decl::Kind::TemplateFunction:
+            processTemplateFunctionDecl(llvm::dyn_cast<TemplateFunctionDecl>(decl));
             break;
         case Decl::Kind::Parameter:
         case Decl::Kind::TemplateParameter:
@@ -472,29 +405,30 @@ void TypeResolver::processEnumDecl(EnumDecl *enumDecl) {
 }
 
 void TypeResolver::processFunctionDecl(FunctionDecl *functionDecl) {
-    if (functionDecl->hasTemplateParameters()) {
-        bool shouldHaveDefaultArgument = false;
-
-        // We allow `void func<typename T, T value>()` so we have to set the functionTemplateParams here...
-        functionTemplateParams = &functionDecl->templateParameters;
-
-        for (TemplateParameterDecl* templateParameterDecl : functionDecl->templateParameters) {
-            if (!resolveType(templateParameterDecl->type)) {
-                printError("template parameter type `" + templateParameterDecl->type->getString() + "` was not found!",
-                           templateParameterDecl->startPosition(), templateParameterDecl->endPosition());
-            }
-
-            // Also make sure all template parameters after the first optional template parameter are also optional...
-            if (templateParameterDecl->hasDefaultArgument()) {
-                if (!shouldHaveDefaultArgument) {
-                    shouldHaveDefaultArgument = true;
-                } else {
-                    printError("all template parameters after the first optional template parameter must also be optional!",
-                               templateParameterDecl->startPosition(), templateParameterDecl->endPosition());
-                }
-            }
-        }
-    }
+    // TODO: Support template arguments...
+//    if (functionDecl->hasTemplateParameters()) {
+//        bool shouldHaveDefaultArgument = false;
+//
+//        // We allow `void func<typename T, T value>()` so we have to set the functionTemplateParams here...
+//        functionTemplateParams = &functionDecl->templateParameters;
+//
+//        for (TemplateParameterDecl* templateParameterDecl : functionDecl->templateParameters) {
+//            if (!resolveType(templateParameterDecl->type)) {
+//                printError("template parameter type `" + templateParameterDecl->type->getString() + "` was not found!",
+//                           templateParameterDecl->startPosition(), templateParameterDecl->endPosition());
+//            }
+//
+//            // Also make sure all template parameters after the first optional template parameter are also optional...
+//            if (templateParameterDecl->hasDefaultArgument()) {
+//                if (!shouldHaveDefaultArgument) {
+//                    shouldHaveDefaultArgument = true;
+//                } else {
+//                    printError("all template parameters after the first optional template parameter must also be optional!",
+//                               templateParameterDecl->startPosition(), templateParameterDecl->endPosition());
+//                }
+//            }
+//        }
+//    }
 
     // Resolve function return type...
     if (!resolveType(functionDecl->resultType)) {
@@ -543,10 +477,66 @@ void TypeResolver::processNamespaceDecl(NamespaceDecl *namespaceDecl) {
     currentNamespace = namespaceDecl;
 
     for (Decl* decl : namespaceDecl->nestedDecls()) {
+        decl->parentNamespace = namespaceDecl;
         processDecl(decl);
     }
 
     currentNamespace = oldNamespace;
+}
+
+void TypeResolver::processTemplateFunctionDecl(TemplateFunctionDecl *templateFunctionDecl) {
+    if (templateFunctionDecl->hasTemplateParameters()) {
+        bool shouldHaveDefaultArgument = false;
+
+        // We allow `void func<typename T, T value>()` so we have to set the functionTemplateParams here...
+        functionTemplateParams = &templateFunctionDecl->templateParameters;
+
+        for (TemplateParameterDecl* templateParameterDecl : templateFunctionDecl->templateParameters) {
+            if (!resolveType(templateParameterDecl->type)) {
+                printError("template parameter type `" + templateParameterDecl->type->getString() + "` was not found!",
+                           templateParameterDecl->startPosition(), templateParameterDecl->endPosition());
+            }
+
+            // Also make sure all template parameters after the first optional template parameter are also optional...
+            if (templateParameterDecl->hasDefaultArgument()) {
+                if (!shouldHaveDefaultArgument) {
+                    shouldHaveDefaultArgument = true;
+                } else {
+                    printError("all template parameters after the first optional template parameter must also be optional!",
+                               templateParameterDecl->startPosition(), templateParameterDecl->endPosition());
+                }
+            }
+        }
+    }
+
+    // Resolve function return type...
+    if (!resolveType(templateFunctionDecl->resultType)) {
+        printError("could not find function return type `" + templateFunctionDecl->resultType->getString() + "`!",
+                   templateFunctionDecl->resultType->startPosition(), templateFunctionDecl->resultType->endPosition());
+    }
+
+    if (templateFunctionDecl->hasParameters()) {
+        bool shouldHaveDefaultArgument = false;
+
+        // Make sure all parameters after the first optional parameter are also optional
+        for (ParameterDecl* parameterDecl : templateFunctionDecl->parameters) {
+            if (!resolveType(parameterDecl->type)) {
+                printError("could not find function parameter type!",
+                           parameterDecl->startPosition(), parameterDecl->endPosition());
+            }
+
+            if (parameterDecl->hasDefaultArgument()) {
+                if (!shouldHaveDefaultArgument) {
+                    shouldHaveDefaultArgument = true;
+                } else {
+                    printError("all parameters after the first optional parameter must also be optional!",
+                               parameterDecl->startPosition(), parameterDecl->endPosition());
+                }
+            }
+        }
+    }
+
+    processCompoundStmt(templateFunctionDecl->body());
 }
 
 // Stmts
@@ -685,7 +675,7 @@ void TypeResolver::processIdentifierExpr(Expr*& expr) {
         delete identifierExpr;
 
         expr = new ResolvedTypeRefExpr(expr->startPosition(), expr->endPosition(), resolvedType);
-        expr->resultType = deepCopy(resolvedType);
+        expr->resultType = resolvedType->deepCopy();
         return;
     }
 
@@ -709,12 +699,12 @@ void TypeResolver::processIdentifierExpr(Expr*& expr) {
                 }
 
                 Type *resolvedType = new EnumType(expr->startPosition(), expr->endPosition(), identifierExpr->name(),
-                                                  deepCopy(enumDecl->baseType), enumDecl);
+                                                  enumDecl->baseType->deepCopy(), enumDecl);
 
                 delete identifierExpr;
 
                 expr = new ResolvedTypeRefExpr(expr->startPosition(), expr->endPosition(), resolvedType);
-                expr->resultType = deepCopy(resolvedType);
+                expr->resultType = resolvedType->deepCopy();
                 return;
             }
         }
@@ -806,8 +796,6 @@ void TypeResolver::processLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr)
     expr = customPrefixOperator;
 }
 
-
-
 void TypeResolver::processMemberAccessCallExpr(Expr*& expr) {
     auto memberAccessCallExpr = llvm::dyn_cast<MemberAccessCallExpr>(expr);
 
@@ -836,7 +824,7 @@ void TypeResolver::processMemberAccessCallExpr(Expr*& expr) {
             auto refEnumConstant = new RefEnumConstantExpr(memberAccessCallExpr->startPosition(),
                                                            memberAccessCallExpr->endPosition(),
                                                            enumType->decl()->name(), member->name());
-            refEnumConstant->resultType = deepCopy(enumType);
+            refEnumConstant->resultType = enumType->deepCopy();
 
             delete memberAccessCallExpr;
 
@@ -858,7 +846,7 @@ void TypeResolver::processMemberAccessCallExpr(Expr*& expr) {
                     auto enumDecl = llvm::dyn_cast<EnumDecl>(checkDecl);
                     auto enumType = new EnumType(memberAccessCallExpr->objectRef->startPosition(),
                                                  memberAccessCallExpr->objectRef->endPosition(),
-                                                 enumDecl->name(), deepCopy(enumDecl->baseType),
+                                                 enumDecl->name(), enumDecl->baseType->deepCopy(),
                                                  enumDecl, tempNamespaceRef->namespaceDecl());
                     auto resolvedTypeRef = new ResolvedTypeRefExpr(enumType->startPosition(), enumDecl->endPosition(),
                                                                    enumType);

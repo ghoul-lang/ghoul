@@ -219,6 +219,9 @@ llvm::GlobalObject* gulc::CodeGen::generateDecl(const gulc::Decl *decl) {
             generateNamespace(llvm::dyn_cast<gulc::NamespaceDecl>(decl));
             // TODO: Should `generateDecl` even return anything at this point?
             return nullptr;
+        case gulc::Decl::Kind::TemplateFunction:
+            generateTemplateFunctionDecl(llvm::dyn_cast<gulc::TemplateFunctionDecl>(decl));
+            return nullptr;
         default:
             printError("internal - unsupported decl!",
                        decl->startPosition(), decl->endPosition());
@@ -326,8 +329,8 @@ llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
             return generateRefLocalVariableExpr(llvm::dyn_cast<RefLocalVariableExpr>(expr));
         case gulc::Expr::Kind::RefParameter:
             return generateRefParameterExpr(llvm::dyn_cast<RefParameterExpr>(expr));
-        case gulc::Expr::Kind::RefGlobalFileVariable:
-            return generateRefGlobalFileVariableExpr(llvm::dyn_cast<RefGlobalFileVariableExpr>(expr));
+        case gulc::Expr::Kind::RefGlobalVariable:
+            return generateRefGlobalVariableExpr(llvm::dyn_cast<RefGlobalVariableExpr>(expr));
         case gulc::Expr::Kind::RefEnumConstant:
             return generateRefEnumConstant(llvm::dyn_cast<gulc::RefEnumConstantExpr>(expr));
         default:
@@ -418,6 +421,13 @@ void gulc::CodeGen::generateNamespace(const gulc::NamespaceDecl *namespaceDecl) 
     }
 
     currentNamespace = oldNamespace;
+}
+
+void gulc::CodeGen::generateTemplateFunctionDecl(const gulc::TemplateFunctionDecl *templateFunctionDecl) {
+    // TODO: We need to support generating the implemented functions in their own file (because the file the `template` is in might already be compiled, making it so we're not compiling the new functions)
+    for (FunctionDecl* implementedFunction : templateFunctionDecl->implementedFunctions()) {
+        generateDecl(implementedFunction);
+    }
 }
 
 // Stmts
@@ -939,7 +949,6 @@ llvm::Value *gulc::CodeGen::generateFunctionCallExpr(const gulc::FunctionCallExp
     std::string funcName;
     llvm::Function* func = generateRefFunctionExpr(functionCallExpr->functionReference, &funcName);
 
-
     std::vector<llvm::Value*> llvmArgs{};
 
     if (functionCallExpr->hasArguments()) {
@@ -1105,38 +1114,23 @@ llvm::Value *gulc::CodeGen::generateRefParameterExpr(const gulc::RefParameterExp
     return nullptr;
 }
 
-llvm::Value *gulc::CodeGen::generateRefGlobalFileVariableExpr(const gulc::RefGlobalFileVariableExpr *refGlobalFileVariableExpr) {
+llvm::Value *gulc::CodeGen::generateRefGlobalVariableExpr(const gulc::RefGlobalVariableExpr *refGlobalFileVariableExpr) {
     // TODO: Should `AllowInternal` be true?
-    return module->getGlobalVariable(refGlobalFileVariableExpr->mangledName(), true);
+    return module->getGlobalVariable(refGlobalFileVariableExpr->globalVariable()->mangledName(), true);
 }
 
 llvm::Function *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr, std::string *nameOut) {
     switch (expr->getExprKind()) {
-        case gulc::Expr::Kind::RefFileFunction: {
-            auto refFileFunction = llvm::dyn_cast<RefFileFunctionExpr>(expr);
-            *nameOut = refFileFunction->name();
-            return generateRefFileFunctionExpr(refFileFunction);
-        }
-        case gulc::Expr::Kind::RefNamespaceFunction: {
-            auto refNamespaceFunction = llvm::dyn_cast<RefNamespaceFunctionExpr>(expr);
-            *nameOut = refNamespaceFunction->name();
-            return generateRefNamespaceFunctionExpr(refNamespaceFunction);
+        case gulc::Expr::Kind::RefFunction: {
+            auto refFileFunction = llvm::dyn_cast<RefFunctionExpr>(expr);
+            *nameOut = refFileFunction->function()->name();
+            return module->getFunction(refFileFunction->function()->mangledName());
         }
         default:
             printError("[INTERNAL] unsupported function reference!",
                        expr->startPosition(), expr->endPosition());
             return nullptr;
     }
-}
-
-llvm::Function *gulc::CodeGen::generateRefFileFunctionExpr(const gulc::RefFileFunctionExpr *refFileFunctionExpr) {
-    // NOTE: All error checking is should be handled before the code generator
-    return module->getFunction(refFileFunctionExpr->mangledName());
-}
-
-llvm::Function *gulc::CodeGen::generateRefNamespaceFunctionExpr(const gulc::RefNamespaceFunctionExpr *refNamespaceFunctionExpr) {
-    // NOTE: There should be an extern function already in the module...
-    return module->getFunction(refNamespaceFunctionExpr->mangledName());
 }
 
 void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& value) {

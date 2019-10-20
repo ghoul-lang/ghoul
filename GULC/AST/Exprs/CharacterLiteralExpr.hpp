@@ -30,8 +30,12 @@ namespace gulc {
         unsigned int characterValue() const { return _characterValue; }
 
         Expr* deepCopy() const override {
-            return new CharacterLiteralExpr(startPosition(), endPosition(),
-                                            _characterValue);
+            auto result = new CharacterLiteralExpr(startPosition(), endPosition(),
+                                                   _characterValue);
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
     private:

@@ -13,42 +13,37 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_LOCALVARIABLEDECLEXPR_HPP
-#define GULC_LOCALVARIABLEDECLEXPR_HPP
+#ifndef GULC_REFGLOBALVARIABLEEXPR_HPP
+#define GULC_REFGLOBALVARIABLEEXPR_HPP
 
 #include <AST/Expr.hpp>
-#include <string>
+#include <AST/Decls/GlobalVariableDecl.hpp>
 
 namespace gulc {
-    class LocalVariableDeclExpr : public Expr {
+    class RefGlobalVariableExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::LocalVariableDecl; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::RefGlobalVariable; }
 
-        LocalVariableDeclExpr(TextPosition startPosition, TextPosition endPosition,
-                              Expr* type, std::string name)
-                : Expr(Kind::LocalVariableDecl, startPosition, endPosition),
-                  type(type), _name(std::move(name)) {}
+        RefGlobalVariableExpr(TextPosition startPosition, TextPosition endPosition,
+                              GlobalVariableDecl* globalVariable)
+                : Expr(Kind::RefGlobalVariable, startPosition, endPosition),
+                  _globalVariable(globalVariable) {}
 
-        Expr* type;
-        std::string name() const { return _name; }
+        GlobalVariableDecl* globalVariable() const { return _globalVariable; }
 
         Expr* deepCopy() const override {
-            auto result = new LocalVariableDeclExpr(startPosition(), endPosition(),
-                                                    type->deepCopy(), name());
+            auto result = new RefGlobalVariableExpr(startPosition(), endPosition(),
+                                                    _globalVariable);
             if (resultType) {
                 result->resultType = resultType->deepCopy();
             }
             return result;
         }
 
-        ~LocalVariableDeclExpr() override {
-            delete type;
-        }
-
     private:
-        std::string _name;
+        GlobalVariableDecl* _globalVariable;
 
     };
 }
 
-#endif //GULC_LOCALVARIABLEDECLEXPR_HPP
+#endif //GULC_REFGLOBALVARIABLEEXPR_HPP

@@ -1,40 +1,14 @@
-namespace std.testing
+int test<T>(T i)
 {
-    enum Color
-    {
-        Red = 100,
-        Green = 010,
-        Blue = 001,
-    }
-
-    int test(int h)
-    {
-        return h + 12;
-    }
+    return i;
 }
 
-enum FColor
+int test2<int argTest>()
 {
-    Red = 100,
-    Green = 010,
-    Blue = 001,
-}
-
-const int globalTest = 12;
-FColor vgaColor = FColor.Red;
-
-int test(int h)
-{
-    return 12;
-}
-
-int test(FColor t)
-{
-    return 100;
+    return argTest;
 }
 
 int main()
 {
-    FColor c = FColor.Green;
-    return test(c);
+    return test2<12>();
 }

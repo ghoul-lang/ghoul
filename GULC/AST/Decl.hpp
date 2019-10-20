@@ -21,9 +21,12 @@
 #include "llvm/Support/Casting.h"
 
 namespace gulc {
+    class NamespaceDecl;
+
     class Decl {
     public:
         enum class Kind {
+            TemplateFunction,
             Function,
             // TODO: Add 'MemberFunctionDecl' (a.k.a. MethodDecl) and 'MemberPropertyDecl' (which is why we call it 'MemberFunctionDecl' instead of 'MethodDecl')
             // TODO: Create 'Property'
@@ -53,6 +56,8 @@ namespace gulc {
         virtual Decl* deepCopy() const = 0;
 
         virtual ~Decl() = default;
+
+        NamespaceDecl* parentNamespace;
 
     protected:
         Decl(Kind kind, std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition)

@@ -32,8 +32,12 @@ namespace gulc {
         std::string constantName() const { return _constantName; }
 
         Expr* deepCopy() const override {
-            return new RefEnumConstantExpr(startPosition(), endPosition(),
-                                           _enumName, _constantName);
+            auto result = new RefEnumConstantExpr(startPosition(), endPosition(),
+                                                  _enumName, _constantName);
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
     private:

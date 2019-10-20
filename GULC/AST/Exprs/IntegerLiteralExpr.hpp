@@ -33,8 +33,12 @@ namespace gulc {
         std::string numberString;
 
         Expr* deepCopy() const override {
-            return new IntegerLiteralExpr(startPosition(), endPosition(),
-                                          _numberBase, numberString);
+            auto result = new IntegerLiteralExpr(startPosition(), endPosition(),
+                                                 _numberBase, numberString);
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
     private:

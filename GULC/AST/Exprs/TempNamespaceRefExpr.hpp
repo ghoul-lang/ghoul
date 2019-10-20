@@ -31,8 +31,12 @@ namespace gulc {
         NamespaceDecl* namespaceDecl() { return _namespacePrototype; }
 
         Expr* deepCopy() const override {
-            return new TempNamespaceRefExpr(startPosition(), endPosition(),
-                                            static_cast<NamespaceDecl*>(_namespacePrototype->deepCopy()));
+            auto result = new TempNamespaceRefExpr(startPosition(), endPosition(),
+                                                   static_cast<NamespaceDecl*>(_namespacePrototype->deepCopy()));
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
         // We don't own `_namespacePrototype`. We don't free it.

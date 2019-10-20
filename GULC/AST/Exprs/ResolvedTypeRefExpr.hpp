@@ -33,8 +33,12 @@ namespace gulc {
         Type* resolvedType;
 
         Expr* deepCopy() const override {
-            return new ResolvedTypeRefExpr(startPosition(), endPosition(),
-                                           resultType->deepCopy());
+            auto result = new ResolvedTypeRefExpr(startPosition(), endPosition(),
+                                                  resultType->deepCopy());
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
         ~ResolvedTypeRefExpr() override {

@@ -46,6 +46,7 @@
 #include <AST/Exprs/StringLiteralExpr.hpp>
 #include <AST/Exprs/TernaryExpr.hpp>
 #include <AST/Decls/NamespaceDecl.hpp>
+#include <AST/Decls/TemplateFunctionDecl.hpp>
 
 namespace gulc {
     /**
@@ -60,8 +61,6 @@ namespace gulc {
                   currentNamespace(nullptr) {}
 
         void processFile(FileAST& fileAst);
-
-        static Type* deepCopy(const Type* type);
 
     private:
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
@@ -78,6 +77,7 @@ namespace gulc {
         void processFunctionDecl(FunctionDecl* functionDecl);
         void processGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
         void processNamespaceDecl(NamespaceDecl* namespaceDecl);
+        void processTemplateFunctionDecl(TemplateFunctionDecl* templateFunctionDecl);
 
         void processCaseStmt(CaseStmt* caseStmt);
         void processCompoundStmt(CompoundStmt* compoundStmt);

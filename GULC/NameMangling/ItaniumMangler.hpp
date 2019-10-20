@@ -24,6 +24,7 @@ namespace gulc {
         std::string mangle(FunctionDecl* functionDecl) override;
         std::string mangle(GlobalVariableDecl* globalVariableDecl) override;
         void mangle(NamespaceDecl* namespaceDecl, const std::string& prefix) override;
+        void mangle(TemplateFunctionDecl* templateFunctionDecl) override;
 
     private:
         std::string unqualifiedName(FunctionDecl* functionDecl);
@@ -32,6 +33,9 @@ namespace gulc {
         std::string sourceName(const std::string& s);
         std::string bareFunctionType(std::vector<ParameterDecl*>& params);
         std::string typeName(gulc::Type* type);
+
+        std::string templateArg(const Expr* expr);
+        std::string exprPrimary(const Expr* expr);
 
     };
 }

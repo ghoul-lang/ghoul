@@ -15,12 +15,8 @@
 
 #include <AST/Types/BuiltInType.hpp>
 #include <AST/Types/PointerType.hpp>
-#include <AST/Types/FunctionTemplateTypenameRefType.hpp>
-#include <AST/Types/TemplateTypenameType.hpp>
-#include <AST/Types/UnresolvedType.hpp>
 #include <AST/Types/FunctionPointerType.hpp>
 #include <AST/Exprs/LValueToRValueExpr.hpp>
-#include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
 #include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
 #include <AST/Types/ConstType.hpp>
 #include <AST/Types/MutType.hpp>
@@ -29,12 +25,13 @@
 #include <AST/Types/RValueReferenceType.hpp>
 #include <AST/Exprs/RefLocalVariableExpr.hpp>
 #include <AST/Exprs/RefParameterExpr.hpp>
-#include <AST/Exprs/RefFileFunctionExpr.hpp>
-#include <AST/Exprs/RefGlobalFileVariableExpr.hpp>
+#include <AST/Exprs/RefFunctionExpr.hpp>
+#include <AST/Exprs/RefGlobalVariableExpr.hpp>
 #include <AST/Types/EnumType.hpp>
 #include <AST/Exprs/TempNamespaceRefExpr.hpp>
-#include <AST/Exprs/RefNamespaceVariableExpr.hpp>
-#include <AST/Exprs/RefNamespaceFunctionExpr.hpp>
+#include <AST/TypeComparer.hpp>
+#include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
+#include <AST/Types/FunctionTemplateTypenameRefType.hpp>
 #include "DeclResolver.hpp"
 #include "TypeResolver.hpp"
 
@@ -46,126 +43,6 @@ void DeclResolver::processFile(FileAST &fileAst) {
     for (Decl* decl : fileAst.topLevelDecls()) {
         processDecl(decl);
     }
-}
-
-// TODO: Should we just combine with `getTypeGreaterThan` as a `compareTypes`?
-// TODO: `ignoreQualifiers` should only ignore the first qualifiers...
-bool DeclResolver::getTypesAreSame(const Type* type1, const Type* type2, bool ignoreQualifiers) {
-    if (type1->getTypeKind() == type2->getTypeKind()) {
-        switch (type1->getTypeKind()) {
-            case Type::Kind::Const: {
-                auto constType1 = llvm::dyn_cast<ConstType>(type1);
-                auto constType2 = llvm::dyn_cast<ConstType>(type2);
-
-                return getTypesAreSame(constType1->pointToType, constType2->pointToType, ignoreQualifiers);
-            }
-            case Type::Kind::Mut: {
-                auto mutType1 = llvm::dyn_cast<MutType>(type1);
-                auto mutType2 = llvm::dyn_cast<MutType>(type2);
-
-                return getTypesAreSame(mutType1->pointToType, mutType2->pointToType, ignoreQualifiers);
-            }
-            case Type::Kind::Immut: {
-                auto immutType1 = llvm::dyn_cast<ImmutType>(type1);
-                auto immutType2 = llvm::dyn_cast<ImmutType>(type2);
-
-                return getTypesAreSame(immutType1->pointToType, immutType2->pointToType, ignoreQualifiers);
-            }
-            case Type::Kind::BuiltIn: {
-                auto builtInType1 = llvm::dyn_cast<BuiltInType>(type1);
-                auto builtInType2 = llvm::dyn_cast<BuiltInType>(type2);
-
-                return builtInType1->name() == builtInType2->name();
-            }
-            case Type::Kind::Enum: {
-                auto enumType1 = llvm::dyn_cast<EnumType>(type1);
-                auto enumType2 = llvm::dyn_cast<EnumType>(type2);
-
-                return enumType1->name() == enumType2->name();
-            }
-            case Type::Kind::FunctionTemplateTypenameRef: {
-                auto pointerType1 = llvm::dyn_cast<PointerType>(type1);
-                auto pointerType2 = llvm::dyn_cast<PointerType>(type2);
-
-                return getTypesAreSame(pointerType1->pointToType, pointerType2->pointToType, ignoreQualifiers);
-            }
-            case Type::Kind::Pointer: {
-                auto pointerType1 = llvm::dyn_cast<PointerType>(type1);
-                auto pointerType2 = llvm::dyn_cast<PointerType>(type2);
-
-                return getTypesAreSame(pointerType1->pointToType, pointerType2->pointToType, ignoreQualifiers);
-            }
-            case Type::Kind::Reference: {
-                auto refType1 = llvm::dyn_cast<ReferenceType>(type1);
-                auto refType2 = llvm::dyn_cast<ReferenceType>(type2);
-
-                return getTypesAreSame(refType1->referenceToType, refType2->referenceToType, ignoreQualifiers);
-            }
-			case Type::Kind::FunctionPointer: {
-				auto funcPointerType1 = llvm::dyn_cast<FunctionPointerType>(type1);
-				auto funcPointerType2 = llvm::dyn_cast<FunctionPointerType>(type2);
-
-				if (!getTypesAreSame(funcPointerType1->resultType, funcPointerType2->resultType, ignoreQualifiers)) {
-					return false;
-				}
-
-				if (funcPointerType1->paramTypes.empty() != funcPointerType2->paramTypes.empty()) {
-					return false;
-				}
-
-				if (!funcPointerType1->paramTypes.empty()) {
-					for (std::size_t i = 0; i < funcPointerType1->paramTypes.size(); ++i) {
-						if (!getTypesAreSame(funcPointerType1->paramTypes[i], funcPointerType2->paramTypes[i], ignoreQualifiers)) {
-							return false;
-						}
-					}
-				}
-
-				return true;
-			}
-            case Type::Kind::TemplateTypename: {
-                return true;
-            }
-            case Type::Kind::Unresolved: {
-                std::cout << "gulc qualify type pass [DEBUG WARNING]: attempted to compare two 'UnresolvedType's, operation cannot be completed. Defaulting to false." << std::endl;
-                return false;
-            }
-        }
-    } else if (ignoreQualifiers) { // Types are not the same...
-        bool typeChanged = false;
-
-        if (llvm::isa<MutType>(type1)) {
-            type1 = llvm::dyn_cast<MutType>(type1)->pointToType;
-            typeChanged = true;
-        } else if (llvm::isa<ConstType>(type1)) {
-            type1 = llvm::dyn_cast<ConstType>(type1)->pointToType;
-            typeChanged = true;
-        } else if (llvm::isa<ImmutType>(type1)) {
-            type1 = llvm::dyn_cast<ImmutType>(type1)->pointToType;
-            typeChanged = true;
-        }
-
-        if (llvm::isa<MutType>(type2)) {
-            type2 = llvm::dyn_cast<MutType>(type2)->pointToType;
-            typeChanged = true;
-        } else if (llvm::isa<ConstType>(type2)) {
-            type2 = llvm::dyn_cast<ConstType>(type2)->pointToType;
-            typeChanged = true;
-        } else if (llvm::isa<ImmutType>(type2)) {
-            type2 = llvm::dyn_cast<ImmutType>(type2)->pointToType;
-            typeChanged = true;
-        }
-
-        if (typeChanged) {
-            return getTypesAreSame(type1, type2, ignoreQualifiers);
-        }
-    }
-
-    return false;
-}
-
-bool DeclResolver::shouldCastType(const Type* to, const Type* from) {
-    return false;
 }
 
 bool DeclResolver::getTypeIsReference(const Type* check) {
@@ -216,6 +93,9 @@ void DeclResolver::processDecl(Decl *decl) {
             break;
         case Decl::Kind::Namespace:
             processNamespaceDecl(llvm::dyn_cast<NamespaceDecl>(decl));
+            break;
+        case Decl::Kind::TemplateFunction:
+            processTemplateFunctionDecl(llvm::dyn_cast<TemplateFunctionDecl>(decl));
             break;
         case Decl::Kind::Parameter:
         case Decl::Kind::TemplateParameter:
@@ -362,9 +242,11 @@ void DeclResolver::processEnumDecl(EnumDecl *enumDecl) {
 }
 
 void DeclResolver::processFunctionDecl(FunctionDecl *functionDecl) {
-    if (functionDecl->hasTemplateParameters()) {
-        functionTemplateParams = &functionDecl->templateParameters;
+    for (ParameterDecl* parameter : functionDecl->parameters) {
+        // Convert any template type references to the supplied type
+        parameter->typeTemplateParamNumber = applyTemplateTypeArguments(parameter->type);
     }
+
 
     // TODO: This might be wrong. What if we want to return `const [{struct type}]`? the `const` affects all members of the struct type...
     if (llvm::isa<ConstType>(functionDecl->resultType)) {
@@ -383,6 +265,16 @@ void DeclResolver::processFunctionDecl(FunctionDecl *functionDecl) {
     // The result type CAN be `immut` since `immut` has a requirement of NEVER being modified -
     //  unlike `const` which can be modified in situations where the underlying type has a `mut` member variable...
 
+    // Convert any template type references to the supplied type
+    applyTemplateTypeArguments(functionDecl->resultType);
+
+    // We back up the old values since we will be
+    auto oldFunctionParams = functionParams;
+    auto oldReturnType = returnType;
+    auto oldFunctionLocalVariablesCount = functionLocalVariablesCount;
+    auto oldFunctionLocalVariables = std::move(functionLocalVariables);
+    auto oldLabelNames = std::move(labelNames);
+
     if (functionDecl->hasParameters()) {
         functionParams = &functionDecl->parameters;
     }
@@ -391,12 +283,14 @@ void DeclResolver::processFunctionDecl(FunctionDecl *functionDecl) {
 
     // We reset to zero just in case.
     functionLocalVariablesCount = 0;
-    processCompoundStmt(functionDecl->body());
-    functionLocalVariablesCount = 0;
 
-    returnType = nullptr;
-    functionParams = nullptr;
-    functionTemplateParams = nullptr;
+    processCompoundStmt(functionDecl->body());
+
+    labelNames = std::move(oldLabelNames);
+    functionLocalVariablesCount = oldFunctionLocalVariablesCount;
+    functionLocalVariables = std::move(oldFunctionLocalVariables);
+    returnType = oldReturnType;
+    functionParams = oldFunctionParams;
 }
 
 Expr *DeclResolver::solveConstExpression(Expr *expr) {
@@ -441,6 +335,37 @@ void DeclResolver::processNamespaceDecl(NamespaceDecl *namespaceDecl) {
     }
 
     currentNamespace = oldNamespace;
+}
+
+void DeclResolver::processTemplateFunctionDecl(TemplateFunctionDecl *templateFunctionDecl) {
+    if (templateFunctionDecl->hasTemplateParameters() && !templateFunctionDecl->parameters.empty()) {
+        for (TemplateParameterDecl* templateParameter : templateFunctionDecl->templateParameters) {
+            for (ParameterDecl* parameter : templateFunctionDecl->parameters) {
+                if (templateParameter->name() == parameter->name()) {
+                    printError("parameter `" + parameter->name() + "` shadows template parameter of the same name!",
+                               parameter->startPosition(), parameter->endPosition());
+                    return;
+                }
+            }
+        }
+    }
+}
+
+void DeclResolver::processTemplateFunctionDeclImplementation(TemplateFunctionDecl *templateFunctionDecl,
+                                                             std::vector<Expr*>& templateArgs,
+                                                             FunctionDecl *implementedFunction) {
+    auto oldCurrentNamespace = currentNamespace;
+    currentNamespace = templateFunctionDecl->parentNamespace;
+    auto oldFunctionTemplateParams = functionTemplateParams;
+    functionTemplateParams = &templateFunctionDecl->templateParameters;
+    auto oldFunctionTemplateArgs = functionTemplateArgs;
+    functionTemplateArgs = &templateArgs;
+
+    processFunctionDecl(implementedFunction);
+
+    functionTemplateArgs = oldFunctionTemplateArgs;
+    functionTemplateParams = oldFunctionTemplateParams;
+    currentNamespace = oldCurrentNamespace;
 }
 
 // Stmts
@@ -515,26 +440,26 @@ void DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
         if (!getTypeIsReference(returnStmt->returnValue->resultType)) {
             if (llvm::isa<ReferenceType>(returnType)) {
                 auto referenceType = llvm::dyn_cast<ReferenceType>(returnType);
-                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, referenceType->referenceToType, true);
+                typesAreSame = TypeComparer::getTypesAreSame(returnStmt->returnValue->resultType, referenceType->referenceToType, true);
             } else if (llvm::isa<RValueReferenceType>(returnType)) {
                 auto referenceType = llvm::dyn_cast<RValueReferenceType>(returnType);
-                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, referenceType->referenceToType, true);
+                typesAreSame = TypeComparer::getTypesAreSame(returnStmt->returnValue->resultType, referenceType->referenceToType, true);
             } else {
-                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
+                typesAreSame = TypeComparer::getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
             }
         // If the return type of the function isn't a reference but the result value type is then we dereference the result value
         } else if (!getTypeIsReference(returnType)) {
             if (llvm::isa<ReferenceType>(returnStmt->returnValue->resultType)) {
                 auto referenceType = llvm::dyn_cast<ReferenceType>(returnStmt->returnValue->resultType);
-                typesAreSame = getTypesAreSame(returnType, referenceType->referenceToType, true);
+                typesAreSame = TypeComparer::getTypesAreSame(returnType, referenceType->referenceToType, true);
             } else if (llvm::isa<RValueReferenceType>(returnStmt->returnValue->resultType)) {
                 auto referenceType = llvm::dyn_cast<RValueReferenceType>(returnStmt->returnValue->resultType);
-                typesAreSame = getTypesAreSame(returnType, referenceType->referenceToType, true);
+                typesAreSame = TypeComparer::getTypesAreSame(returnType, referenceType->referenceToType, true);
             } else {
-                typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
+                typesAreSame = TypeComparer::getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
             }
         } else {
-            typesAreSame = getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
+            typesAreSame = TypeComparer::getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
         }
 
         if (!getTypeIsReference(returnType)) {
@@ -546,7 +471,7 @@ void DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
             // We will handle this in the verifier.
             auto implicitCastExpr = new ImplicitCastExpr(returnStmt->returnValue->startPosition(),
                                                          returnStmt->returnValue->endPosition(),
-                                                         TypeResolver::deepCopy(returnType),
+                                                         returnType->deepCopy(),
                                                          returnStmt->returnValue);
 
             processImplicitCastExpr(implicitCastExpr);
@@ -764,14 +689,14 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
             rightType = binaryOperatorExpr->rightValue->resultType;
         }
 
-        if (!getTypesAreSame(leftType, rightType, true)) {
+        if (!TypeComparer::getTypesAreSame(leftType, rightType, true)) {
             binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
                                                                   binaryOperatorExpr->rightValue->endPosition(),
-                                                                  TypeResolver::deepCopy(leftType),
+                                                                  leftType->deepCopy(),
                                                                   binaryOperatorExpr->rightValue);
         }
 
-        binaryOperatorExpr->resultType = TypeResolver::deepCopy(leftType);
+        binaryOperatorExpr->resultType = leftType->deepCopy();
 
         if (binaryOperatorExpr->operatorName() != "=") {
             if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
@@ -818,7 +743,7 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
                                                         leftValue,
                                                         binaryOperatorExpr->rightValue);
 
-            newRightValue->resultType = TypeResolver::deepCopy(leftType);
+            newRightValue->resultType = leftType->deepCopy();
 
             // Set the new right value and change the operator name to '='
             binaryOperatorExpr->setOperatorName("=");
@@ -847,18 +772,18 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
                 if (!rightIsSigned) {
                     binaryOperatorExpr->leftValue = new ImplicitCastExpr(binaryOperatorExpr->leftValue->startPosition(),
                                                                          binaryOperatorExpr->leftValue->endPosition(),
-                                                                         TypeResolver::deepCopy(rightType),
+                                                                         rightType->deepCopy(),
                                                                          binaryOperatorExpr->leftValue);
-                    binaryOperatorExpr->resultType = (TypeResolver::deepCopy(rightType));
+                    binaryOperatorExpr->resultType = rightType->deepCopy();
                     return;
                 }
             } else { // left is not signed...
                 if (rightIsSigned) {
                     binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
                                                                           binaryOperatorExpr->rightValue->endPosition(),
-                                                                          TypeResolver::deepCopy(leftType),
+                                                                          leftType->deepCopy(),
                                                                           binaryOperatorExpr->rightValue);
-                    binaryOperatorExpr->resultType = (TypeResolver::deepCopy(leftType));
+                    binaryOperatorExpr->resultType = leftType->deepCopy();
                     return;
                 }
             }
@@ -868,18 +793,18 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
                 if (!rightIsFloating) {
                     binaryOperatorExpr->leftValue = new ImplicitCastExpr(binaryOperatorExpr->leftValue->startPosition(),
                                                                          binaryOperatorExpr->leftValue->endPosition(),
-                                                                         TypeResolver::deepCopy(rightType),
+                                                                         rightType->deepCopy(),
                                                                          binaryOperatorExpr->leftValue);
-                    binaryOperatorExpr->resultType = (TypeResolver::deepCopy(rightType));
+                    binaryOperatorExpr->resultType = rightType->deepCopy();
                     return;
                 }
             } else { // left is not signed...
                 if (rightIsFloating) {
                     binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
                                                                           binaryOperatorExpr->rightValue->endPosition(),
-                                                                          TypeResolver::deepCopy(leftType),
+                                                                          leftType->deepCopy(),
                                                                           binaryOperatorExpr->rightValue);
-                    binaryOperatorExpr->resultType = (TypeResolver::deepCopy(leftType));
+                    binaryOperatorExpr->resultType = leftType->deepCopy();
                     return;
                 }
             }
@@ -888,16 +813,16 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
             if (leftBuiltInType->size() > rightBuiltInType->size()) {
                 binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
                                                                       binaryOperatorExpr->rightValue->endPosition(),
-                                                                      TypeResolver::deepCopy(leftType),
+                                                                      leftType->deepCopy(),
                                                                       binaryOperatorExpr->rightValue);
-                binaryOperatorExpr->resultType = (TypeResolver::deepCopy(leftType));
+                binaryOperatorExpr->resultType = leftType->deepCopy();
                 return;
             } else if (leftBuiltInType->size() < rightBuiltInType->size()) {
                 binaryOperatorExpr->leftValue = new ImplicitCastExpr(binaryOperatorExpr->leftValue->startPosition(),
                                                                      binaryOperatorExpr->leftValue->endPosition(),
-                                                                     TypeResolver::deepCopy(rightType),
+                                                                     rightType->deepCopy(),
                                                                      binaryOperatorExpr->leftValue);
-                binaryOperatorExpr->resultType = (TypeResolver::deepCopy(rightType));
+                binaryOperatorExpr->resultType = rightType->deepCopy();
                 return;
             }
 
@@ -905,7 +830,7 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
         }
     }
 
-    binaryOperatorExpr->resultType = TypeResolver::deepCopy(binaryOperatorExpr->leftValue->resultType);
+    binaryOperatorExpr->resultType = binaryOperatorExpr->leftValue->resultType->deepCopy();
 }
 
 void DeclResolver::processCharacterLiteralExpr(CharacterLiteralExpr *characterLiteralExpr) {
@@ -914,7 +839,10 @@ void DeclResolver::processCharacterLiteralExpr(CharacterLiteralExpr *characterLi
 }
 
 void DeclResolver::processExplicitCastExpr(ExplicitCastExpr *explicitCastExpr) {
-    explicitCastExpr->resultType = TypeResolver::deepCopy(explicitCastExpr->castType);
+    // Convert any template type references to the supplied type
+    applyTemplateTypeArguments(explicitCastExpr->castType);
+
+    explicitCastExpr->resultType = explicitCastExpr->castType->deepCopy();
 }
 
 void DeclResolver::processFloatLiteralExpr(FloatLiteralExpr *floatLiteralExpr) {
@@ -940,6 +868,14 @@ void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
     processExpr(functionCallExpr->functionReference);
     exprIsFunctionCall = false;
 
+    if (llvm::isa<TempNamespaceRefExpr>(functionCallExpr->functionReference) ||
+        functionCallExpr->functionReference->resultType == nullptr) {
+        // This will trigger an error in `CodeVerifier`, this most likely means the function that was called is named the same as a namespace
+        functionCallExpr->resultType = new BuiltInType({}, {}, "int32");
+        functionCallArgs = nullptr;
+        return;
+    }
+
     // TODO: Support `ConstType`, `MutType`, and `ImmutType` since they can all contain `FunctionPointerType`
     if (llvm::isa<FunctionPointerType>(functionCallExpr->functionReference->resultType)) {
         auto functionPointerType = llvm::dyn_cast<FunctionPointerType>(functionCallExpr->functionReference->resultType);
@@ -958,11 +894,11 @@ void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
             if (llvm::isa<ReferenceType>(checkArgType)) checkArgType = llvm::dyn_cast<ReferenceType>(checkArgType)->referenceToType;
             if (llvm::isa<RValueReferenceType>(checkArgType)) checkArgType = llvm::dyn_cast<RValueReferenceType>(checkArgType)->referenceToType;
 
-            if (!getTypesAreSame(checkParamType, checkArgType)) {
+            if (!TypeComparer::getTypesAreSame(checkParamType, checkArgType)) {
                 // We will handle this in the verifier.
                 auto implicitCastExpr = new ImplicitCastExpr(functionCallExpr->arguments[i]->startPosition(),
                                                              functionCallExpr->arguments[i]->endPosition(),
-                                                             TypeResolver::deepCopy(functionPointerType->paramTypes[i]),
+                                                             functionPointerType->paramTypes[i]->deepCopy(),
                                                              functionCallExpr->arguments[i]);
 
                 processImplicitCastExpr(implicitCastExpr);
@@ -972,7 +908,7 @@ void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
         }
 
         // We set the result type of this expression to the result type of the function being called.
-        functionCallExpr->resultType = TypeResolver::deepCopy(functionPointerType->resultType);
+        functionCallExpr->resultType = functionPointerType->resultType->deepCopy();
         // This makes references technically rvalue references internally...
         functionCallExpr->resultType->setIsLValue(false);
     } else {
@@ -1015,13 +951,15 @@ bool DeclResolver::canImplicitCast(const Type* to, const Type* from) {
     return false;
 }
 
-bool DeclResolver::argsMatchParams(const std::vector<ParameterDecl*> &params, const std::vector<Expr*> &args,
-                                   bool *isExact) {
+bool DeclResolver::argsMatchParams(const std::vector<ParameterDecl*> &params, const std::vector<Expr*>* args,
+                                   bool *isExact,
+                                   const std::vector<TemplateParameterDecl*>& functionCallTemplateParams,
+                                   const std::vector<Expr*>& functionCallTemplateArgs) {
     // If there are more args than there are params then the args can never match
     // NOTE: There can be more `params` than `args` but all params after `args` MUST be optional.
-    if (args.size() > params.size()) return false;
+    if (args != nullptr && args->size() > params.size()) return false;
 
-    if (params.empty() && args.empty()) {
+    if (params.empty() && (args == nullptr || args->empty())) {
         *isExact = true;
         return true;
     }
@@ -1030,13 +968,44 @@ bool DeclResolver::argsMatchParams(const std::vector<ParameterDecl*> &params, co
 
     for (std::size_t i = 0; i < params.size(); ++i) {
         // If `i` is greater than the size of `args` then the parameter at that index MUST be optional (a.k.a. has a default argument)
-        if (i >= args.size()) {
+        if (args == nullptr || i >= args->size()) {
             *isExact = currentlyExactMatch;
             return params[i]->hasDefaultArgument();
         }
 
-        Type* argType = args[i]->resultType;
+        Type* argType = (*args)[i]->resultType;
         Type* paramType = params[i]->type;
+
+        if (llvm::isa<FunctionTemplateTypenameRefType>(paramType)) {
+            auto funcTemplateTypenameRef = llvm::dyn_cast<FunctionTemplateTypenameRefType>(paramType);
+
+            for (std::size_t paramIndex = 0; paramIndex < functionCallTemplateParams.size(); ++paramIndex) {
+                if (functionCallTemplateParams[paramIndex]->name() == funcTemplateTypenameRef->name()) {
+                    const Expr* typeRef = nullptr;
+
+                    if (paramIndex >= functionCallTemplateArgs.size()) {
+                        if (functionCallTemplateParams[paramIndex]->hasDefaultArgument()) {
+                            printDebugWarning("template function call has missing default argument type!");
+                            continue;
+                        }
+
+                        typeRef = functionCallTemplateParams[paramIndex]->defaultArgument();
+                    } else {
+                        typeRef = functionCallTemplateArgs[paramIndex];
+                    }
+
+                    if (!llvm::isa<ResolvedTypeRefExpr>(typeRef)) {
+                        printDebugWarning("template function call has unresolved type ref!");
+                        continue;
+                    }
+
+                    auto resolvedTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(typeRef);
+
+                    paramType = resolvedTypeRef->resolvedType;
+                    break;
+                }
+            }
+        }
 
         // We remove the top level qualifiers for parameters/arguments.
         // `const`, `immut`, and `mut` don't do anything at the top level for parameters
@@ -1054,7 +1023,7 @@ bool DeclResolver::argsMatchParams(const std::vector<ParameterDecl*> &params, co
         if (llvm::isa<ReferenceType>(paramType)) paramType = llvm::dyn_cast<ReferenceType>(paramType)->referenceToType;
         if (llvm::isa<RValueReferenceType>(paramType)) paramType = llvm::dyn_cast<RValueReferenceType>(paramType)->referenceToType;
 
-        if (!getTypesAreSame(argType, paramType, false)) {
+        if (!TypeComparer::getTypesAreSame(argType, paramType, false)) {
             if (canImplicitCast(paramType, argType)) {
                 currentlyExactMatch = false;
                 continue;
@@ -1068,12 +1037,53 @@ bool DeclResolver::argsMatchParams(const std::vector<ParameterDecl*> &params, co
     return true;
 }
 
-bool DeclResolver::checkFunctionMatchesCall(const FunctionDecl*& currentFoundFunction, const FunctionDecl* checkFunction,
+bool DeclResolver::templateArgsMatchParams(const std::vector<TemplateParameterDecl*> &params,
+                                           const std::vector<Expr*> &args) {
+    for (std::size_t i = 0; i < params.size(); ++i) {
+        if (i >= args.size()) {
+            // If the index is greater than the number of arguments we have then there is only a match if the parameter at the index is optional
+            return params[i]->hasDefaultArgument();
+        } else {
+            if (llvm::isa<TemplateTypenameType>(params[i]->type)) {
+                // If the parameter is a template type (i.e. `<typename T>` then the argument MUST be a resolved type reference
+                if (!llvm::isa<ResolvedTypeRefExpr>(args[i])) {
+                    if (llvm::isa<UnresolvedTypeRefExpr>(args[i])) {
+                        printError("[INTERNAL] unresolved type found in template parameter checker!",
+                                   args[i]->startPosition(), args[i]->endPosition());
+                    }
+
+                    return false;
+                }
+            } else {
+                if (!llvm::isa<BuiltInType>(params[i]->type)) {
+                    printError("[INTERNAL] only built in types supported for template parameters!",
+                               args[i]->startPosition(), args[i]->endPosition());
+                }
+
+                auto builtInType = llvm::dyn_cast<BuiltInType>(params[i]->type);
+
+                if (builtInType->isFloating()) {
+                    if (!(llvm::isa<FloatLiteralExpr>(args[i]) || llvm::isa<IntegerLiteralExpr>(args[i]))) {
+                        return false;
+                    }
+                } else {
+                    if (!llvm::isa<IntegerLiteralExpr>(args[i])) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+bool DeclResolver::checkFunctionMatchesCall(FunctionDecl*& currentFoundFunction, FunctionDecl* checkFunction,
                                             bool* isExactMatch, bool* isAmbiguous) {
     bool checkIsExactMatch = false;
 
     // We check if the args are a match with the function parameters
-    if (argsMatchParams(checkFunction->parameters, *functionCallArgs, &checkIsExactMatch)) {
+    if (argsMatchParams(checkFunction->parameters, functionCallArgs, &checkIsExactMatch)) {
         // If the current found function is an exact match and the checked function is exact then there is an ambiguity...
         if (*isExactMatch && checkIsExactMatch) {
             // We have to immediately exit if two functions are exact matches...
@@ -1099,11 +1109,72 @@ bool DeclResolver::checkFunctionMatchesCall(const FunctionDecl*& currentFoundFun
     return true;
 }
 
+bool DeclResolver::checkTemplateFunctionMatchesCall(FunctionDecl *&currentFoundFunction,
+                                                    TemplateFunctionDecl *checkFunction,
+                                                    bool *isExactMatch, bool *isAmbiguous,
+                                                    std::vector<Expr*>& functionCallTemplateArgs) {
+    if (functionCallTemplateArgs.size() > checkFunction->templateParameters.size()) {
+        // Skip if there are more arguments than parameters...
+        return false;
+    }
+
+    if (!templateArgsMatchParams(checkFunction->templateParameters, functionCallTemplateArgs)) {
+        // Template arguments must match the parameters
+        // TODO: We should probably do an `isExact` kinda thing. Literals are strongly typed.
+        //  so if you do `example<1>` and there is an `example<i16 x>` and `example<i64 x>` this would be ambiguous
+        //  but if there was an `example<i32 x>` then it would no longer be ambiguous
+        return false;
+    }
+
+    bool checkIsExactMatch = false;
+    bool createdNewFunction = false;
+
+    FunctionDecl* implementedFunction = nullptr;
+
+    // We check if the args are a match with the function parameters
+    if (argsMatchParams(checkFunction->parameters, functionCallArgs, &checkIsExactMatch,
+                        checkFunction->templateParameters, functionCallTemplateArgs)) {
+        // If the current found function is an exact match and the checked function is exact then there is an ambiguity...
+        if (*isExactMatch && checkIsExactMatch) {
+            // We have to immediately exit if two functions are exact matches...
+            return false;
+            // If neither found function is an exact match then there is an ambiguity...
+            //  BUT this kind of ambiguity can be solved if we find an exact match...
+        } else if (!(*isExactMatch || checkIsExactMatch)) {
+            if (currentFoundFunction == nullptr) {
+                implementedFunction = checkFunction->getOrCreateFunction(functionCallTemplateArgs, &createdNewFunction);
+                currentFoundFunction = implementedFunction;
+            } else {
+                *isAmbiguous = true;
+            }
+        } else if (!*isExactMatch) {
+            // If the new function is an exact match then `isAmbiguous` is now false
+            if (checkIsExactMatch) {
+                *isAmbiguous = false;
+            }
+            implementedFunction = checkFunction->getOrCreateFunction(functionCallTemplateArgs, &createdNewFunction);
+            currentFoundFunction = implementedFunction;
+            *isExactMatch = checkIsExactMatch;
+        }
+    }
+
+    if (createdNewFunction) {
+        processTemplateFunctionDeclImplementation(checkFunction, functionCallTemplateArgs, implementedFunction);
+    }
+
+    return true;
+}
+
 /**
  * Try to find the `IdentifierExpr` within the current context by searching local variables, params, decls, etc.
  */
 void DeclResolver::processIdentifierExpr(Expr*& expr) {
     auto identifierExpr = llvm::dyn_cast<IdentifierExpr>(expr);
+
+    // Process the template arguments
+    for (Expr*& templateArg : identifierExpr->templateArguments) {
+        processExpr(templateArg);
+    }
 
     // First we check if the identifier is a built in type
     if (BuiltInType::isBuiltInType(identifierExpr->name())) {
@@ -1119,13 +1190,7 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
 
         expr = new ResolvedTypeRefExpr(expr->startPosition(), expr->endPosition(), resolvedType);
         // TODO: Is this really even needed?
-        expr->resultType = TypeResolver::deepCopy(resolvedType);
-        return;
-    }
-
-    if (identifierExpr->hasTemplateArguments()) {
-        printError("templating support currently not finished!",
-                   identifierExpr->startPosition(), identifierExpr->endPosition());
+        expr->resultType = resolvedType->deepCopy();
         return;
     }
 
@@ -1139,7 +1204,7 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
 
             Expr* refLocal = new RefLocalVariableExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
                                                       identifierExpr->name());
-            refLocal->resultType = TypeResolver::deepCopy(functionLocalVariables[i]->resultType);
+            refLocal->resultType = functionLocalVariables[i]->resultType->deepCopy();
             // A local variable reference is an lvalue.
             refLocal->resultType->setIsLValue(true);
             // We always dereference local variable calls if they are references...
@@ -1150,6 +1215,36 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
             expr = refLocal;
 
             return;
+        }
+    }
+
+    // Then we check template parameters
+    if (functionTemplateParams != nullptr) {
+        for (std::size_t i = 0; i < functionTemplateParams->size(); ++i) {
+            if ((*functionTemplateParams)[i]->name() == identifierExpr->name()) {
+                Expr* resultExpr = nullptr;
+
+                if (functionTemplateArgs == nullptr || i >= functionTemplateArgs->size()) {
+                    if (!(*functionTemplateParams)[i]->hasDefaultArgument()) {
+                        // If the template arguments are null and the function template parameter doesn't have a
+                        //  default value then the identifier isn't a template parameter... stop checking them.
+                        break;
+                    }
+
+                    resultExpr = (*functionTemplateParams)[i]->defaultArgument()->deepCopy();
+                } else {
+                    resultExpr = (*functionTemplateArgs)[i]->deepCopy();
+                }
+
+                // TODO: Is this needed? I don't think it should be. We should handle `processExpr` WAY before we reach this point...
+                //processExpr(resultExpr);
+
+                // Delete the old identifier and set expression where it used to reside to now be the template argument value.
+                delete identifierExpr;
+                expr = resultExpr;
+
+                return;
+            }
         }
     }
 
@@ -1165,7 +1260,7 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                 Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
                                                       identifierExpr->endPosition(),
                                                       paramIndex);
-                refParam->resultType = TypeResolver::deepCopy((*functionParams)[paramIndex]->type);
+                refParam->resultType = (*functionParams)[paramIndex]->type->deepCopy();
                 // A parameter reference is an lvalue.
                 refParam->resultType->setIsLValue(true);
                 // We always dereference local variable calls if they are references...
@@ -1185,7 +1280,7 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         for (const TemplateParameterDecl* templateParam : *functionTemplateParams) {
             // TODO: Check if the type of `templateParam` is `FunctionPointerType`
             if (templateParam->name() == identifierExpr->name()) {
-                identifierExpr->resultType = TypeResolver::deepCopy(templateParam->type);
+                identifierExpr->resultType = templateParam->type->deepCopy();
                 return;
             }
         }
@@ -1195,22 +1290,26 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
     // TODO: then class/struct template params
 
     // then current file
-    const FunctionDecl* foundFunction = nullptr;
+    FunctionDecl* foundFunction = nullptr;
     // `isExactMatch` is used to check for ambiguity
     bool isExactMatch = false;
     bool isAmbiguous = false;
     // TODO: We need to also support function qualifier overloading (`const`, `mut`, `immut` like `int test() const {}`)
 
-    for (const Decl* decl : currentFileAst->topLevelDecls()) {
+    bool hasTemplateArgs = identifierExpr->hasTemplateArguments();
+
+    for (Decl* decl : currentFileAst->topLevelDecls()) {
         if (decl->name() == identifierExpr->name()) {
             if (llvm::isa<GlobalVariableDecl>(decl)) {
-                auto variableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
-                auto globalVariableRef = new RefGlobalFileVariableExpr(identifierExpr->startPosition(),
-                                                                       identifierExpr->endPosition(),
-                                                                       variableDecl->name(),
-                                                                       variableDecl->mangledName());
+                // If there are template args then we have to find a template decl
+                if (hasTemplateArgs) continue;
 
-                globalVariableRef->resultType = TypeResolver::deepCopy(variableDecl->type);
+                auto variableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
+                auto globalVariableRef = new RefGlobalVariableExpr(identifierExpr->startPosition(),
+                                                                   identifierExpr->endPosition(),
+                                                                   variableDecl);
+
+                globalVariableRef->resultType = variableDecl->type->deepCopy();
                 // A global variable reference is an lvalue.
                 globalVariableRef->resultType->setIsLValue(true);
                 // TODO: Should we dereference global variables? Can globals even be references?
@@ -1221,10 +1320,25 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
 
                 return;
             } else if (llvm::isa<FunctionDecl>(decl)) {
+                // If there are template args then we have to find a template decl
+                if (hasTemplateArgs) continue;
+
                 auto functionDecl = llvm::dyn_cast<FunctionDecl>(decl);
 
                 if (functionDecl->name() == identifierExpr->name()) {
                     if (!checkFunctionMatchesCall(foundFunction, functionDecl, &isExactMatch, &isAmbiguous)) {
+                        printError("function call is ambiguous!",
+                                   identifierExpr->startPosition(), identifierExpr->endPosition());
+                    }
+                }
+            } else if (llvm::isa<TemplateFunctionDecl>(decl)) {
+                // TODO: We should support implicit template typing (i.e. `int test<T>(T p);` calling `test(12);` == `test<int>(12);`
+                if (!hasTemplateArgs) continue;
+
+                auto templateFunctionDecl = llvm::dyn_cast<TemplateFunctionDecl>(decl);
+
+                if (templateFunctionDecl->name() == identifierExpr->name()) {
+                    if (!checkTemplateFunctionMatchesCall(foundFunction, templateFunctionDecl, &isExactMatch, &isAmbiguous, identifierExpr->templateArguments)) {
                         printError("function call is ambiguous!",
                                    identifierExpr->startPosition(), identifierExpr->endPosition());
                     }
@@ -1243,17 +1357,16 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                        identifierExpr->startPosition(), identifierExpr->endPosition());
         }
 
-        Type* resultTypeCopy = TypeResolver::deepCopy(foundFunction->resultType);
+        Type* resultTypeCopy = foundFunction->resultType->deepCopy();
         std::vector<Type*> paramTypeCopy{};
 
         for (const ParameterDecl* param : foundFunction->parameters) {
-            paramTypeCopy.push_back(TypeResolver::deepCopy(param->type));
+            paramTypeCopy.push_back(param->type->deepCopy());
         }
 
         // TODO: the tempalte arguments need to be processed
-        Expr* refFileFunc = new RefFileFunctionExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
-                                                    identifierExpr->name(), identifierExpr->templateArguments,
-                                                    foundFunction->mangledName());
+        Expr* refFileFunc = new RefFunctionExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
+                                                foundFunction);
         refFileFunc->resultType = new FunctionPointerType({}, {}, resultTypeCopy, paramTypeCopy);
 
         delete identifierExpr;
@@ -1269,8 +1382,15 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
 }
 
 void DeclResolver::processImplicitCastExpr(ImplicitCastExpr *implicitCastExpr) {
+    // Convert any template type references to the supplied type
+    applyTemplateTypeArguments(implicitCastExpr->castType);
+
     if (implicitCastExpr->resultType == nullptr) {
-        implicitCastExpr->resultType = (TypeResolver::deepCopy(implicitCastExpr->castType));
+        implicitCastExpr->resultType = implicitCastExpr->castType->deepCopy();
+    } else {
+        // If the result type isn't null then we need to make sure the type is converted away from a template type...
+        // Convert any template type references to the supplied type
+        applyTemplateTypeArguments(implicitCastExpr->resultType);
     }
 }
 
@@ -1301,7 +1421,11 @@ void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVari
         }
 
         auto resolvedTypeRefExpr = llvm::dyn_cast<ResolvedTypeRefExpr>(localVariableDeclExpr->type);
-        localVariableDeclExpr->resultType = TypeResolver::deepCopy(resolvedTypeRefExpr->resolvedType);
+
+        // Convert any template type references to the supplied type
+        applyTemplateTypeArguments(resolvedTypeRefExpr->resolvedType);
+
+        localVariableDeclExpr->resultType = resolvedTypeRefExpr->resolvedType->deepCopy();
 
         addLocalVariable(localVariableDeclExpr);
     }
@@ -1323,7 +1447,7 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
     if (llvm::isa<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef)) {
         auto namespaceRef = llvm::dyn_cast<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef);
 
-        const FunctionDecl* foundFunction = nullptr;
+        FunctionDecl* foundFunction = nullptr;
         bool isExactMatch = false;
         bool isAmbiguous = false;
 
@@ -1334,10 +1458,9 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
 
                     currentFileAst->addImportExtern(checkDecl);
 
-                    auto refNamespaceVariable = new RefNamespaceVariableExpr(memberAccessCallExpr->startPosition(),
-                                                                             memberAccessCallExpr->endPosition(),
-                                                                             globalVariable->name(),
-                                                                             globalVariable->mangledName());
+                    auto refNamespaceVariable = new RefGlobalVariableExpr(memberAccessCallExpr->startPosition(),
+                                                                          memberAccessCallExpr->endPosition(),
+                                                                          globalVariable);
 
                     delete memberAccessCallExpr;
 
@@ -1365,22 +1488,20 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
                            memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
             }
 
-            Type* resultTypeCopy = TypeResolver::deepCopy(foundFunction->resultType);
+            Type* resultTypeCopy = foundFunction->resultType->deepCopy();
             std::vector<Type*> paramTypeCopy{};
 
             for (const ParameterDecl* param : foundFunction->parameters) {
-                paramTypeCopy.push_back(TypeResolver::deepCopy(param->type));
+                paramTypeCopy.push_back(param->type->deepCopy());
             }
 
             // Add the referenced function to a list of potentially imported externs
             currentFileAst->addImportExtern(foundFunction);
 
             // TODO: the tempalte arguments need to be processed
-            auto refNamespaceFunction = new RefNamespaceFunctionExpr(memberAccessCallExpr->startPosition(),
-                                                                     memberAccessCallExpr->endPosition(),
-                                                                     memberAccessCallExpr->member->name(),
-                                                                     memberAccessCallExpr->member->templateArguments,
-                                                                     foundFunction->mangledName());
+            auto refNamespaceFunction = new RefFunctionExpr(memberAccessCallExpr->startPosition(),
+                                                            memberAccessCallExpr->endPosition(),
+                                                            foundFunction);
             refNamespaceFunction->resultType = new FunctionPointerType({}, {}, resultTypeCopy, paramTypeCopy);
 
             delete expr;
@@ -1397,7 +1518,7 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
 void DeclResolver::processParenExpr(ParenExpr *parenExpr) {
     processExpr(parenExpr->containedExpr);
 
-    parenExpr->resultType = TypeResolver::deepCopy(parenExpr->containedExpr->resultType);
+    parenExpr->resultType = parenExpr->containedExpr->resultType->deepCopy();
 
     convertLValueToRValue(parenExpr->containedExpr);
 }
@@ -1406,7 +1527,7 @@ void DeclResolver::processPostfixOperatorExpr(PostfixOperatorExpr *postfixOperat
     // TODO: Support operator overloading type resolution
     processExpr(postfixOperatorExpr->expr);
 
-    postfixOperatorExpr->resultType = TypeResolver::deepCopy(postfixOperatorExpr->expr->resultType);
+    postfixOperatorExpr->resultType = postfixOperatorExpr->expr->resultType->deepCopy();
 }
 
 void DeclResolver::processPotentialExplicitCastExpr(Expr*& expr) {
@@ -1430,11 +1551,11 @@ void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorE
     // TODO: Support operator overloading type resolution
     // TODO: Support `sizeof`, `alignof`, `offsetof`, and `nameof`
     if (prefixOperatorExpr->operatorName() == "&") { // Address
-        prefixOperatorExpr->resultType = new PointerType({}, {}, TypeResolver::deepCopy(prefixOperatorExpr->expr->resultType));
+        prefixOperatorExpr->resultType = new PointerType({}, {}, prefixOperatorExpr->expr->resultType->deepCopy());
     } else if (prefixOperatorExpr->operatorName() == "*") { // Dereference
         if (llvm::isa<PointerType>(checkType)) {
             auto pointerType = llvm::dyn_cast<PointerType>(checkType);
-            prefixOperatorExpr->resultType = TypeResolver::deepCopy(pointerType->pointToType);
+            prefixOperatorExpr->resultType = pointerType->pointToType->deepCopy();
             // A dereferenced value is an lvalue
             prefixOperatorExpr->resultType->setIsLValue(true);
         } else {
@@ -1450,11 +1571,11 @@ void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorE
             return;
         }
 
-        prefixOperatorExpr->resultType = new ReferenceType({}, {}, TypeResolver::deepCopy(prefixOperatorExpr->expr->resultType));
+        prefixOperatorExpr->resultType = new ReferenceType({}, {}, prefixOperatorExpr->expr->resultType->deepCopy());
     } else if (prefixOperatorExpr->operatorName() == ".deref") {
         if (llvm::isa<ReferenceType>(checkType)) {
             auto referenceType = llvm::dyn_cast<ReferenceType>(checkType);
-            prefixOperatorExpr->resultType = TypeResolver::deepCopy(referenceType->referenceToType);
+            prefixOperatorExpr->resultType = referenceType->referenceToType->deepCopy();
             // A dereferenced value is an lvalue
             prefixOperatorExpr->resultType->setIsLValue(true);
         } else {
@@ -1462,7 +1583,7 @@ void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorE
             return;
         }
     } else {
-        prefixOperatorExpr->resultType = TypeResolver::deepCopy(prefixOperatorExpr->expr->resultType);
+        prefixOperatorExpr->resultType = prefixOperatorExpr->expr->resultType->deepCopy();
     }
 }
 
@@ -1523,8 +1644,63 @@ void DeclResolver::convertLValueToRValue(Expr*& potentialLValue) {
     if (potentialLValue->resultType->isLValue()) {
         Expr *newRValue = new LValueToRValueExpr(potentialLValue->startPosition(), potentialLValue->endPosition(),
                                                  potentialLValue);
-        newRValue->resultType = TypeResolver::deepCopy(potentialLValue->resultType);
+        newRValue->resultType = potentialLValue->resultType->deepCopy();
         newRValue->resultType->setIsLValue(false);
         potentialLValue = newRValue;
     }
+}
+
+unsigned int DeclResolver::applyTemplateTypeArguments(Type*& type) {
+    if (llvm::isa<FunctionTemplateTypenameRefType>(type)) {
+        auto templateTypenameRef = llvm::dyn_cast<FunctionTemplateTypenameRefType>(type);
+
+        for (std::size_t i = 0; i < functionTemplateParams->size(); ++i) {
+            TemplateParameterDecl* checkParam = (*functionTemplateParams)[i];
+
+            if (templateTypenameRef->name() == checkParam->name()) {
+                if (llvm::isa<TemplateTypenameType>(checkParam->type)) {
+                    const Expr* hopefullyResolvedTypeRef = nullptr;
+
+                    if (i >= functionTemplateArgs->size()) {
+                        if (!checkParam->hasDefaultArgument()) {
+                            printDebugWarning("function template param doesn't have required default argument!");
+                            return 0;
+                        }
+
+                        hopefullyResolvedTypeRef = checkParam->defaultArgument();
+                    } else {
+                        hopefullyResolvedTypeRef = (*functionTemplateArgs)[i];
+                    }
+
+                    if (!llvm::isa<ResolvedTypeRefExpr>(hopefullyResolvedTypeRef)) {
+                        printDebugWarning("unresolved type ref in template arguments list!");
+                        return 0;
+                    }
+
+                    auto resolvedTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(hopefullyResolvedTypeRef);
+
+                    // Get the resolved type, delete old `type`, set `type` to the resolved type, and return.
+                    Type* resultType = resolvedTypeRef->resolvedType->deepCopy();
+                    delete type;
+                    type = resultType;
+                    // TODO: Once we support template classes we will have to offset the function reference index by the size of the template class parameter list
+                    // We add one so we can use `0` as a type of `null`
+                    return i + 1;
+                }
+            }
+        }
+    } else if (llvm::isa<ConstType>(type)) {
+        return applyTemplateTypeArguments(llvm::dyn_cast<ConstType>(type)->pointToType);
+    } else if (llvm::isa<MutType>(type)) {
+        return applyTemplateTypeArguments(llvm::dyn_cast<MutType>(type)->pointToType);
+    } else if (llvm::isa<ImmutType>(type)) {
+        return applyTemplateTypeArguments(llvm::dyn_cast<ImmutType>(type)->pointToType);
+    } else if (llvm::isa<PointerType>(type)) {
+        return applyTemplateTypeArguments(llvm::dyn_cast<PointerType>(type)->pointToType);
+    } else if (llvm::isa<ReferenceType>(type)) {
+        return applyTemplateTypeArguments(llvm::dyn_cast<ReferenceType>(type)->referenceToType);
+    } else if (llvm::isa<RValueReferenceType>(type)) {
+        return applyTemplateTypeArguments(llvm::dyn_cast<RValueReferenceType>(type)->referenceToType);
+    }
+    // TODO: Whenever we support template types we need to also handle their argument types here...
 }

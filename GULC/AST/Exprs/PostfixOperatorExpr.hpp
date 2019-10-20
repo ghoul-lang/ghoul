@@ -33,8 +33,12 @@ namespace gulc {
         Expr* expr;
 
         Expr* deepCopy() const override {
-            return new PostfixOperatorExpr(startPosition(), endPosition(),
-                                           _operatorName, expr->deepCopy());
+            auto result =  new PostfixOperatorExpr(startPosition(), endPosition(),
+                                                   _operatorName, expr->deepCopy());
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
         ~PostfixOperatorExpr() override {

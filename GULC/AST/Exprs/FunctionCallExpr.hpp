@@ -40,8 +40,12 @@ namespace gulc {
                 copiedArguments.push_back(arg->deepCopy());
             }
 
-            return new FunctionCallExpr(startPosition(), endPosition(),
-                                        functionReference, std::move(copiedArguments));
+            auto result = new FunctionCallExpr(startPosition(), endPosition(),
+                                               functionReference, std::move(copiedArguments));
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
         ~FunctionCallExpr() override {

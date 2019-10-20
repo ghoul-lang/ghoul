@@ -41,15 +41,15 @@
 #include <AST/Stmts/BreakStmt.hpp>
 #include <AST/Stmts/ContinueStmt.hpp>
 #include <AST/Exprs/ImplicitCastExpr.hpp>
-#include <AST/Exprs/RefFileFunctionExpr.hpp>
+#include <AST/Exprs/RefFunctionExpr.hpp>
 #include <AST/Exprs/RefLocalVariableExpr.hpp>
 #include <AST/Exprs/RefParameterExpr.hpp>
 #include <AST/Decls/GlobalVariableDecl.hpp>
-#include <AST/Exprs/RefGlobalFileVariableExpr.hpp>
+#include <AST/Exprs/RefGlobalVariableExpr.hpp>
 #include <AST/Decls/EnumConstantDecl.hpp>
 #include <AST/Exprs/RefEnumConstantExpr.hpp>
 #include <AST/Decls/NamespaceDecl.hpp>
-#include <AST/Exprs/RefNamespaceFunctionExpr.hpp>
+#include <AST/Decls/TemplateFunctionDecl.hpp>
 #include "Module.hpp"
 
 namespace gulc {
@@ -85,6 +85,7 @@ namespace gulc {
         llvm::Function* generateFunctionDecl(const FunctionDecl* functionDecl);
         llvm::GlobalVariable* generateGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl);
         void generateNamespace(const NamespaceDecl* namespaceDecl);
+        void generateTemplateFunctionDecl(const TemplateFunctionDecl* templateFunctionDecl);
 
         // Stmts
         void generateCompoundStmt(const CompoundStmt* compoundStmt);
@@ -118,11 +119,9 @@ namespace gulc {
         llvm::Value* generatePostfixOperatorExpr(const PostfixOperatorExpr* postfixOperatorExpr);
         llvm::Value* generateRefLocalVariableExpr(const RefLocalVariableExpr* refLocalVariableExpr);
         llvm::Value* generateRefParameterExpr(const RefParameterExpr* refParameterExpr);
-        llvm::Value* generateRefGlobalFileVariableExpr(const RefGlobalFileVariableExpr* refGlobalFileVariableExpr);
+        llvm::Value* generateRefGlobalVariableExpr(const RefGlobalVariableExpr* refGlobalFileVariableExpr);
 
         llvm::Function* generateRefFunctionExpr(const Expr* expr, std::string* nameOut);
-        llvm::Function* generateRefFileFunctionExpr(const RefFileFunctionExpr* refFileFunctionExpr);
-        llvm::Function* generateRefNamespaceFunctionExpr(const RefNamespaceFunctionExpr* refNamespaceFunctionExpr);
 
         void castValue(gulc::Type* to, gulc::Type* from, llvm::Value*& value);
 

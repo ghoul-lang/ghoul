@@ -21,6 +21,7 @@
 #include <AST/Types/ImmutType.hpp>
 #include <AST/Types/MutType.hpp>
 #include <AST/Types/RValueReferenceType.hpp>
+#include <AST/TypeComparer.hpp>
 #include "CodeVerifier.hpp"
 #include "DeclResolver.hpp"
 
@@ -214,6 +215,9 @@ void CodeVerifier::verifyDecl(Decl *decl) {
         case Decl::Kind::Namespace:
             verifyNamespaceDecl(llvm::dyn_cast<NamespaceDecl>(decl));
             break;
+        case Decl::Kind::TemplateFunction:
+            verifyTemplateFunctionDecl(llvm::dyn_cast<TemplateFunctionDecl>(decl));
+            break;
         default:
             printDebugWarning("unhandled Decl in 'processDecl'!");
             break;
@@ -350,21 +354,22 @@ void CodeVerifier::verifyFunctionDecl(FunctionDecl *functionDecl) {
         printError("function name '" + functionDecl->name() + "' is ambiguous with the current parameter types!",
                    functionDecl->startPosition(), functionDecl->endPosition());
         return;
+    } else if (checkDeclNameInUse(functionDecl->name(), functionDecl, true)) {
+        printError("redefinition for `" + functionDecl->name() + "` as a different declaration is not supported!",
+                   functionDecl->startPosition(), functionDecl->endPosition());
+        return;
     }
 
     currentFunctionReturnType = functionDecl->resultType;
-    currentFunctionTemplateParameters = &functionDecl->templateParameters;
     currentFunctionParameters = &functionDecl->parameters;
 
     currentFunctionLocalVariablesCount = 0;
 
-    // TODO: Make sure the function name isn't already taken
     verifyCompoundStmt(functionDecl->body());
 
     currentFunctionLocalVariablesCount = 0;
 
     currentFunctionReturnType = nullptr;
-    currentFunctionTemplateParameters = nullptr;
     currentFunctionParameters = nullptr;
 }
 
@@ -389,6 +394,29 @@ void CodeVerifier::verifyNamespaceDecl(NamespaceDecl *namespaceDecl) {
     }
 
     currentNamespace = oldNamespace;
+}
+
+void CodeVerifier::verifyTemplateFunctionDecl(TemplateFunctionDecl *templateFunctionDecl) {
+    currentFunctionTemplateParameters = &templateFunctionDecl->templateParameters;
+
+    // NOTE: I don't think this is needed since we check if a name is taken in the `DeclResolver`
+//    if (templateFunctionDecl->hasTemplateParameters() && !templateFunctionDecl->parameters.empty()) {
+//        for (TemplateParameterDecl* templateParameter : templateFunctionDecl->templateParameters) {
+//            for (ParameterDecl* parameter : templateFunctionDecl->parameters) {
+//                if (templateParameter->name() == parameter->name()) {
+//                    printError("parameter `" + parameter->name() + "` shadows template parameter of the same name!",
+//                               parameter->startPosition(), parameter->endPosition());
+//                    return;
+//                }
+//            }
+//        }
+//    }
+
+    for (FunctionDecl* implementedFunction : templateFunctionDecl->implementedFunctions()) {
+        verifyFunctionDecl(implementedFunction);
+    }
+
+    currentFunctionTemplateParameters = nullptr;
 }
 
 // Stmts
@@ -578,6 +606,28 @@ void CodeVerifier::verifyIntegerLiteralExpr(IntegerLiteralExpr *integerLiteralEx
 
 void CodeVerifier::verifyLocalVariableDeclExpr(LocalVariableDeclExpr *localVariableDeclExpr) {
     // TODO: I don't think there really is anything to verify here?
+    // NOTE: I don't think this is needed since we check if a name is taken in the `DeclResolver`
+//    // Check the name is already in use...
+//    if (currentFunctionParameters != nullptr) {
+//        for (ParameterDecl* parameter : *currentFunctionParameters) {
+//            if (parameter->name() == localVariableDeclExpr->name()) {
+//                printError("local variable `" + localVariableDeclExpr->name() + "` shadows parameter of the same name!",
+//                           localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());;
+//                return;
+//            }
+//        }
+//    }
+//
+//    if (currentFunctionTemplateParameters != nullptr) {
+//        for (TemplateParameterDecl* templateParameter : *currentFunctionTemplateParameters) {
+//            if (templateParameter->name() == localVariableDeclExpr->name()) {
+//                printError("local variable `" + localVariableDeclExpr->name() + "` shadows template parameter of the same name!",
+//                           localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());;
+//                return;
+//            }
+//        }
+//    }
+//    // All other declarations are allowed to be shadowed, right?
 }
 
 void CodeVerifier::verifyLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr) {
@@ -631,17 +681,43 @@ void CodeVerifier::verifyUnresolvedTypeRefExpr(Expr *&expr) {
                expr->startPosition(), expr->endPosition());
 }
 
-bool CodeVerifier::checkDeclNameInUse(const std::string &name, Decl* ignoreDecl) {
+bool CodeVerifier::checkDeclNameInUse(const std::string &name, Decl* ignoreDecl, bool ignoreFunctions) {
     // TODO: Check current class
-    // TODO: Check current namespace
+    // Check current namespace
+    if (currentNamespace != nullptr) {
+        for (Decl* checkDecl : currentNamespace->nestedDecls()) {
+            if (ignoreDecl == checkDecl) continue;
+
+            if (checkDecl->name() == name) {
+                // If we're supposed to ignore functions and the `checkDecl` is a function or template function then we go to the next top level decl...
+                if (ignoreFunctions &&
+                    (llvm::isa<FunctionDecl>(checkDecl) || llvm::isa<TemplateFunctionDecl>(checkDecl))) {
+                    continue;
+                }
+
+                return true;
+            }
+        }
+
+        // If the current namespace isn't null then we don't check the current file, we can differentiate between file and namespace declarations...
+        return false;
+    }
+
     // Check current file
     for (Decl* checkDecl : currentFileAst->topLevelDecls()) {
         if (ignoreDecl == checkDecl) continue;
 
         if (checkDecl->name() == name) {
+            // If we're supposed to ignore functions and the `checkDecl` is a function or template function then we go to the next top level decl...
+            if (ignoreFunctions &&
+                    (llvm::isa<FunctionDecl>(checkDecl) || llvm::isa<TemplateFunctionDecl>(checkDecl))) {
+                continue;
+            }
+
             return true;
         }
     }
+
     return false;
 }
 
@@ -724,7 +800,7 @@ bool CodeVerifier::checkParamsAreSame(std::vector<ParameterDecl *> &params1, std
             if (llvm::isa<ConstType>(paramType1)) paramType1 = llvm::dyn_cast<ConstType>(paramType1)->pointToType;
             if (llvm::isa<ConstType>(paramType2)) paramType2 = llvm::dyn_cast<ConstType>(paramType2)->pointToType;
 
-            if (!DeclResolver::getTypesAreSame(paramType1, paramType2)) {
+            if (!TypeComparer::getTypesAreSame(paramType1, paramType2)) {
                 return false;
             }
         }

@@ -230,9 +230,9 @@ std::string ASTPrinter::getTemplateParametersString(const std::vector<TemplatePa
 void ASTPrinter::printFunctionDecl(const FunctionDecl *functionDecl, const std::string& prefix) {
     std::cout << prefix << "| FunctionDecl `" << functionDecl->name() << "`";
 
-    if (!functionDecl->templateParameters.empty()) {
-        std::cout << prefix << "<" << getTemplateParametersString(functionDecl->templateParameters) << ">";
-    }
+//    if (!functionDecl->templateParameters.empty()) {
+//        std::cout << prefix << "<" << getTemplateParametersString(functionDecl->templateParameters) << ">";
+//    }
 
     std::cout << "(" << getParametersString(functionDecl->parameters) << ") "
                  "-> " << getTypeName(functionDecl->resultType)

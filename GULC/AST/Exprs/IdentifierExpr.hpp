@@ -41,8 +41,12 @@ namespace gulc {
                 copiedTemplateArguments.push_back(templateArgument->deepCopy());
             }
 
-            return new IdentifierExpr(startPosition(), endPosition(), name(),
-                                      std::move(copiedTemplateArguments));
+            auto result = new IdentifierExpr(startPosition(), endPosition(), name(),
+                                             std::move(copiedTemplateArguments));
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
         ~IdentifierExpr() override {

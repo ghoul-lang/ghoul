@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+#include <AST/Decls/TemplateFunctionDecl.hpp>
 #include "NameMangler.hpp"
 
 using namespace gulc;
@@ -38,6 +39,11 @@ void NameMangler::processDecl(Decl *decl) {
         case Decl::Kind::Namespace: {
             auto namespaceDecl = llvm::dyn_cast<NamespaceDecl>(decl);
             _manglerBase->mangle(namespaceDecl);
+            break;
+        }
+        case Decl::Kind::TemplateFunction: {
+            auto templateFunctionDecl = llvm::dyn_cast<TemplateFunctionDecl>(decl);
+            _manglerBase->mangle(templateFunctionDecl);
             break;
         }
     }

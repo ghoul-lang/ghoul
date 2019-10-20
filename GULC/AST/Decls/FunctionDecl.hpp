@@ -29,26 +29,30 @@ namespace gulc {
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Function; }
 
         FunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                     Type* resultType, std::vector<TemplateParameterDecl*> templateParameters,
-                     std::vector<ParameterDecl*> parameters, CompoundStmt* body)
+                     Type* resultType, std::vector<ParameterDecl*> parameters, CompoundStmt* body)
+                : FunctionDecl(std::move(name), std::move(sourceFile), startPosition, endPosition, resultType,
+                               std::move(parameters), body, {}) {}
+
+        FunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
+                     Type* resultType, std::vector<ParameterDecl*> parameters, CompoundStmt* body,
+                     std::vector<Expr*> templateArguments)
                 : Decl(Kind::Function, std::move(name), std::move(sourceFile), startPosition, endPosition),
-                  resultType(resultType), templateParameters(std::move(templateParameters)),
+                  templateArguments(std::move(templateArguments)), resultType(resultType),
                   parameters(std::move(parameters)), _body(body) {}
 
+        std::vector<Expr*> templateArguments;
         Type* resultType;
-        std::vector<TemplateParameterDecl*> templateParameters;
         std::vector<ParameterDecl*> parameters;
         CompoundStmt* body() const { return _body; }
 
-        bool hasTemplateParameters() const { return !templateParameters.empty(); }
         bool hasParameters() const { return !parameters.empty(); }
 
         Decl* deepCopy() const override {
-            std::vector<TemplateParameterDecl*> copiedTemplateParameters;
+            std::vector<Expr*> copiedTemplateArguments;
             std::vector<ParameterDecl*> copiedParameters;
 
-            for (TemplateParameterDecl* templateParameter : templateParameters) {
-                copiedTemplateParameters.push_back(static_cast<TemplateParameterDecl*>(templateParameter->deepCopy()));
+            for (Expr* templateArgument : templateArguments) {
+                copiedTemplateArguments.push_back(templateArgument->deepCopy());
             }
 
             for (ParameterDecl* parameter : parameters) {
@@ -57,17 +61,18 @@ namespace gulc {
 
             return new FunctionDecl(name(), sourceFile(),
                                     startPosition(), endPosition(),
-                                    resultType->deepCopy(), std::move(copiedTemplateParameters),
-                                    std::move(copiedParameters), static_cast<CompoundStmt*>(_body->deepCopy()));
+                                    resultType->deepCopy(),
+                                    std::move(copiedParameters), static_cast<CompoundStmt*>(_body->deepCopy()),
+                                    std::move(copiedTemplateArguments));
         }
 
         ~FunctionDecl() override {
-            for (ParameterDecl* parameterDecl : parameters) {
-                delete parameterDecl;
+            for (Expr* templateArgument : templateArguments) {
+                delete templateArgument;
             }
 
-            for (TemplateParameterDecl* templateParameterDecl : templateParameters) {
-                delete templateParameterDecl;
+            for (ParameterDecl* parameterDecl : parameters) {
+                delete parameterDecl;
             }
 
             delete resultType;

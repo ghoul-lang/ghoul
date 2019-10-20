@@ -33,9 +33,13 @@ namespace gulc {
         Expr* falseExpr;
 
         Expr* deepCopy() const override {
-            return new TernaryExpr(startPosition(), endPosition(),
-                                   condition->deepCopy(),
-                                   trueExpr->deepCopy(), falseExpr->deepCopy());
+            auto result = new TernaryExpr(startPosition(), endPosition(),
+                                          condition->deepCopy(),
+                                          trueExpr->deepCopy(), falseExpr->deepCopy());
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
         ~TernaryExpr() override {

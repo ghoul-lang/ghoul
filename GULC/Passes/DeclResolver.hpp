@@ -56,6 +56,7 @@
 #include <AST/Decls/GlobalVariableDecl.hpp>
 #include <AST/Decls/EnumDecl.hpp>
 #include <AST/Decls/NamespaceDecl.hpp>
+#include <AST/Decls/TemplateFunctionDecl.hpp>
 
 namespace gulc {
     // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
@@ -65,16 +66,15 @@ namespace gulc {
     public:
         DeclResolver()
                 : currentFileAst(nullptr), currentNamespace(nullptr), returnType(nullptr),
-                  functionTemplateParams(nullptr), functionParams(nullptr), exprIsFunctionCall(false),
-                  functionCallArgs(nullptr), labelNames(), functionLocalVariablesCount(0), functionLocalVariables() {}
+                  functionTemplateParams(nullptr), functionTemplateArgs(nullptr), functionParams(nullptr),
+                  exprIsFunctionCall(false), functionCallArgs(nullptr), labelNames(), functionLocalVariablesCount(0),
+                  functionLocalVariables() {}
 
         void processFile(FileAST& fileAst);
 
         static Expr* solveConstExpression(Expr* expr);
 
     private:
-        static bool getTypesAreSame(const Type* type1, const Type* type2, bool ignoreQualifiers = false);
-        bool shouldCastType(const Type* to, const Type* from);
         bool getTypeIsReference(const Type* check);
         bool canImplicitCast(const Type* to, const Type* from);
 
@@ -82,10 +82,16 @@ namespace gulc {
          * Checks if the result types of `args` matches the input types of `params`
          * If the result type of an `arg` requires an implicit cast to match `param` then `isExact` is set to false
          */
-        bool argsMatchParams(const std::vector<ParameterDecl*>& params, const std::vector<Expr*>& args, bool* isExact);
+        bool argsMatchParams(const std::vector<ParameterDecl*>& params, const std::vector<Expr*>* args, bool* isExact,
+                             const std::vector<TemplateParameterDecl*>& functionCallTemplateParams = {},
+                             const std::vector<Expr*>& functionCallTemplateArgs = {});
+        bool templateArgsMatchParams(const std::vector<TemplateParameterDecl*>& params, const std::vector<Expr*>& args);
         /// Returns false on error
-        bool checkFunctionMatchesCall(const FunctionDecl*& currentFoundFunction, const FunctionDecl* checkFunction,
+        bool checkFunctionMatchesCall(FunctionDecl*& currentFoundFunction, FunctionDecl* checkFunction,
                                       bool* isExactMatch, bool* isAmbiguous);
+        bool checkTemplateFunctionMatchesCall(FunctionDecl*& currentFoundFunction, TemplateFunctionDecl* checkFunction,
+                                              bool* isExactMatch, bool* isAmbiguous,
+                                              std::vector<Expr*>& functionCallTemplateArgs);
 
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
         void printWarning(const std::string& message, TextPosition startPosition, TextPosition endPosition);
@@ -99,6 +105,10 @@ namespace gulc {
         void processFunctionDecl(FunctionDecl* functionDecl);
         void processGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
         void processNamespaceDecl(NamespaceDecl* namespaceDecl);
+        void processTemplateFunctionDecl(TemplateFunctionDecl* templateFunctionDecl);
+        void processTemplateFunctionDeclImplementation(TemplateFunctionDecl* templateFunctionDecl,
+                                                       std::vector<Expr*>& templateArgs,
+                                                       FunctionDecl* implementedFunction);
 
         void processBreakStmt(BreakStmt* breakStmt);
         void processCaseStmt(CaseStmt* caseStmt);
@@ -140,11 +150,16 @@ namespace gulc {
         void dereferenceReferences(Expr*& potentialReference);
         void convertLValueToRValue(Expr*& potentialLValue);
 
+        /// Changes the type to an absolute type if the type is a template type
+        /// Returns template parameter number for the type
+        unsigned int applyTemplateTypeArguments(Type*& potentialTemplateType);
+
         // Context management
         FileAST* currentFileAst;
         NamespaceDecl* currentNamespace;
         Type* returnType;
         const std::vector<TemplateParameterDecl*>* functionTemplateParams;
+        const std::vector<Expr*>* functionTemplateArgs;
         const std::vector<ParameterDecl*>* functionParams;
         // This is used to tell `processIdentifierExpr` to enable searching functions.
         bool exprIsFunctionCall;
@@ -155,11 +170,12 @@ namespace gulc {
         std::vector<LocalVariableDeclExpr*> functionLocalVariables;
 
         void labelResolved(const std::string& labelName) {
-            if (labelNames.find(labelName) != labelNames.end()) {
-                labelNames[labelName] = true;
-            } else {
-                labelNames.insert({ labelName, true });
-            }
+//            if (labelNames.find(labelName) != labelNames.end()) {
+//                labelNames[labelName] = true;
+//            } else {
+//                labelNames.insert({ labelName, true });
+//            }
+            labelNames.insert_or_assign(labelName, true);
         }
 
         void addUnresolvedLabel(const std::string& labelName) {

@@ -41,8 +41,12 @@ namespace gulc {
                 copiedArguments.push_back(argument->deepCopy());
             }
 
-            return new IndexerCallExpr(startPosition(), endPosition(),
-                                       indexerReference->deepCopy(), std::move(copiedArguments));
+            auto result = new IndexerCallExpr(startPosition(), endPosition(),
+                                              indexerReference->deepCopy(), std::move(copiedArguments));
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
         ~IndexerCallExpr() override {

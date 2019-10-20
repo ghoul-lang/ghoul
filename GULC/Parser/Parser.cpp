@@ -46,6 +46,7 @@
 #include <AST/Decls/EnumConstantDecl.hpp>
 #include <AST/Decls/EnumDecl.hpp>
 #include <AST/Decls/NamespaceDecl.hpp>
+#include <AST/Decls/TemplateFunctionDecl.hpp>
 #include "Parser.hpp"
 
 using namespace gulc;
@@ -377,14 +378,14 @@ qualifierFound:
                     // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
                     CompoundStmt* compoundStmt = parseCompoundStmt();
 
-                    return new FunctionDecl(name, _filePath, startPosition, endPosition, resultType, templateParameters, parameters, compoundStmt);
+                    return new TemplateFunctionDecl(name, _filePath, startPosition, endPosition, resultType, templateParameters, parameters, compoundStmt);
                 }
                 case TokenType::LPAREN: { // Function
                     std::vector<ParameterDecl*> parameters = parseParameterDecls(startPosition);
                     // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
                     CompoundStmt* compoundStmt = parseCompoundStmt();
 
-                    return new FunctionDecl(name, _filePath, startPosition, endPosition, resultType, {}, parameters, compoundStmt);
+                    return new FunctionDecl(name, _filePath, startPosition, endPosition, resultType, parameters, compoundStmt);
                 }
                 case TokenType::EQUALS: {
                     _lexer.consumeType(TokenType::EQUALS);

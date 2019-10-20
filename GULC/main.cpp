@@ -39,13 +39,13 @@ int main() {
     TypeResolver typeResolver(prototypes);
     typeResolver.processFile(fileAst);
 
-    // Mangle names (for overloading support)
-    NameMangler nameMangler(new ItaniumMangler());
-    nameMangler.processFile(fileAst);
-
     // Resolve declarations
     DeclResolver declResolver;
     declResolver.processFile(fileAst);
+
+    // Mangle names (for overloading support)
+    NameMangler nameMangler(new ItaniumMangler());
+    nameMangler.processFile(fileAst);
 
     // Translate operations and verify operations can be performed
     CodeVerifier codeVerifier;

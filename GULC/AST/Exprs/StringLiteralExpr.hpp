@@ -31,7 +31,11 @@ namespace gulc {
         std::string stringValue() const { return _stringValue; }
 
         Expr* deepCopy() const override {
-            return new StringLiteralExpr(startPosition(), endPosition(), _stringValue);
+            auto result = new StringLiteralExpr(startPosition(), endPosition(), _stringValue);
+            if (resultType) {
+                result->resultType = resultType->deepCopy();
+            }
+            return result;
         }
 
     private:
