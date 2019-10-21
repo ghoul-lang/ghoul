@@ -27,10 +27,10 @@
 
 using namespace gulc;
 
-void CodeVerifier::verifyFile(FileAST& fileAst) {
-    currentFileAst = &fileAst;
+void CodeVerifier::verifyFile(FileAST* fileAst) {
+    currentFileAst = fileAst;
 
-    for (Decl* decl : fileAst.topLevelDecls()) {
+    for (Decl* decl : fileAst->topLevelDecls()) {
         verifyDecl(decl);
     }
 }

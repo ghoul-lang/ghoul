@@ -21,9 +21,6 @@
 #include <AST/Types/MutType.hpp>
 #include <AST/Types/ImmutType.hpp>
 #include <AST/Types/PointerType.hpp>
-#include <AST/Types/FunctionPointerType.hpp>
-#include <AST/Types/TemplateTypenameType.hpp>
-#include <AST/Types/RValueReferenceType.hpp>
 #include <AST/Types/EnumType.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
 #include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
@@ -35,12 +32,16 @@
 
 using namespace gulc;
 
-void TypeResolver::processFile(FileAST &fileAst) {
-    currentFileAst = &fileAst;
+void TypeResolver::processFile(std::vector<FileAST*>& files) {
+    for (FileAST* fileAst : files) {
+        currentFileAst = fileAst;
 
-    // TODO: We need to do two passes. One for assigning types to all declarations and then one for assigning them to expressions
-    for (Decl* decl : fileAst.topLevelDecls()) {
-        processDecl(decl);
+        processImports(&fileAst->imports());
+
+        // TODO: We need to do two passes. One for assigning types to all declarations and then one for assigning them to expressions
+        for (Decl* decl : fileAst->topLevelDecls()) {
+            processDecl(decl);
+        }
     }
 }
 
@@ -245,6 +246,59 @@ bool TypeResolver::resolveType(Type *&type) {
     }
 
     return false;
+}
+
+void TypeResolver::processImports(std::vector<Import*>* imports) {
+    currentImports = imports;
+
+    if (imports != nullptr) {
+        for (Import* checkImport : *imports) {
+            for (NamespaceDecl* checkNamespace : _namespacePrototypes) {
+                if (checkImport->namespacePath()[0] == checkNamespace->name()) {
+                    checkImport->pointToNamespace = validateImportPath(checkNamespace, checkImport->namespacePath(), 1);
+                    break;
+                }
+            }
+
+            if (checkImport->pointToNamespace == nullptr) {
+                printError("namespace '" + checkImport->namespacePath()[0] + "' was not found!", {}, {});
+            }
+        }
+    }
+}
+
+/// Errors if the import path is invalid...
+NamespaceDecl* TypeResolver::validateImportPath(NamespaceDecl *checkNamespace, const std::vector<std::string> &checkPath,
+                                                std::size_t currentPathIndex) {
+    // If the current path index is greater than or equal to the size then we return, the namespace path is valid...
+    if (currentPathIndex >= checkPath.size()) {
+        // We return the final namespace which will be the namespace the checkPath points to...
+        return checkNamespace;
+    }
+
+    const std::string& findName = checkPath[currentPathIndex];
+
+    for (Decl* checkDecl : checkNamespace->nestedDecls()) {
+        if (llvm::isa<NamespaceDecl>(checkDecl)) {
+            auto checkNestedNamespace = llvm::dyn_cast<NamespaceDecl>(checkDecl);
+
+            // If we find the namespace path then we recursively continue checking the path
+            if (checkNestedNamespace->name() == findName) {
+                return validateImportPath(checkNestedNamespace, checkPath, currentPathIndex + 1);
+            }
+        }
+    }
+
+    // If we reach this point the namespace path was not found...
+    std::string currentValidPath = checkPath[0];
+
+    for (std::size_t i = 1; i < currentPathIndex - 1; ++i) {
+        currentValidPath += "." + checkPath[i];
+    }
+
+    // TODO: We should probably store the start and end for every parsed import...
+    printError("namespace identifier '" + checkPath[currentPathIndex] + "' was not found in namespace '" + currentValidPath + "'!", {}, {});
+    return nullptr;
 }
 
 void TypeResolver::processDecl(Decl *decl) {
@@ -659,7 +713,35 @@ void TypeResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
     processExpr(functionCallExpr->functionReference);
 }
 
+// Returns true if the Decl is resolved
+Expr* TypeResolver::processIdentifierExprForDecl(Decl* decl, Expr*& expr) {
+    auto identifierExpr = llvm::dyn_cast<IdentifierExpr>(expr);
+
+    if (decl->name() == identifierExpr->name()) {
+        // TODO: Add all Decls that can be types as they're added...
+        if (llvm::isa<EnumDecl>(decl)) {
+            auto enumDecl = llvm::dyn_cast<EnumDecl>(decl);
+
+            // TODO: We should support template overloading.
+            if (identifierExpr->hasTemplateArguments()) {
+                printError("enum types cannot have template arguments!",
+                           identifierExpr->startPosition(), identifierExpr->endPosition());
+            }
+
+            Type *resolvedType = new EnumType(expr->startPosition(), expr->endPosition(), identifierExpr->name(),
+                                              enumDecl->baseType->deepCopy(), enumDecl);
+
+            auto result = new ResolvedTypeRefExpr(expr->startPosition(), expr->endPosition(), resolvedType);
+            result->resultType = resolvedType->deepCopy();
+            return result;
+        }
+    }
+
+    return nullptr;
+}
+
 void TypeResolver::processIdentifierExpr(Expr*& expr) {
+    // TODO: We need to check for ambiguities...
     auto identifierExpr = llvm::dyn_cast<IdentifierExpr>(expr);
 
     // First we check if the identifier is a built in type
@@ -685,35 +767,73 @@ void TypeResolver::processIdentifierExpr(Expr*& expr) {
         }
     }
 
+    Expr* resolvedIdentifier = nullptr;
+
     // Check the file for types...
     for (Decl* decl : currentFileAst->topLevelDecls()) {
-        if (decl->name() == identifierExpr->name()) {
-            // TODO: Add all Decls that can be types as they're added...
-            if (llvm::isa<EnumDecl>(decl)) {
-                auto enumDecl = llvm::dyn_cast<EnumDecl>(decl);
+        Expr* potentialResolvedIdentifier = processIdentifierExprForDecl(decl, expr);
 
-                // TODO: We should support template overloading.
-                if (identifierExpr->hasTemplateArguments()) {
-                    printError("enum types cannot have template arguments!",
-                               identifierExpr->startPosition(), identifierExpr->endPosition());
-                }
-
-                Type *resolvedType = new EnumType(expr->startPosition(), expr->endPosition(), identifierExpr->name(),
-                                                  enumDecl->baseType->deepCopy(), enumDecl);
-
-                delete identifierExpr;
-
-                expr = new ResolvedTypeRefExpr(expr->startPosition(), expr->endPosition(), resolvedType);
-                expr->resultType = resolvedType->deepCopy();
+        if (potentialResolvedIdentifier != nullptr) {
+            if (resolvedIdentifier != nullptr) {
+                printError("type identifier `" + identifierExpr->name() + "` is ambiguous!",
+                           identifierExpr->startPosition(), identifierExpr->endPosition());
                 return;
             }
+
+            resolvedIdentifier = potentialResolvedIdentifier;
         }
+    }
+
+    // Check current namespace..
+    if (currentNamespace) {
+        for (Decl* decl : currentNamespace->nestedDecls()) {
+            Expr* potentialResolvedIdentifier = processIdentifierExprForDecl(decl, expr);
+
+            if (potentialResolvedIdentifier != nullptr) {
+                if (resolvedIdentifier != nullptr) {
+                    printError("type identifier `" + identifierExpr->name() + "` is ambiguous!",
+                               identifierExpr->startPosition(), identifierExpr->endPosition());
+                    return;
+                }
+
+                resolvedIdentifier = potentialResolvedIdentifier;
+            }
+        }
+    }
+
+    // Check imports...
+    if (currentImports) {
+        for (Import* checkImport : *currentImports) {
+            if (checkImport->pointToNamespace) {
+                for (Decl* decl : checkImport->pointToNamespace->nestedDecls()) {
+                    Expr* potentialResolvedIdentifier = processIdentifierExprForDecl(decl, expr);
+
+                    if (potentialResolvedIdentifier != nullptr) {
+                        if (resolvedIdentifier != nullptr) {
+                            printError("type identifier `" + identifierExpr->name() + "` is ambiguous!",
+                                       identifierExpr->startPosition(), identifierExpr->endPosition());
+                            return;
+                        }
+
+                        resolvedIdentifier = potentialResolvedIdentifier;
+                    }
+                }
+            }
+        }
+    }
+
+    // If we've resolved the identifier we delete the old expr, set it to the resolved identifier, and then return...
+    if (resolvedIdentifier != nullptr) {
+        delete expr;
+        expr = resolvedIdentifier;
+        return;
     }
 
     for (NamespaceDecl* checkNamespace : _namespacePrototypes) {
         if (checkNamespace->name() == identifierExpr->name()) {
             delete identifierExpr;
             expr = new TempNamespaceRefExpr({}, {}, checkNamespace);
+            return;
         }
     }
 
@@ -845,7 +965,7 @@ void TypeResolver::processMemberAccessCallExpr(Expr*& expr) {
     } else if (llvm::isa<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef)) {
         auto tempNamespaceRef = llvm::dyn_cast<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef);
 
-        for (Decl* checkDecl : tempNamespaceRef->namespaceDecl()->nestedDecls()) {
+        for (Decl *checkDecl : tempNamespaceRef->namespaceDecl()->nestedDecls()) {
             // TODO: This should probably be improved...
             if (checkDecl->name() == memberAccessCallExpr->member->name()) {
                 if (llvm::isa<EnumDecl>(checkDecl)) {
@@ -874,11 +994,12 @@ void TypeResolver::processMemberAccessCallExpr(Expr*& expr) {
                 }
             }
         }
-    } else {
-        printError("unsupported member access call!",
-                   memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
-        return;
     }
+//    else {
+//        printError("unsupported member access call!",
+//                   memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+//        return;
+//    }
 }
 
 void TypeResolver::processParenExpr(ParenExpr *parenExpr) {

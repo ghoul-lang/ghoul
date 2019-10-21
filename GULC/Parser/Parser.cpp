@@ -75,7 +75,54 @@ FileAST Parser::parseFile() {
     FileAST result(_filePath);
 
     while (_lexer.peekType() != TokenType::ENDOFFILE) {
-        result.addTopLevelDecl(parseTopLevelDecl());
+        if (_lexer.peekType() == TokenType::IMPORT) {
+            _lexer.consumeType(TokenType::IMPORT);
+
+            std::vector<std::string> namespacePath{};
+            namespacePath.push_back(_lexer.peekToken().currentSymbol);
+
+            if (!_lexer.consumeType(TokenType::SYMBOL)) {
+                printError("expected namespace path, found '" + _lexer.peekToken().currentSymbol + "'!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                continue;
+            }
+
+            while (_lexer.peekType() != TokenType::SEMICOLON && _lexer.peekType() != TokenType::AS) {
+                if (!_lexer.consumeType(TokenType::PERIOD)) {
+                    printError("expected namespace path separator '.', found '" + _lexer.peekToken().currentSymbol + "'!",
+                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                    break;
+                }
+
+                namespacePath.push_back(_lexer.peekToken().currentSymbol);
+
+                if (!_lexer.consumeType(TokenType::SYMBOL)) {
+                    printError("expected namespace path, found '" + _lexer.peekToken().currentSymbol + "'!",
+                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                    continue;
+                }
+            }
+
+            std::string alias;
+
+            if (_lexer.consumeType(TokenType::AS)) {
+                alias = _lexer.peekToken().currentSymbol;
+
+                if (!_lexer.consumeType(TokenType::SYMBOL)) {
+                    printError("expected import alias, found '" + _lexer.peekToken().currentSymbol + "'!",
+                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                }
+            }
+
+            if (!_lexer.consumeType(TokenType::SEMICOLON)) {
+                printError("expected ';' after import, found '" + _lexer.peekToken().currentSymbol + "'!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+            }
+
+            result.addImport(new Import(namespacePath, alias));
+        } else {
+            result.addTopLevelDecl(parseTopLevelDecl());
+        }
     }
 
     return result;

@@ -13,33 +13,34 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_NAMESPACEPROTOTYPER_HPP
-#define GULC_NAMESPACEPROTOTYPER_HPP
+#ifndef GULC_IMPORT_HPP
+#define GULC_IMPORT_HPP
 
 #include <vector>
+#include <string>
 #include <AST/Decls/NamespaceDecl.hpp>
-#include <AST/FileAST.hpp>
 
 namespace gulc {
-    /**
-     * NamespacePrototyper creates a global list of all namespaces visible to the current project.
-     * It creates prototypes of all functions, variables, etc. that can then be use to import lookups and absolute path lookups.
-     */
-    class NamespacePrototyper {
+    class Import {
     public:
-        NamespacePrototyper()
-                : currentNamespace(nullptr) {}
+        Import(std::vector<std::string> namespacePath, std::string alias)
+                : pointToNamespace(nullptr), _namespacePath(std::move(namespacePath)), _alias(std::move(alias)) {}
 
-        std::vector<NamespaceDecl*> generatePrototypes(std::vector<FileAST*>& files);
+        [[nodiscard]]
+        const std::vector<std::string>& namespacePath() const { return _namespacePath; }
+        [[nodiscard]]
+        bool hasAlias() const { return !_alias.empty(); }
+        [[nodiscard]]
+        const std::string& alias() const { return _alias; }
+
+        // Namespace the import points to, we don't own this so we don't free it...
+        NamespaceDecl* pointToNamespace;
 
     private:
-        NamespaceDecl* getNamespacePrototype(std::vector<NamespaceDecl*>& result, std::string name);
-
-        void generateNamespaceDecl(std::vector<NamespaceDecl*>& result, NamespaceDecl* namespaceDecl);
-
-        NamespaceDecl* currentNamespace;
+        std::vector<std::string> _namespacePath;
+        std::string _alias;
 
     };
 }
 
-#endif //GULC_NAMESPACEPROTOTYPER_HPP
+#endif //GULC_IMPORT_HPP

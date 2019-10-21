@@ -17,7 +17,6 @@
 #include <AST/Types/PointerType.hpp>
 #include <AST/Types/FunctionPointerType.hpp>
 #include <AST/Exprs/LValueToRValueExpr.hpp>
-#include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
 #include <AST/Types/ConstType.hpp>
 #include <AST/Types/MutType.hpp>
 #include <AST/Types/ImmutType.hpp>
@@ -26,7 +25,6 @@
 #include <AST/Exprs/RefLocalVariableExpr.hpp>
 #include <AST/Exprs/RefParameterExpr.hpp>
 #include <AST/Exprs/RefFunctionExpr.hpp>
-#include <AST/Exprs/RefGlobalVariableExpr.hpp>
 #include <AST/Types/EnumType.hpp>
 #include <AST/Exprs/TempNamespaceRefExpr.hpp>
 #include <AST/TypeComparer.hpp>
@@ -37,11 +35,14 @@
 
 using namespace gulc;
 
-void DeclResolver::processFile(FileAST &fileAst) {
-    currentFileAst = &fileAst;
+void DeclResolver::processFile(std::vector<FileAST*>& files) {
+    for (FileAST* fileAst : files) {
+        currentFileAst = fileAst;
+        currentImports = &fileAst->imports();
 
-    for (Decl* decl : fileAst.topLevelDecls()) {
-        processDecl(decl);
+        for (Decl *decl : fileAst->topLevelDecls()) {
+            processDecl(decl);
+        }
     }
 }
 
@@ -1165,6 +1166,68 @@ bool DeclResolver::checkTemplateFunctionMatchesCall(FunctionDecl *&currentFoundF
     return true;
 }
 
+void DeclResolver::processIdentifierExprForDecl(Decl *checkDecl, IdentifierExpr* identifierExpr, bool hasTemplateArgs,
+                                                RefGlobalVariableExpr*& foundGlobalVariable,
+                                                FunctionDecl*& foundFunction, bool& isExactMatch, bool& isAmbiguous) {
+    if (llvm::isa<GlobalVariableDecl>(checkDecl)) {
+        // If there are template args then we have to find a template decl
+        if (hasTemplateArgs) return;
+
+        if (foundGlobalVariable != nullptr || foundFunction != nullptr) {
+            printError("identifier '" + identifierExpr->name() + "' is ambiguous!",
+                       identifierExpr->startPosition(), identifierExpr->endPosition());
+            return;
+        }
+
+        auto variableDecl = llvm::dyn_cast<GlobalVariableDecl>(checkDecl);
+        auto globalVariableRef = new RefGlobalVariableExpr(identifierExpr->startPosition(),
+                                                           identifierExpr->endPosition(),
+                                                           variableDecl);
+
+        globalVariableRef->resultType = variableDecl->type->deepCopy();
+        // A global variable reference is an lvalue.
+        globalVariableRef->resultType->setIsLValue(true);
+        // TODO: Should we dereference global variables? Can globals even be references?
+        //dereferenceReferences(globalVariableRef);
+//                delete identifierExpr;
+//                expr = globalVariableRef;
+//                return;
+        foundGlobalVariable = globalVariableRef;
+    } else if (llvm::isa<FunctionDecl>(checkDecl)) {
+        // If there are template args then we have to find a template decl
+        if (hasTemplateArgs) return;
+
+        auto functionDecl = llvm::dyn_cast<FunctionDecl>(checkDecl);
+
+        if (foundGlobalVariable != nullptr) {
+            printError("identifier '" + identifierExpr->name() + "' is ambiguous!",
+                       identifierExpr->startPosition(), identifierExpr->endPosition());
+            return;
+        }
+
+        if (!checkFunctionMatchesCall(foundFunction, functionDecl, &isExactMatch, &isAmbiguous)) {
+            printError("function call is ambiguous!",
+                       identifierExpr->startPosition(), identifierExpr->endPosition());
+        }
+    } else if (llvm::isa<TemplateFunctionDecl>(checkDecl)) {
+        // TODO: We should support implicit template typing (i.e. `int test<T>(T p);` calling `test(12);` == `test<int>(12);`
+        if (!hasTemplateArgs) return;
+
+        auto templateFunctionDecl = llvm::dyn_cast<TemplateFunctionDecl>(checkDecl);
+
+        if (foundGlobalVariable != nullptr) {
+            printError("identifier '" + identifierExpr->name() + "' is ambiguous!",
+                       identifierExpr->startPosition(), identifierExpr->endPosition());
+            return;
+        }
+
+        if (!checkTemplateFunctionMatchesCall(foundFunction, templateFunctionDecl, &isExactMatch, &isAmbiguous, identifierExpr->templateArguments)) {
+            printError("function call is ambiguous!",
+                       identifierExpr->startPosition(), identifierExpr->endPosition());
+        }
+    }
+}
+
 /**
  * Try to find the `IdentifierExpr` within the current context by searching local variables, params, decls, etc.
  */
@@ -1290,65 +1353,57 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
     // TODO: then class/struct template params
 
     // then current file
+    RefGlobalVariableExpr* foundGlobalVariable = nullptr;
     FunctionDecl* foundFunction = nullptr;
     // `isExactMatch` is used to check for ambiguity
     bool isExactMatch = false;
     bool isAmbiguous = false;
+    bool isExtern = false;
     // TODO: We need to also support function qualifier overloading (`const`, `mut`, `immut` like `int test() const {}`)
 
     bool hasTemplateArgs = identifierExpr->hasTemplateArguments();
 
     for (Decl* decl : currentFileAst->topLevelDecls()) {
         if (decl->name() == identifierExpr->name()) {
-            if (llvm::isa<GlobalVariableDecl>(decl)) {
-                // If there are template args then we have to find a template decl
-                if (hasTemplateArgs) continue;
+            processIdentifierExprForDecl(decl, identifierExpr, hasTemplateArgs, foundGlobalVariable,
+                                         foundFunction, isExactMatch, isAmbiguous);
+        }
+    }
 
-                auto variableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
-                auto globalVariableRef = new RefGlobalVariableExpr(identifierExpr->startPosition(),
-                                                                   identifierExpr->endPosition(),
-                                                                   variableDecl);
+    // then current namespace
+    if (currentNamespace) {
+        for (Decl* decl : currentNamespace->nestedDecls()) {
+            if (decl->name() == identifierExpr->name()) {
+                processIdentifierExprForDecl(decl, identifierExpr, hasTemplateArgs, foundGlobalVariable,
+                                             foundFunction, isExactMatch, isAmbiguous);
+            }
+        }
+    }
 
-                globalVariableRef->resultType = variableDecl->type->deepCopy();
-                // A global variable reference is an lvalue.
-                globalVariableRef->resultType->setIsLValue(true);
-                // TODO: Should we dereference global variables? Can globals even be references?
-                //dereferenceReferences(globalVariableRef);
-                delete identifierExpr;
 
-                expr = globalVariableRef;
-
-                return;
-            } else if (llvm::isa<FunctionDecl>(decl)) {
-                // If there are template args then we have to find a template decl
-                if (hasTemplateArgs) continue;
-
-                auto functionDecl = llvm::dyn_cast<FunctionDecl>(decl);
-
-                if (functionDecl->name() == identifierExpr->name()) {
-                    if (!checkFunctionMatchesCall(foundFunction, functionDecl, &isExactMatch, &isAmbiguous)) {
-                        printError("function call is ambiguous!",
-                                   identifierExpr->startPosition(), identifierExpr->endPosition());
-                    }
-                }
-            } else if (llvm::isa<TemplateFunctionDecl>(decl)) {
-                // TODO: We should support implicit template typing (i.e. `int test<T>(T p);` calling `test(12);` == `test<int>(12);`
-                if (!hasTemplateArgs) continue;
-
-                auto templateFunctionDecl = llvm::dyn_cast<TemplateFunctionDecl>(decl);
-
-                if (templateFunctionDecl->name() == identifierExpr->name()) {
-                    if (!checkTemplateFunctionMatchesCall(foundFunction, templateFunctionDecl, &isExactMatch, &isAmbiguous, identifierExpr->templateArguments)) {
-                        printError("function call is ambiguous!",
-                                   identifierExpr->startPosition(), identifierExpr->endPosition());
-                    }
+    // then imports.
+    if (currentImports) {
+        for (Import* anImport : *currentImports) {
+            for (Decl* decl : anImport->pointToNamespace->nestedDecls()) {
+                if (decl->name() == identifierExpr->name()) {
+                    processIdentifierExprForDecl(decl, identifierExpr, hasTemplateArgs, foundGlobalVariable,
+                                                 foundFunction, isExactMatch, isAmbiguous);
                 }
             }
         }
     }
 
-    // TODO: then current namespace
-    // TODO: then imports.
+    // If we reach this point and `foundGlobalVariable` isn't null then it means we found the global variable, replace `expr` with the reference to it...
+    if (foundGlobalVariable) {
+        delete expr;
+        expr = foundGlobalVariable;
+
+        if (foundGlobalVariable->globalVariable()->parentNamespace != nullptr) {
+            currentFileAst->addImportExtern(foundGlobalVariable->globalVariable());
+        }
+
+        return;
+    }
 
     if (foundFunction) {
         // If the found function is ambiguous then we have to error, it means there are multiple functions that all require some type of implicit cast to work...
@@ -1372,6 +1427,15 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         delete identifierExpr;
 
         expr = refFileFunc;
+
+        // true xor true = false
+        // true xor false = true
+        // false xor true = true
+        // false xor false = false
+
+        if (foundFunction->parentNamespace != nullptr) {
+            currentFileAst->addImportExtern(foundFunction);
+        }
 
         return;
     }
@@ -1532,7 +1596,15 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
         }
     }
 
-    printError("member access calls not yet supported!", memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+    if (llvm::isa<IdentifierExpr>(memberAccessCallExpr->objectRef)) {
+        auto missingIdentifier = llvm::dyn_cast<IdentifierExpr>(memberAccessCallExpr->objectRef);
+
+        printError("identifier '" + missingIdentifier->name() + "' was not found!",
+                   missingIdentifier->startPosition(), missingIdentifier->endPosition());
+    } else {
+        printError("unknown expression in member access call!",
+                   memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+    }
 }
 
 void DeclResolver::processParenExpr(ParenExpr *parenExpr) {

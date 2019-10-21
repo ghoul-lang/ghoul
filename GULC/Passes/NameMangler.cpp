@@ -18,9 +18,11 @@
 
 using namespace gulc;
 
-void NameMangler::processFile(FileAST &fileAst) {
-    for (Decl* decl : fileAst.topLevelDecls()) {
-        processDecl(decl);
+void NameMangler::processFile(std::vector<FileAST*>& files) {
+    for (FileAST* fileAst : files) {
+        for (Decl *decl : fileAst->topLevelDecls()) {
+            processDecl(decl);
+        }
     }
 }
 

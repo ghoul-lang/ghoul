@@ -59,7 +59,7 @@ namespace gulc {
                   currentFunctionTemplateParameters(nullptr), currentFunctionParameters(nullptr),
                   currentFunctionLocalVariablesCount(0), currentFunctionLocalVariables() {}
 
-        void verifyFile(FileAST& fileAst);
+        void verifyFile(FileAST* fileAst);
 
     private:
         bool canCastType(Type* to, Type* from, bool isExplicit);

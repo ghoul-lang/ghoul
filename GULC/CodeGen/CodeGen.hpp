@@ -64,13 +64,13 @@ namespace gulc {
                   currentLoopBlockContinue(nullptr), currentLoopBlockBreak(nullptr),
                   nestedLoopCount(0), nestedLoopContinues(), nestedLoopBreaks() {}
 
-        gulc::Module generate(FileAST& file);
+        gulc::Module generate(FileAST* file);
 
     private:
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
 
         void generateImportExtern(const Decl* decl);
-        llvm::GlobalObject* generateDecl(const Decl* decl);
+        llvm::GlobalObject* generateDecl(const Decl* decl, bool isInternal = true);
         void generateStmt(const Stmt* stmt, const std::string& stmtName = "");
         llvm::Value* generateExpr(const Expr* expr);
 
@@ -82,10 +82,10 @@ namespace gulc {
         void generateExternGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl);
 
         // Decls
-        llvm::Function* generateFunctionDecl(const FunctionDecl* functionDecl);
-        llvm::GlobalVariable* generateGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl);
+        llvm::Function* generateFunctionDecl(const FunctionDecl* functionDecl, bool isInternal);
+        llvm::GlobalVariable* generateGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl, bool isInternal);
         void generateNamespace(const NamespaceDecl* namespaceDecl);
-        void generateTemplateFunctionDecl(const TemplateFunctionDecl* templateFunctionDecl);
+        void generateTemplateFunctionDecl(const TemplateFunctionDecl* templateFunctionDecl, bool isInternal);
 
         // Stmts
         void generateCompoundStmt(const CompoundStmt* compoundStmt);

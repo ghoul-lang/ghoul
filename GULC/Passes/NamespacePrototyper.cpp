@@ -17,12 +17,14 @@
 
 using namespace gulc;
 
-std::vector<NamespaceDecl*> gulc::NamespacePrototyper::generatePrototypes(gulc::FileAST& file) {
-    std::vector<NamespaceDecl*> result{};
+std::vector<NamespaceDecl*> gulc::NamespacePrototyper::generatePrototypes(std::vector<FileAST*>& files) {
+    std::vector<NamespaceDecl *> result{};
 
-    for (Decl* decl : file.topLevelDecls()) {
-        if (llvm::isa<NamespaceDecl>(decl)) {
-            generateNamespaceDecl(result, llvm::dyn_cast<NamespaceDecl>(decl));
+    for (FileAST* fileAst : files) {
+        for (Decl *decl : fileAst->topLevelDecls()) {
+            if (llvm::isa<NamespaceDecl>(decl)) {
+                generateNamespaceDecl(result, llvm::dyn_cast<NamespaceDecl>(decl));
+            }
         }
     }
 

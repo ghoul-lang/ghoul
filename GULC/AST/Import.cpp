@@ -13,27 +13,4 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_NAMEMANGLER_HPP
-#define GULC_NAMEMANGLER_HPP
-
-#include <AST/FileAST.hpp>
-#include <NameMangling/ManglerBase.hpp>
-#include <AST/Decls/NamespaceDecl.hpp>
-
-namespace gulc {
-    class NameMangler {
-    public:
-        explicit NameMangler(ManglerBase* manglerBase)
-                : _manglerBase(manglerBase) {}
-
-        void processFile(std::vector<FileAST*>& files);
-
-    private:
-        ManglerBase* _manglerBase;
-
-        void processDecl(Decl* decl);
-
-    };
-}
-
-#endif //GULC_NAMEMANGLER_HPP
+#include "Import.hpp"

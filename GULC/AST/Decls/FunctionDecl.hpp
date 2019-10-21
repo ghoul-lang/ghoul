@@ -38,7 +38,11 @@ namespace gulc {
                      std::vector<Expr*> templateArguments)
                 : Decl(Kind::Function, std::move(name), std::move(sourceFile), startPosition, endPosition),
                   templateArguments(std::move(templateArguments)), resultType(resultType),
-                  parameters(std::move(parameters)), _body(body) {}
+                  parameters(std::move(parameters)), _body(body), _isMain(false) {
+            if (this->name() == "main") {
+                _isMain = true;
+            }
+        }
 
         std::vector<Expr*> templateArguments;
         Type* resultType;
@@ -46,6 +50,8 @@ namespace gulc {
         CompoundStmt* body() const { return _body; }
 
         bool hasParameters() const { return !parameters.empty(); }
+
+        bool isMain() const { return _isMain; }
 
         Decl* deepCopy() const override {
             std::vector<Expr*> copiedTemplateArguments;
@@ -81,6 +87,7 @@ namespace gulc {
 
     private:
         CompoundStmt* _body;
+        bool _isMain;
 
     };
 }

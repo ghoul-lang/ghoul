@@ -57,10 +57,10 @@ namespace gulc {
     class TypeResolver {
     public:
         explicit TypeResolver(std::vector<NamespaceDecl*>& namespacePrototypes)
-                : _namespacePrototypes(namespacePrototypes), currentFileAst(nullptr), functionTemplateParams(nullptr),
-                  currentNamespace(nullptr) {}
+                : _namespacePrototypes(namespacePrototypes), currentFileAst(nullptr), currentImports(nullptr),
+                  functionTemplateParams(nullptr), currentNamespace(nullptr) {}
 
-        void processFile(FileAST& fileAst);
+        void processFile(std::vector<FileAST*>& files);
 
     private:
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
@@ -68,6 +68,10 @@ namespace gulc {
         void printDebugWarning(const std::string& message);
 
         bool resolveType(Type*& type);
+
+        void processImports(std::vector<Import*>* imports);
+        NamespaceDecl* validateImportPath(NamespaceDecl* checkNamespace, const std::vector<std::string>& checkPath,
+                                          std::size_t currentPathIndex);
 
         void processDecl(Decl* decl);
         void processStmt(Stmt*& stmt);
@@ -97,6 +101,8 @@ namespace gulc {
         void processExplicitCastExpr(ExplicitCastExpr* explicitCastExpr);
         void processFloatLiteralExpr(FloatLiteralExpr* floatLiteralExpr);
         void processFunctionCallExpr(FunctionCallExpr* functionCallExpr);
+        // Returns resolved identifier on success, returns null on failure
+        Expr* processIdentifierExprForDecl(Decl* decl, Expr*& expr);
         void processIdentifierExpr(Expr*& expr);
         void processImplicitCastExpr(ImplicitCastExpr* implicitCastExpr);
         void processIndexerCallExpr(IndexerCallExpr* indexerCallExpr);
@@ -116,6 +122,7 @@ namespace gulc {
         // Context management
         std::vector<NamespaceDecl*>& _namespacePrototypes;
         FileAST* currentFileAst;
+        std::vector<Import*>* currentImports;
         const std::vector<TemplateParameterDecl*>* functionTemplateParams;
         NamespaceDecl* currentNamespace;
 

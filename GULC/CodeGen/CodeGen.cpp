@@ -39,11 +39,12 @@
 #include <AST/Decls/EnumDecl.hpp>
 #include "CodeGen.hpp"
 
-gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
+
+gulc::Module gulc::CodeGen::generate(gulc::FileAST* file) {
     llvm::LLVMContext* llvmContext = new llvm::LLVMContext();
     llvm::IRBuilder<> irBuilder(*llvmContext);
     // TODO: Should we remove the ending file extension?
-    llvm::Module* genModule = new llvm::Module(file.filePath(), *llvmContext);
+    llvm::Module* genModule = new llvm::Module(file->filePath(), *llvmContext);
     //llvm::PassManager<llvm::Function>* funcPassManager = new llvm::PassManager<llvm::Function>();
     llvm::legacy::FunctionPassManager* funcPassManager = new llvm::legacy::FunctionPassManager(genModule);
 
@@ -60,18 +61,18 @@ gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
 
     funcPassManager->doInitialization();
 
-    currentFileAst = &file;
+    currentFileAst = file;
     this->llvmContext = llvmContext;
     this->irBuilder = &irBuilder;
     this->module = genModule;
     this->funcPass = funcPassManager;
 
     // Add the externs that have been imported...
-    for (const gulc::Decl* decl : file.importExterns()) {
+    for (const gulc::Decl* decl : file->importExterns()) {
         generateImportExtern(decl);
     }
 
-    for (const gulc::Decl* decl : file.topLevelDecls()) {
+    for (const gulc::Decl* decl : file->topLevelDecls()) {
         generateDecl(decl);
 
         //globalObject.print()
@@ -82,7 +83,7 @@ gulc::Module gulc::CodeGen::generate(gulc::FileAST& file) {
     funcPassManager->doFinalization();
     delete funcPassManager;
 
-    return Module(file.filePath(), llvmContext, genModule);
+    return Module(file->filePath(), llvmContext, genModule);
 }
 
 void gulc::CodeGen::printError(const std::string &message, TextPosition startPosition, TextPosition endPosition) {
@@ -206,21 +207,21 @@ void gulc::CodeGen::generateImportExtern(const gulc::Decl *decl) {
     }
 }
 
-llvm::GlobalObject* gulc::CodeGen::generateDecl(const gulc::Decl *decl) {
+llvm::GlobalObject* gulc::CodeGen::generateDecl(const gulc::Decl *decl, bool isInternal) {
     switch (decl->getDeclKind()) {
         case gulc::Decl::Kind::Enum:
             // We don't generate any code for the enum declaration...
             break;
         case gulc::Decl::Kind::Function:
-            return generateFunctionDecl(llvm::dyn_cast<gulc::FunctionDecl>(decl));
+            return generateFunctionDecl(llvm::dyn_cast<gulc::FunctionDecl>(decl), isInternal);
         case gulc::Decl::Kind::GlobalVariable:
-            return generateGlobalVariableDecl(llvm::dyn_cast<gulc::GlobalVariableDecl>(decl));
+            return generateGlobalVariableDecl(llvm::dyn_cast<gulc::GlobalVariableDecl>(decl), isInternal);
         case gulc::Decl::Kind::Namespace:
             generateNamespace(llvm::dyn_cast<gulc::NamespaceDecl>(decl));
             // TODO: Should `generateDecl` even return anything at this point?
             return nullptr;
         case gulc::Decl::Kind::TemplateFunction:
-            generateTemplateFunctionDecl(llvm::dyn_cast<gulc::TemplateFunctionDecl>(decl));
+            generateTemplateFunctionDecl(llvm::dyn_cast<gulc::TemplateFunctionDecl>(decl), isInternal);
             return nullptr;
         default:
             printError("internal - unsupported decl!",
@@ -360,14 +361,20 @@ void gulc::CodeGen::generateExternGlobalVariableDecl(const GlobalVariableDecl* g
 }
 
 // Decls
-llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *functionDecl) {
+llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *functionDecl, bool isInternal) {
     std::vector<llvm::Type*> paramTypes = generateParamTypes(functionDecl->parameters);
     llvm::Type* returnType = generateLlvmType(functionDecl->resultType);
     llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
     llvm::Function* function = module->getFunction(functionDecl->mangledName());
 
     if (!function) {
-        function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::CommonLinkage, functionDecl->mangledName(), module);
+        auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
+
+        if (isInternal && !functionDecl->isMain()) {
+            linkageType = llvm::Function::LinkageTypes::InternalLinkage;
+        }
+
+        function = llvm::Function::Create(functionType, linkageType, functionDecl->mangledName(), module);
     }
 
     llvm::BasicBlock* funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", function);
@@ -397,7 +404,7 @@ llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *fu
     return function;
 }
 
-llvm::GlobalVariable *gulc::CodeGen::generateGlobalVariableDecl(const gulc::GlobalVariableDecl *globalVariableDecl) {
+llvm::GlobalVariable *gulc::CodeGen::generateGlobalVariableDecl(const gulc::GlobalVariableDecl *globalVariableDecl, bool isInternal) {
     llvm::Type* llvmType = generateLlvmType(globalVariableDecl->type);
 
     bool isConstant = llvm::isa<ImmutType>(globalVariableDecl->type) || llvm::isa<ConstType>(globalVariableDecl->type);
@@ -407,9 +414,14 @@ llvm::GlobalVariable *gulc::CodeGen::generateGlobalVariableDecl(const gulc::Glob
         initialValue = generateConstant(globalVariableDecl->initialValue);
     }
 
-    return new llvm::GlobalVariable(*module, llvmType, isConstant,
-                                    llvm::GlobalValue::LinkageTypes::InternalLinkage,
-                                    initialValue, globalVariableDecl->mangledName());
+    auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
+
+    if (isInternal) {
+        linkageType = llvm::Function::LinkageTypes::InternalLinkage;
+    }
+
+    return new llvm::GlobalVariable(*module, llvmType, isConstant, linkageType, initialValue,
+                                    globalVariableDecl->mangledName());
 }
 
 void gulc::CodeGen::generateNamespace(const gulc::NamespaceDecl *namespaceDecl) {
@@ -417,16 +429,16 @@ void gulc::CodeGen::generateNamespace(const gulc::NamespaceDecl *namespaceDecl) 
     currentNamespace = namespaceDecl;
 
     for (const Decl* decl : namespaceDecl->nestedDecls()) {
-        generateDecl(decl);
+        generateDecl(decl, false);
     }
 
     currentNamespace = oldNamespace;
 }
 
-void gulc::CodeGen::generateTemplateFunctionDecl(const gulc::TemplateFunctionDecl *templateFunctionDecl) {
+void gulc::CodeGen::generateTemplateFunctionDecl(const gulc::TemplateFunctionDecl *templateFunctionDecl, bool isInternal) {
     // TODO: We need to support generating the implemented functions in their own file (because the file the `template` is in might already be compiled, making it so we're not compiling the new functions)
     for (FunctionDecl* implementedFunction : templateFunctionDecl->implementedFunctions()) {
-        generateDecl(implementedFunction);
+        generateDecl(implementedFunction, isInternal);
     }
 }
 

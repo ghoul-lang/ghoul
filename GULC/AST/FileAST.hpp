@@ -20,13 +20,14 @@
 #include <string>
 #include <vector>
 #include "Decl.hpp"
+#include "Import.hpp"
 #include <iostream>
 
 namespace gulc {
     class FileAST {
     public:
         explicit FileAST(std::string filePath)
-                : _filePath(std::move(filePath)), _importExterns(), _topLevelDecls() {}
+                : _filePath(std::move(filePath)), _imports(), _importExterns(), _topLevelDecls() {}
 
 		FileAST& operator=(FileAST&& other) noexcept = default;
 		FileAST(FileAST&& other) noexcept = default;
@@ -35,6 +36,12 @@ namespace gulc {
         const std::vector<Decl*>& topLevelDecls() const { return _topLevelDecls; }
         void addTopLevelDecl(Decl* decl) { _topLevelDecls.push_back(decl); }
 
+        // Import statements/declarations (not sure exactly what they would be considered... more likely static statements?)
+        std::vector<Import*>& imports() { return _imports; }
+        const std::vector<Import*>& imports() const { return _imports; }
+        void addImport(Import* anImport) { _imports.push_back(anImport); }
+
+        // Import externs are `Decl` classes that we create `extern` prototypes to in our object file
         std::vector<const Decl*>& importExterns() { return _importExterns; };
         const std::vector<const Decl*>& importExterns() const { return _importExterns; };
 
@@ -52,6 +59,8 @@ namespace gulc {
 
     private:
         std::string _filePath;
+        // These are our actual `import`s `import std.io`, `import std.gui.graphics as gfx`
+        std::vector<Import*> _imports;
         // We don't own these so we don't delete them.
         std::vector<const Decl*> _importExterns;
         std::vector<Decl*> _topLevelDecls;

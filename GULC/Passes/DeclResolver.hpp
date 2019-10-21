@@ -52,6 +52,7 @@
 #include <AST/Exprs/ResolvedTypeRefExpr.hpp>
 #include <AST/Exprs/StringLiteralExpr.hpp>
 #include <AST/Exprs/LocalVariableDeclExpr.hpp>
+#include <AST/Exprs/RefGlobalVariableExpr.hpp>
 #include <AST/FileAST.hpp>
 #include <AST/Decls/GlobalVariableDecl.hpp>
 #include <AST/Decls/EnumDecl.hpp>
@@ -65,12 +66,12 @@ namespace gulc {
 
     public:
         DeclResolver()
-                : currentFileAst(nullptr), currentNamespace(nullptr), returnType(nullptr),
+                : currentFileAst(nullptr), currentImports(nullptr), currentNamespace(nullptr), returnType(nullptr),
                   functionTemplateParams(nullptr), functionTemplateArgs(nullptr), functionParams(nullptr),
                   exprIsFunctionCall(false), functionCallArgs(nullptr), labelNames(), functionLocalVariablesCount(0),
                   functionLocalVariables() {}
 
-        void processFile(FileAST& fileAst);
+        void processFile(std::vector<FileAST*>& files);
 
         static Expr* solveConstExpression(Expr* expr);
 
@@ -132,6 +133,9 @@ namespace gulc {
         void processFloatLiteralExpr(FloatLiteralExpr* floatLiteralExpr);
         void processFunctionCallExpr(FunctionCallExpr* functionCallExpr);
         void processIdentifierExpr(Expr*& identifierExpr);
+        void processIdentifierExprForDecl(Decl *checkDecl, IdentifierExpr* identifierExpr, bool hasTemplateArgs,
+                                          RefGlobalVariableExpr*& foundGlobalVariable,
+                                          FunctionDecl*& foundFunction, bool& isExactMatch, bool& isAmbiguous);
         void processImplicitCastExpr(ImplicitCastExpr* implicitCastExpr);
         void processIndexerCallExpr(IndexerCallExpr* indexerCallExpr);
         void processIntegerLiteralExpr(IntegerLiteralExpr* integerLiteralExpr);
@@ -156,6 +160,7 @@ namespace gulc {
 
         // Context management
         FileAST* currentFileAst;
+        std::vector<Import*>* currentImports;
         NamespaceDecl* currentNamespace;
         Type* returnType;
         const std::vector<TemplateParameterDecl*>* functionTemplateParams;

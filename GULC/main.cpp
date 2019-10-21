@@ -27,41 +27,57 @@
 using namespace gulc;
 
 int main() {
-    // Parse our file in
-    Parser parser("Examples/FunctionTest.gul");
-    FileAST fileAst(parser.parseFile());
+    std::vector<std::string> inputFiles = {
+            "Examples/TestFile1.gul",
+            "Examples/TestFile2.gul"
+    };
+    std::vector<FileAST*> parsedFiles{};
+    parsedFiles.reserve(inputFiles.size());
+
+    // Parse our files in
+    for (std::string& inputFile : inputFiles) {
+        Parser parser(inputFile);
+        parsedFiles.push_back(new FileAST(parser.parseFile()));
+    }
 
     // Generate namespace map
     NamespacePrototyper namespacePrototyper;
-    std::vector<NamespaceDecl*> prototypes = namespacePrototyper.generatePrototypes(fileAst);
+    std::vector<NamespaceDecl*> prototypes = namespacePrototyper.generatePrototypes(parsedFiles);
 
     // Resolve types
     TypeResolver typeResolver(prototypes);
-    typeResolver.processFile(fileAst);
+    typeResolver.processFile(parsedFiles);
 
     // Resolve declarations
     DeclResolver declResolver;
-    declResolver.processFile(fileAst);
+    declResolver.processFile(parsedFiles);
 
     // Mangle names (for overloading support)
     NameMangler nameMangler(new ItaniumMangler());
-    nameMangler.processFile(fileAst);
+    nameMangler.processFile(parsedFiles);
 
-    // Translate operations and verify operations can be performed
-    CodeVerifier codeVerifier;
-    codeVerifier.verifyFile(fileAst);
+    // List of object files
+    std::vector<ObjFile> objFiles;
+    objFiles.reserve(parsedFiles.size());
 
-    // Generate the LLVM IR
-    CodeGen codeGen = CodeGen();
-    gulc::Module module = codeGen.generate(fileAst);
+    // The last three stages can be threaded at some point. No modifications should be made after this point so it should be okay to thread
+    for (FileAST* fileAst : parsedFiles) {
+        // Translate operations and verify operations can be performed
+        CodeVerifier codeVerifier;
+        codeVerifier.verifyFile(fileAst);
 
-    // Generate the object files
-    ObjGen::init();
-    ObjGen objGen = ObjGen();
-    ObjFile objFile = objGen.generate(module);
+        // Generate the LLVM IR
+        CodeGen codeGen = CodeGen();
+        gulc::Module module = codeGen.generate(fileAst);
+
+        // Generate the object files
+        ObjGen::init();
+        ObjGen objGen = ObjGen();
+        objFiles.push_back(objGen.generate(module));
+    }
 
     // Link the object files together
-    gulc::Linker::link(objFile);
+    gulc::Linker::link(objFiles);
 
 	return 0;
 }

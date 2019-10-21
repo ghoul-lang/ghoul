@@ -1,0 +1,19 @@
+import std;
+
+namespace vartest
+{
+    int hmmm = 12;
+}
+
+int test = 12;
+
+//int test<T>(T i)
+//{
+//    return i;
+//}
+
+int main()
+{
+    //return test;
+    return test<int>(42);
+}

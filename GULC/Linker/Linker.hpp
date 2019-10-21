@@ -22,7 +22,7 @@
 namespace gulc {
     class Linker {
     public:
-        static void link(ObjFile objFile);
+        static void link(std::vector<ObjFile>& objFiles);
     };
 }
 
