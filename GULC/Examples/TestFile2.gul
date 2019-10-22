@@ -1,7 +1,4 @@
 namespace std
 {
-    int test<T>(T i)
-    {
-        return i + 33;
-    }
+    int globalTest = 4;
 }

@@ -356,8 +356,12 @@ void gulc::CodeGen::generateExternFunctionDecl(const FunctionDecl* functionDecl)
 }
 
 void gulc::CodeGen::generateExternGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl) {
-    printError("[INTERNAL] namespace variables not yet supported!",
-               globalVariableDecl->startPosition(), globalVariableDecl->endPosition());
+    llvm::Type* llvmType = generateLlvmType(globalVariableDecl->type);
+
+    bool isConstant = llvm::isa<ImmutType>(globalVariableDecl->type) || llvm::isa<ConstType>(globalVariableDecl->type);
+
+    new llvm::GlobalVariable(*module, llvmType, isConstant, llvm::Function::LinkageTypes::ExternalLinkage,
+                             nullptr, globalVariableDecl->mangledName());
 }
 
 // Decls
@@ -405,23 +409,34 @@ llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *fu
 }
 
 llvm::GlobalVariable *gulc::CodeGen::generateGlobalVariableDecl(const gulc::GlobalVariableDecl *globalVariableDecl, bool isInternal) {
-    llvm::Type* llvmType = generateLlvmType(globalVariableDecl->type);
+    llvm::GlobalVariable* checkExtern = module->getGlobalVariable(globalVariableDecl->name(), true);
 
-    bool isConstant = llvm::isa<ImmutType>(globalVariableDecl->type) || llvm::isa<ConstType>(globalVariableDecl->type);
     llvm::Constant* initialValue = nullptr;
 
     if (globalVariableDecl->hasInitialValue()) {
         initialValue = generateConstant(globalVariableDecl->initialValue);
     }
 
-    auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
+    if (checkExtern) {
+        if (initialValue) {
+            checkExtern->setInitializer(initialValue);
+        }
 
-    if (isInternal) {
-        linkageType = llvm::Function::LinkageTypes::InternalLinkage;
+        return checkExtern;
+    } else {
+        llvm::Type* llvmType = generateLlvmType(globalVariableDecl->type);
+
+        bool isConstant = llvm::isa<ImmutType>(globalVariableDecl->type) || llvm::isa<ConstType>(globalVariableDecl->type);
+
+        auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
+
+        if (isInternal) {
+            linkageType = llvm::Function::LinkageTypes::InternalLinkage;
+        }
+
+        return new llvm::GlobalVariable(*module, llvmType, isConstant, linkageType, initialValue,
+                                        globalVariableDecl->mangledName());
     }
-
-    return new llvm::GlobalVariable(*module, llvmType, isConstant, linkageType, initialValue,
-                                    globalVariableDecl->mangledName());
 }
 
 void gulc::CodeGen::generateNamespace(const gulc::NamespaceDecl *namespaceDecl) {

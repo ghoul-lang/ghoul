@@ -435,7 +435,7 @@ void DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
     if (returnStmt->hasReturnValue()) {
         processExpr(returnStmt->returnValue);
 
-        bool typesAreSame = false;
+        bool typesAreSame;
 
         // If the return value isn't a reference but the return type of the function is we need to create a reference? This should probably be illegal?
         if (!getTypeIsReference(returnStmt->returnValue->resultType)) {
@@ -1358,7 +1358,6 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
     // `isExactMatch` is used to check for ambiguity
     bool isExactMatch = false;
     bool isAmbiguous = false;
-    bool isExtern = false;
     // TODO: We need to also support function qualifier overloading (`const`, `mut`, `immut` like `int test() const {}`)
 
     bool hasTemplateArgs = identifierExpr->hasTemplateArguments();
@@ -1523,6 +1522,7 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
         bool isExactMatch = false;
         bool isAmbiguous = false;
 
+        // TODO: Should we use the function `processIdentifierExprForDecl` here?
         for (Decl* checkDecl : namespaceRef->namespaceDecl()->nestedDecls()) {
             if (checkDecl->name() == memberAccessCallExpr->member->name()) {
                 if (llvm::isa<GlobalVariableDecl>(checkDecl)) {
@@ -1533,6 +1533,9 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
                     auto refNamespaceVariable = new RefGlobalVariableExpr(memberAccessCallExpr->startPosition(),
                                                                           memberAccessCallExpr->endPosition(),
                                                                           globalVariable);
+                    refNamespaceVariable->resultType = globalVariable->type->deepCopy();
+                    // A global variable reference is an lvalue.
+                    refNamespaceVariable->resultType->setIsLValue(true);
 
                     delete memberAccessCallExpr;
 
