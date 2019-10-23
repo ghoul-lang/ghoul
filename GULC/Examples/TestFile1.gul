@@ -1,6 +1,22 @@
 import std;
 
+struct TestStruct
+{
+    int hm2;
+    float hm;
+
+    int memberFunctionTest(int param1)
+    {
+        return param1 + 3;
+    }
+}
+
+TestStruct idgaf;
+
 int main()
 {
-    return std.globalTest;
+    TestStruct t;
+
+    //return t.memberFunctionTest(12);
+    return 0;
 }

@@ -41,7 +41,11 @@ namespace gulc {
             Enum,
             EnumConstant,
 
-            Namespace
+            Namespace,
+
+            Struct,
+            Class,
+            Interface
         };
 
         Kind getDeclKind() const { return _kind; }

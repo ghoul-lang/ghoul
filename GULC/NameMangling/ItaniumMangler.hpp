@@ -25,6 +25,7 @@ namespace gulc {
         std::string mangle(GlobalVariableDecl* globalVariableDecl) override;
         void mangle(NamespaceDecl* namespaceDecl, const std::string& prefix) override;
         void mangle(TemplateFunctionDecl* templateFunctionDecl) override;
+        void mangle(StructDecl* structDecl, const std::string& prefix) override;
 
     private:
         std::string unqualifiedName(FunctionDecl* functionDecl);

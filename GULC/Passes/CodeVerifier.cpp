@@ -22,6 +22,8 @@
 #include <AST/Types/MutType.hpp>
 #include <AST/Types/RValueReferenceType.hpp>
 #include <AST/TypeComparer.hpp>
+#include <AST/Types/UnresolvedType.hpp>
+#include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
 #include "CodeVerifier.hpp"
 #include "DeclResolver.hpp"
 
@@ -215,6 +217,9 @@ void CodeVerifier::verifyDecl(Decl *decl) {
         case Decl::Kind::Namespace:
             verifyNamespaceDecl(llvm::dyn_cast<NamespaceDecl>(decl));
             break;
+        case Decl::Kind::Struct:
+            verifyStructDecl(llvm::dyn_cast<StructDecl>(decl));
+            break;
         case Decl::Kind::TemplateFunction:
             verifyTemplateFunctionDecl(llvm::dyn_cast<TemplateFunctionDecl>(decl));
             break;
@@ -286,6 +291,10 @@ void CodeVerifier::verifyExpr(Expr*& expr) {
             break;
         case Expr::Kind::CharacterLiteral:
             verifyCharacterLiteralExpr(llvm::dyn_cast<CharacterLiteralExpr>(expr));
+            break;
+        case Expr::Kind::CustomPrefixOperator:
+            printError("custom prefix operators not yet supported!",
+                       expr->startPosition(), expr->endPosition());
             break;
         case Expr::Kind::ExplicitCast:
             verifyExplicitCastExpr(llvm::dyn_cast<ExplicitCastExpr>(expr));
@@ -394,6 +403,18 @@ void CodeVerifier::verifyNamespaceDecl(NamespaceDecl *namespaceDecl) {
     }
 
     currentNamespace = oldNamespace;
+}
+
+void CodeVerifier::verifyStructDecl(StructDecl *structDecl) {
+    StructDecl* oldStruct = currentStruct;
+    currentStruct = structDecl;
+
+    // TODO: We should make sure any members of the struct can actually be members of the struct...
+    for (Decl* decl : structDecl->members) {
+        verifyDecl(decl);
+    }
+
+    currentStruct = oldStruct;
 }
 
 void CodeVerifier::verifyTemplateFunctionDecl(TemplateFunctionDecl *templateFunctionDecl) {
@@ -605,7 +626,13 @@ void CodeVerifier::verifyIntegerLiteralExpr(IntegerLiteralExpr *integerLiteralEx
 }
 
 void CodeVerifier::verifyLocalVariableDeclExpr(LocalVariableDeclExpr *localVariableDeclExpr) {
-    // TODO: I don't think there really is anything to verify here?
+    if (llvm::isa<UnresolvedTypeRefExpr>(localVariableDeclExpr->type)) {
+        auto unresolvedTypeRef = llvm::dyn_cast<UnresolvedTypeRefExpr>(localVariableDeclExpr->type);
+
+        printError("variable type '" + unresolvedTypeRef->unresolvedType->getString() + "' was not found!",
+                   localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
+    }
+
     // NOTE: I don't think this is needed since we check if a name is taken in the `DeclResolver`
 //    // Check the name is already in use...
 //    if (currentFunctionParameters != nullptr) {

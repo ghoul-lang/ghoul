@@ -37,6 +37,7 @@
 #include <AST/Exprs/CharacterLiteralExpr.hpp>
 #include <AST/Types/EnumType.hpp>
 #include <AST/Decls/EnumDecl.hpp>
+#include <AST/Types/StructType.hpp>
 #include "CodeGen.hpp"
 
 
@@ -170,6 +171,10 @@ llvm::Type *gulc::CodeGen::generateLlvmType(const gulc::Type* type) {
             auto enumType = llvm::dyn_cast<EnumType>(type);
             return generateLlvmType(enumType->baseType());
         }
+        case gulc::Type::Kind::Struct: {
+            auto structType = llvm::dyn_cast<StructType>(type);
+            return getLlvmStructType(structType->decl());
+        }
         default:
             printError("type '" + type->getString() + "' not yet supported!",
                        type->startPosition(), type->endPosition());
@@ -181,6 +186,11 @@ llvm::Type *gulc::CodeGen::generateLlvmType(const gulc::Type* type) {
 std::vector<llvm::Type*> gulc::CodeGen::generateParamTypes(const std::vector<ParameterDecl*>& parameters) {
     std::vector<llvm::Type*> paramTypes{};
     paramTypes.reserve(parameters.size());
+
+    // TODO: We might want to change this. This makes the assumption `generateParamTypes` is only called when generating a function normally
+    if (currentStruct) {
+        paramTypes.push_back(getLlvmStructType(currentStruct));
+    }
 
     for (const ParameterDecl* parameterDecl : parameters) {
         paramTypes.push_back(generateLlvmType(parameterDecl->type));
@@ -219,6 +229,9 @@ llvm::GlobalObject* gulc::CodeGen::generateDecl(const gulc::Decl *decl, bool isI
         case gulc::Decl::Kind::Namespace:
             generateNamespace(llvm::dyn_cast<gulc::NamespaceDecl>(decl));
             // TODO: Should `generateDecl` even return anything at this point?
+            return nullptr;
+        case gulc::Decl::Kind::Struct:
+            generateStructDecl(llvm::dyn_cast<StructDecl>(decl), isInternal);
             return nullptr;
         case gulc::Decl::Kind::TemplateFunction:
             generateTemplateFunctionDecl(llvm::dyn_cast<gulc::TemplateFunctionDecl>(decl), isInternal);
@@ -334,6 +347,8 @@ llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
             return generateRefGlobalVariableExpr(llvm::dyn_cast<RefGlobalVariableExpr>(expr));
         case gulc::Expr::Kind::RefEnumConstant:
             return generateRefEnumConstant(llvm::dyn_cast<gulc::RefEnumConstantExpr>(expr));
+        case gulc::Expr::Kind::RefStructMemberVariable:
+            return generateRefStructMemberVariableExpr(llvm::dyn_cast<gulc::RefStructMemberVariableExpr>(expr));
         default:
             printError("unexpected expression type in code generator!",
                        expr->startPosition(), expr->endPosition());
@@ -389,7 +404,6 @@ llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *fu
     currentFunctionLocalVariablesCount = 0;
     generateStmt(functionDecl->body());
     currentFunctionLocalVariablesCount = 0;
-
 
     // TODO: CodeGen shouldn't have to handle this, this should be handled elsewhere (`CodeVerifier` should check that a function returns on all code paths)
     if (llvm::isa<BuiltInType>(functionDecl->resultType) &&
@@ -448,6 +462,21 @@ void gulc::CodeGen::generateNamespace(const gulc::NamespaceDecl *namespaceDecl) 
     }
 
     currentNamespace = oldNamespace;
+}
+
+void gulc::CodeGen::generateStructDecl(const gulc::StructDecl *structDecl, bool isInternal) {
+    const gulc::StructDecl* oldStruct = currentStruct;
+    currentStruct = structDecl;
+
+    for (const Decl* decl : structDecl->members) {
+        if (llvm::isa<FunctionDecl>(decl)) {
+            generateFunctionDecl(llvm::dyn_cast<FunctionDecl>(decl), isInternal);
+        } else if (llvm::isa<TemplateFunctionDecl>(decl)) {
+            generateTemplateFunctionDecl(llvm::dyn_cast<TemplateFunctionDecl>(decl), isInternal);
+        }
+    }
+
+    currentStruct = oldStruct;
 }
 
 void gulc::CodeGen::generateTemplateFunctionDecl(const gulc::TemplateFunctionDecl *templateFunctionDecl, bool isInternal) {
@@ -1144,6 +1173,33 @@ llvm::Value *gulc::CodeGen::generateRefParameterExpr(const gulc::RefParameterExp
 llvm::Value *gulc::CodeGen::generateRefGlobalVariableExpr(const gulc::RefGlobalVariableExpr *refGlobalFileVariableExpr) {
     // TODO: Should `AllowInternal` be true?
     return module->getGlobalVariable(refGlobalFileVariableExpr->globalVariable()->mangledName(), true);
+}
+
+llvm::Value *gulc::CodeGen::generateRefStructMemberVariableExpr(const gulc::RefStructMemberVariableExpr *refStructMemberVariableExpr) {
+    llvm::Value* objectRef = generateExpr(refStructMemberVariableExpr->objectRef);
+
+    std::vector<GlobalVariableDecl*>& dataMembers = refStructMemberVariableExpr->structType->decl()->dataMembers;
+    unsigned int index = 0;
+    bool elementFound = false;
+
+    for (std::size_t i = 0; i < dataMembers.size(); ++i) {
+        // We check if the pointers are the same for equality...
+        if (dataMembers[i] == refStructMemberVariableExpr->refVariable) {
+            index = i;
+            elementFound = true;
+            break;
+        }
+    }
+
+    if (!elementFound) {
+        printError("struct element '" + refStructMemberVariableExpr->refVariable->name() + "' was not found!",
+                   refStructMemberVariableExpr->startPosition(), refStructMemberVariableExpr->endPosition());
+    }
+
+    // NOTE: Not exactly sure whats wrong here but we'll just let LLVM handle getting the type...
+//    llvm::StructType* structType = getLlvmStructType(refStructMemberVariableExpr->structType->decl());
+//    llvm::PointerType* structPointerType = llvm::PointerType::getUnqual(structType);
+    return irBuilder->CreateStructGEP(nullptr, objectRef, index, refStructMemberVariableExpr->refVariable->name());
 }
 
 llvm::Function *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr, std::string *nameOut) {

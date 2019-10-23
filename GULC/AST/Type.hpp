@@ -34,7 +34,8 @@ namespace gulc {
             Immut,
             Reference,
             RValueReference,
-            Enum
+            Enum,
+            Struct
         };
 
         Kind getTypeKind() const { return _kind; }

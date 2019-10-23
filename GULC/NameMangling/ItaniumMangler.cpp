@@ -97,6 +97,16 @@ void ItaniumMangler::mangle(TemplateFunctionDecl *templateFunctionDecl) {
     }
 }
 
+void ItaniumMangler::mangle(StructDecl *structDecl, const std::string& prefix) {
+    for (Decl* decl : structDecl->members) {
+        if (llvm::isa<FunctionDecl>(decl)) {
+
+        } else if (llvm::isa<TemplateFunctionDecl>(decl)) {
+
+        }
+    }
+}
+
 std::string ItaniumMangler::unqualifiedName(FunctionDecl *functionDecl) {
     return sourceName(functionDecl->name());
 }

@@ -14,6 +14,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <AST/Decls/TemplateFunctionDecl.hpp>
+#include <AST/Decls/StructDecl.hpp>
 #include "NameMangler.hpp"
 
 using namespace gulc;
@@ -41,6 +42,11 @@ void NameMangler::processDecl(Decl *decl) {
         case Decl::Kind::Namespace: {
             auto namespaceDecl = llvm::dyn_cast<NamespaceDecl>(decl);
             _manglerBase->mangle(namespaceDecl);
+            break;
+        }
+        case Decl::Kind::Struct: {
+            auto structDecl = llvm::dyn_cast<StructDecl>(decl);
+            _manglerBase->mangle(structDecl);
             break;
         }
         case Decl::Kind::TemplateFunction: {

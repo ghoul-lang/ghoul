@@ -50,19 +50,21 @@
 #include <AST/Exprs/RefEnumConstantExpr.hpp>
 #include <AST/Decls/NamespaceDecl.hpp>
 #include <AST/Decls/TemplateFunctionDecl.hpp>
+#include <AST/Decls/StructDecl.hpp>
+#include <AST/Exprs/RefStructMemberVariableExpr.hpp>
 #include "Module.hpp"
 
 namespace gulc {
     class CodeGen {
     public:
         CodeGen()
-                : currentFileAst(nullptr), currentNamespace(nullptr), llvmContext(nullptr), irBuilder(nullptr),
-                  module(nullptr), funcPass(nullptr),
+                : currentFileAst(nullptr), currentStruct(nullptr), currentNamespace(nullptr), llvmContext(nullptr),
+                  irBuilder(nullptr), module(nullptr), funcPass(nullptr),
                   loopNameNumber(0),
                   currentFunction(nullptr), currentFunctionParameters(), entryBlockBuilder(nullptr),
                   currentFunctionLabels(), currentFunctionLocalVariablesCount(0),  currentFunctionLocalVariables(),
                   currentLoopBlockContinue(nullptr), currentLoopBlockBreak(nullptr),
-                  nestedLoopCount(0), nestedLoopContinues(), nestedLoopBreaks() {}
+                  nestedLoopCount(0), nestedLoopContinues(), nestedLoopBreaks(), llvmStructTypes() {}
 
         gulc::Module generate(FileAST* file);
 
@@ -85,6 +87,7 @@ namespace gulc {
         llvm::Function* generateFunctionDecl(const FunctionDecl* functionDecl, bool isInternal);
         llvm::GlobalVariable* generateGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl, bool isInternal);
         void generateNamespace(const NamespaceDecl* namespaceDecl);
+        void generateStructDecl(const StructDecl* structDecl, bool isInternal);
         void generateTemplateFunctionDecl(const TemplateFunctionDecl* templateFunctionDecl, bool isInternal);
 
         // Stmts
@@ -120,6 +123,7 @@ namespace gulc {
         llvm::Value* generateRefLocalVariableExpr(const RefLocalVariableExpr* refLocalVariableExpr);
         llvm::Value* generateRefParameterExpr(const RefParameterExpr* refParameterExpr);
         llvm::Value* generateRefGlobalVariableExpr(const RefGlobalVariableExpr* refGlobalFileVariableExpr);
+        llvm::Value* generateRefStructMemberVariableExpr(const RefStructMemberVariableExpr* refStructMemberVariableExpr);
 
         llvm::Function* generateRefFunctionExpr(const Expr* expr, std::string* nameOut);
 
@@ -128,6 +132,7 @@ namespace gulc {
         // Context info
         FileAST* currentFileAst;
         const NamespaceDecl* currentNamespace;
+        const StructDecl* currentStruct;
         llvm::LLVMContext* llvmContext;
         llvm::IRBuilder<>* irBuilder;
         llvm::Module* module;
@@ -147,6 +152,8 @@ namespace gulc {
         unsigned int nestedLoopCount;
         std::vector<llvm::BasicBlock*> nestedLoopContinues;
         std::vector<llvm::BasicBlock*> nestedLoopBreaks;
+
+        std::map<const StructDecl*, llvm::StructType*> llvmStructTypes;
 
         bool currentFunctionLabelsContains(const std::string& labelName) {
             return currentFunctionLabels.find(labelName) != currentFunctionLabels.end();
@@ -243,6 +250,21 @@ namespace gulc {
             }
 
             return nullptr;
+        }
+
+        llvm::StructType* getLlvmStructType(const StructDecl* structDecl) {
+            if (llvmStructTypes.find(structDecl) != llvmStructTypes.end()) {
+                return llvmStructTypes[structDecl];
+            } else {
+                std::vector<llvm::Type*> elements;
+
+                for (GlobalVariableDecl* dataMember : structDecl->dataMembers) {
+                    elements.push_back(generateLlvmType(dataMember->type));
+                }
+
+                // TODO: Support `[packed]` attribute...
+                return llvm::StructType::create(*llvmContext, elements, structDecl->name(), false);
+            }
         }
 
     };

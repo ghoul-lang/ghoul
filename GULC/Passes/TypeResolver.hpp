@@ -17,6 +17,7 @@
 #define GULC_TYPERESOLVER_HPP
 
 #include <AST/FileAST.hpp>
+#include <AST/Types/UnresolvedType.hpp>
 #include <AST/Decls/EnumDecl.hpp>
 #include <AST/Decls/FunctionDecl.hpp>
 #include <AST/Decls/GlobalVariableDecl.hpp>
@@ -47,6 +48,7 @@
 #include <AST/Exprs/TernaryExpr.hpp>
 #include <AST/Decls/NamespaceDecl.hpp>
 #include <AST/Decls/TemplateFunctionDecl.hpp>
+#include <AST/Decls/StructDecl.hpp>
 
 namespace gulc {
     /**
@@ -67,6 +69,7 @@ namespace gulc {
         void printWarning(const std::string& message, TextPosition startPosition, TextPosition endPosition);
         void printDebugWarning(const std::string& message);
 
+        bool declResolvesToType(Decl* decl, UnresolvedType* unresolvedType, Type** resolvedType);
         bool resolveType(Type*& type);
 
         void processImports(std::vector<Import*>* imports);
@@ -81,6 +84,7 @@ namespace gulc {
         void processFunctionDecl(FunctionDecl* functionDecl);
         void processGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
         void processNamespaceDecl(NamespaceDecl* namespaceDecl);
+        void processStructDecl(StructDecl* structDecl);
         void processTemplateFunctionDecl(TemplateFunctionDecl* templateFunctionDecl);
 
         void processCaseStmt(CaseStmt* caseStmt);
@@ -125,6 +129,7 @@ namespace gulc {
         std::vector<Import*>* currentImports;
         const std::vector<TemplateParameterDecl*>* functionTemplateParams;
         NamespaceDecl* currentNamespace;
+        StructDecl* currentStruct;
 
     };
 }

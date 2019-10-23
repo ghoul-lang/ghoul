@@ -14,7 +14,6 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <AST/Types/BuiltInType.hpp>
-#include <AST/Types/UnresolvedType.hpp>
 #include <AST/Types/FunctionTemplateTypenameRefType.hpp>
 #include <AST/Types/ReferenceType.hpp>
 #include <AST/Types/ConstType.hpp>
@@ -28,6 +27,7 @@
 #include <AST/Exprs/PotentialExplicitCastExpr.hpp>
 #include <AST/Exprs/RefEnumConstantExpr.hpp>
 #include <AST/Exprs/TempNamespaceRefExpr.hpp>
+#include <AST/Types/StructType.hpp>
 #include "TypeResolver.hpp"
 
 using namespace gulc;
@@ -68,6 +68,37 @@ void TypeResolver::printDebugWarning(const std::string &message) {
 #endif
 }
 
+bool TypeResolver::declResolvesToType(Decl *decl, UnresolvedType* unresolvedType, Type** resolvedType) {
+    // TODO: Take templates into consideration
+    //  `class Example<T> where T : Widget` and `class Example<T> where T : Window` should be supported
+    if (llvm::isa<EnumDecl>(decl)) {
+        auto enumDecl = llvm::dyn_cast<EnumDecl>(decl);
+        Type *baseType;
+
+        if (enumDecl->hasBaseType()) {
+            baseType = enumDecl->baseType->deepCopy();
+        } else {
+            // Default type for enum is uint32
+            baseType = new BuiltInType(unresolvedType->startPosition(), unresolvedType->endPosition(), "uint32");
+        }
+
+        *resolvedType = new EnumType(unresolvedType->startPosition(), unresolvedType->endPosition(), enumDecl->name(),
+                                     baseType, enumDecl, decl->parentNamespace);
+
+        return true;
+    } else if (llvm::isa<StructDecl>(decl)) {
+        auto structDecl = llvm::dyn_cast<StructDecl>(decl);
+        // TODO: Support base type
+
+        *resolvedType = new StructType(unresolvedType->startPosition(), unresolvedType->endPosition(),
+                                       structDecl->name(), structDecl);
+
+        return true;
+    }
+
+    return false;
+}
+
 bool TypeResolver::resolveType(Type *&type) {
     if (type->getTypeKind() == Type::Kind::Unresolved) {
         // TODO: Take 'namespacePath' into consideration
@@ -102,24 +133,12 @@ bool TypeResolver::resolveType(Type *&type) {
 
 
                     for (Decl* checkDecl : checkNamespace->nestedDecls()) {
-                        // TODO: We should abstract this out...
                         if (checkDecl->name() == unresolvedType->name()) {
-                            if (llvm::isa<EnumDecl>(checkDecl)) {
-                                auto enumDecl = llvm::dyn_cast<EnumDecl>(checkDecl);
-                                Type *baseType;
+                            Type* potentialResolvedType = nullptr;
 
-                                if (enumDecl->hasBaseType()) {
-                                    baseType = enumDecl->baseType->deepCopy();
-                                } else {
-                                    // Default type for enum is uint32
-                                    baseType = new BuiltInType(type->startPosition(), type->endPosition(), "uint32");
-                                }
-
-                                Type *oldType = type;
-                                type = new EnumType(oldType->startPosition(), oldType->endPosition(), enumDecl->name(),
-                                                    baseType, enumDecl, checkNamespace);
-
-                                delete oldType;
+                            if (declResolvesToType(checkDecl, unresolvedType, &potentialResolvedType)) {
+                                delete type;
+                                type = potentialResolvedType;
                                 return true;
                             }
                         }
@@ -161,24 +180,11 @@ bool TypeResolver::resolveType(Type *&type) {
             // Check the file decls...
             for (Decl *checkDecl : currentFileAst->topLevelDecls()) {
                 if (checkDecl->name() == unresolvedType->name()) {
-                    // TODO: Take templates into consideration
-                    //  `class Example<T> where T : Widget` and `class Example<T> where T : Window` should be supported
-                    if (llvm::isa<EnumDecl>(checkDecl)) {
-                        auto enumDecl = llvm::dyn_cast<EnumDecl>(checkDecl);
-                        Type *baseType;
+                    Type* potentialResolvedType = nullptr;
 
-                        if (enumDecl->hasBaseType()) {
-                            baseType = enumDecl->baseType->deepCopy();
-                        } else {
-                            // Default type for enum is uint32
-                            baseType = new BuiltInType(type->startPosition(), type->endPosition(), "uint32");
-                        }
-
-                        Type *oldType = type;
-                        type = new EnumType(oldType->startPosition(), oldType->endPosition(), enumDecl->name(),
-                                            baseType, enumDecl);
-
-                        delete oldType;
+                    if (declResolvesToType(checkDecl, unresolvedType, &potentialResolvedType)) {
+                        delete type;
+                        type = potentialResolvedType;
                         return true;
                     }
                 }
@@ -314,6 +320,9 @@ void TypeResolver::processDecl(Decl *decl) {
             break;
         case Decl::Kind::Namespace:
             processNamespaceDecl(llvm::dyn_cast<NamespaceDecl>(decl));
+            break;
+        case Decl::Kind::Struct:
+            processStructDecl(llvm::dyn_cast<StructDecl>(decl));
             break;
         case Decl::Kind::TemplateFunction:
             processTemplateFunctionDecl(llvm::dyn_cast<TemplateFunctionDecl>(decl));
@@ -538,6 +547,23 @@ void TypeResolver::processNamespaceDecl(NamespaceDecl *namespaceDecl) {
     currentNamespace = oldNamespace;
 }
 
+void TypeResolver::processStructDecl(StructDecl *structDecl) {
+    StructDecl* oldStruct = currentStruct;
+    currentStruct = structDecl;
+
+    // TODO: Process base type
+    for (Decl* decl : structDecl->members) {
+        // The variable pointers are stored into their own vector so we know the offsets of each variable within the struct
+        if (llvm::isa<GlobalVariableDecl>(decl)) {
+            structDecl->dataMembers.push_back(llvm::dyn_cast<GlobalVariableDecl>(decl));
+        }
+
+        processDecl(decl);
+    }
+
+    currentStruct = oldStruct;
+}
+
 void TypeResolver::processTemplateFunctionDecl(TemplateFunctionDecl *templateFunctionDecl) {
     if (templateFunctionDecl->hasTemplateParameters()) {
         bool shouldHaveDefaultArgument = false;
@@ -730,6 +756,21 @@ Expr* TypeResolver::processIdentifierExprForDecl(Decl* decl, Expr*& expr) {
 
             Type *resolvedType = new EnumType(expr->startPosition(), expr->endPosition(), identifierExpr->name(),
                                               enumDecl->baseType->deepCopy(), enumDecl);
+
+            auto result = new ResolvedTypeRefExpr(expr->startPosition(), expr->endPosition(), resolvedType);
+            result->resultType = resolvedType->deepCopy();
+            return result;
+        } else if (llvm::isa<StructDecl>(decl)) {
+            auto structDecl = llvm::dyn_cast<StructDecl>(decl);
+
+            // TODO: We need to support template structs
+            if (identifierExpr->hasTemplateArguments()) {
+                printError("struct types currently cannot be templated!",
+                           identifierExpr->startPosition(), identifierExpr->endPosition());
+            }
+
+            Type* resolvedType = new StructType(expr->startPosition(), expr->endPosition(), identifierExpr->name(),
+                                                structDecl);
 
             auto result = new ResolvedTypeRefExpr(expr->startPosition(), expr->endPosition(), resolvedType);
             result->resultType = resolvedType->deepCopy();

@@ -50,14 +50,16 @@
 #include <AST/Decls/GlobalVariableDecl.hpp>
 #include <AST/Decls/NamespaceDecl.hpp>
 #include <AST/Decls/TemplateFunctionDecl.hpp>
+#include <AST/Decls/StructDecl.hpp>
 
 namespace gulc {
     class CodeVerifier {
     public:
         CodeVerifier()
-                : currentFileAst(nullptr), currentNamespace(nullptr), currentFunctionReturnType(nullptr),
-                  currentFunctionTemplateParameters(nullptr), currentFunctionParameters(nullptr),
-                  currentFunctionLocalVariablesCount(0), currentFunctionLocalVariables() {}
+                : currentFileAst(nullptr), currentNamespace(nullptr), currentStruct(nullptr),
+                  currentFunctionReturnType(nullptr), currentFunctionTemplateParameters(nullptr),
+                  currentFunctionParameters(nullptr), currentFunctionLocalVariablesCount(0),
+                  currentFunctionLocalVariables() {}
 
         void verifyFile(FileAST* fileAst);
 
@@ -82,6 +84,7 @@ namespace gulc {
         void verifyFunctionDecl(FunctionDecl* functionDecl);
         void verifyGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
         void verifyNamespaceDecl(NamespaceDecl* namespaceDecl);
+        void verifyStructDecl(StructDecl* structDecl);
         void verifyTemplateFunctionDecl(TemplateFunctionDecl* templateFunctionDecl);
 
         // Stmts
@@ -127,6 +130,7 @@ namespace gulc {
         // Context
         FileAST* currentFileAst;
         NamespaceDecl* currentNamespace;
+        StructDecl* currentStruct;
         Type* currentFunctionReturnType;
         std::vector<TemplateParameterDecl*>* currentFunctionTemplateParameters;
         std::vector<ParameterDecl*>* currentFunctionParameters;

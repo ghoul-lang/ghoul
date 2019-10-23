@@ -58,6 +58,7 @@
 #include <AST/Decls/EnumDecl.hpp>
 #include <AST/Decls/NamespaceDecl.hpp>
 #include <AST/Decls/TemplateFunctionDecl.hpp>
+#include <AST/Decls/StructDecl.hpp>
 
 namespace gulc {
     // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
@@ -66,10 +67,10 @@ namespace gulc {
 
     public:
         DeclResolver()
-                : currentFileAst(nullptr), currentImports(nullptr), currentNamespace(nullptr), returnType(nullptr),
-                  functionTemplateParams(nullptr), functionTemplateArgs(nullptr), functionParams(nullptr),
-                  exprIsFunctionCall(false), functionCallArgs(nullptr), labelNames(), functionLocalVariablesCount(0),
-                  functionLocalVariables() {}
+                : currentFileAst(nullptr), currentImports(nullptr), currentNamespace(nullptr), currentStruct(nullptr),
+                  returnType(nullptr), functionTemplateParams(nullptr), functionTemplateArgs(nullptr),
+                  functionParams(nullptr), exprIsFunctionCall(false), functionCallArgs(nullptr), labelNames(),
+                  functionLocalVariablesCount(0), functionLocalVariables() {}
 
         void processFile(std::vector<FileAST*>& files);
 
@@ -106,6 +107,7 @@ namespace gulc {
         void processFunctionDecl(FunctionDecl* functionDecl);
         void processGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
         void processNamespaceDecl(NamespaceDecl* namespaceDecl);
+        void processStructDecl(StructDecl* structDecl);
         void processTemplateFunctionDecl(TemplateFunctionDecl* templateFunctionDecl);
         void processTemplateFunctionDeclImplementation(TemplateFunctionDecl* templateFunctionDecl,
                                                        std::vector<Expr*>& templateArgs,
@@ -162,6 +164,7 @@ namespace gulc {
         FileAST* currentFileAst;
         std::vector<Import*>* currentImports;
         NamespaceDecl* currentNamespace;
+        StructDecl* currentStruct;
         Type* returnType;
         const std::vector<TemplateParameterDecl*>* functionTemplateParams;
         const std::vector<Expr*>* functionTemplateArgs;

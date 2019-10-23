@@ -30,6 +30,9 @@
 #include <AST/TypeComparer.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
 #include <AST/Types/FunctionTemplateTypenameRefType.hpp>
+#include <AST/Types/StructType.hpp>
+#include <AST/Exprs/RefStructMemberVariableExpr.hpp>
+#include <AST/Exprs/RefStructMemberFunctionExpr.hpp>
 #include "DeclResolver.hpp"
 #include "TypeResolver.hpp"
 
@@ -94,6 +97,9 @@ void DeclResolver::processDecl(Decl *decl) {
             break;
         case Decl::Kind::Namespace:
             processNamespaceDecl(llvm::dyn_cast<NamespaceDecl>(decl));
+            break;
+        case Decl::Kind::Struct:
+            processStructDecl(llvm::dyn_cast<StructDecl>(decl));
             break;
         case Decl::Kind::TemplateFunction:
             processTemplateFunctionDecl(llvm::dyn_cast<TemplateFunctionDecl>(decl));
@@ -336,6 +342,17 @@ void DeclResolver::processNamespaceDecl(NamespaceDecl *namespaceDecl) {
     }
 
     currentNamespace = oldNamespace;
+}
+
+void DeclResolver::processStructDecl(StructDecl *structDecl) {
+    StructDecl* oldStruct = currentStruct;
+    currentStruct = structDecl;
+
+    for (Decl* decl : structDecl->members) {
+        processDecl(decl);
+    }
+
+    currentStruct = oldStruct;
 }
 
 void DeclResolver::processTemplateFunctionDecl(TemplateFunctionDecl *templateFunctionDecl) {
@@ -1508,6 +1525,8 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
         }
     }
 
+    bool hasTemplateArgs = memberAccessCallExpr->member->hasTemplateArguments();
+
     // TODO: Support operator overloading the `.` and `->` operators
     // TODO: `public override T operator.() => return this.whatever_T_is;` this can ONLY be supported when the implementing class/struct has NO public facing functions
     // TODO: MemberAccessCallExpr can ALSO be a namespace path to a type. We will need to take this into account at some point.
@@ -1515,8 +1534,6 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
 //    processIdentifierExpr(memberAccessCallExpr->member);
     if (llvm::isa<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef)) {
         auto namespaceRef = llvm::dyn_cast<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef);
-
-        bool hasTemplateArgs = memberAccessCallExpr->member->hasTemplateArguments();
 
         FunctionDecl* foundFunction = nullptr;
         bool isExactMatch = false;
@@ -1597,17 +1614,106 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
 
             return;
         }
-    }
-
-    if (llvm::isa<IdentifierExpr>(memberAccessCallExpr->objectRef)) {
-        auto missingIdentifier = llvm::dyn_cast<IdentifierExpr>(memberAccessCallExpr->objectRef);
-
-        printError("identifier '" + missingIdentifier->name() + "' was not found!",
-                   missingIdentifier->startPosition(), missingIdentifier->endPosition());
     } else {
-        printError("unknown expression in member access call!",
-                   memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+        processExpr(memberAccessCallExpr->objectRef);
+
+        if (memberAccessCallExpr->objectRef->resultType != nullptr) {
+            // TODO: We need to support extensions that add member functions to ANY type...
+            if (llvm::isa<StructType>(memberAccessCallExpr->objectRef->resultType)) {
+                auto structType = llvm::dyn_cast<StructType>(memberAccessCallExpr->objectRef->resultType);
+
+                FunctionDecl* foundFunction = nullptr;
+                bool isExactMatch = false;
+                bool isAmbiguous = false;
+
+                for (Decl* checkDecl : structType->decl()->members) {
+                    if (checkDecl->name() == memberAccessCallExpr->member->name()) {
+                        // TODO: Needs to be changed to `MemberVariableDecl`
+                        if (llvm::isa<GlobalVariableDecl>(checkDecl)) {
+                            auto memberVariable = llvm::dyn_cast<GlobalVariableDecl>(checkDecl);
+
+                            auto refStructVariable = new RefStructMemberVariableExpr(memberAccessCallExpr->startPosition(),
+                                                                                     memberAccessCallExpr->endPosition(),
+                                                                                     memberAccessCallExpr->objectRef,
+                                                                                     structType, memberVariable);
+                            refStructVariable->resultType = memberVariable->type->deepCopy();
+                            // A global variable reference is an lvalue.
+                            refStructVariable->resultType->setIsLValue(true);
+
+                            // We steal the object reference
+                            memberAccessCallExpr->objectRef = nullptr;
+                            delete memberAccessCallExpr;
+
+                            expr = refStructVariable;
+
+                            return;
+                        } else if (llvm::isa<FunctionDecl>(checkDecl)) {
+                            auto function = llvm::dyn_cast<FunctionDecl>(checkDecl);
+
+                            if (!checkFunctionMatchesCall(foundFunction, function, &isExactMatch, &isAmbiguous)) {
+                                printError("struct function call is ambiguous!",
+                                           memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+                            }
+                        } else if (llvm::isa<TemplateFunctionDecl>(checkDecl)) {
+                            // TODO: We should support implicit template typing (i.e. `int test<T>(T p);` calling `test(12);` == `test<int>(12);`
+                            if (!hasTemplateArgs) continue;
+
+                            auto templateFunctionDecl = llvm::dyn_cast<TemplateFunctionDecl>(checkDecl);
+
+                            if (templateFunctionDecl->name() == memberAccessCallExpr->member->name()) {
+                                if (!checkTemplateFunctionMatchesCall(foundFunction, templateFunctionDecl, &isExactMatch, &isAmbiguous, memberAccessCallExpr->member->templateArguments)) {
+                                    printError("struct function call is ambiguous!",
+                                               memberAccessCallExpr->member->startPosition(), memberAccessCallExpr->member->endPosition());
+                                }
+                            }
+                        } else {
+                            printError("unknown struct member access call!",
+                                       memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+                            return;
+                        }
+                    }
+                }
+
+                if (foundFunction) {
+                    if (isAmbiguous) {
+                        printError("struct function call is ambiguous!",
+                                   memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+                    }
+
+                    Type* resultTypeCopy = foundFunction->resultType->deepCopy();
+                    std::vector<Type*> paramTypeCopy{};
+
+                    for (const ParameterDecl* param : foundFunction->parameters) {
+                        paramTypeCopy.push_back(param->type->deepCopy());
+                    }
+
+                    // TODO: the template arguments need to be processed
+                    auto refStructFunction = new RefStructMemberFunctionExpr(memberAccessCallExpr->startPosition(),
+                                                                             memberAccessCallExpr->endPosition(),
+                                                                             memberAccessCallExpr->objectRef,
+                                                                             structType,
+                                                                             foundFunction);
+                    // TODO: We should probably replace this with a `MemberFunctionPointerType` or something so the `this` parameter is apart of the type...
+                    refStructFunction->resultType = new FunctionPointerType({}, {}, resultTypeCopy, paramTypeCopy);
+
+                    // We steal the object reference
+                    memberAccessCallExpr->objectRef = nullptr;
+                    delete expr;
+
+                    expr = refStructFunction;
+
+                    return;
+                }
+            } else {
+                printError("type '" + memberAccessCallExpr->objectRef->resultType->getString() + "' not supported in member access call!",
+                           memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+            }
+        }
     }
+
+    // If we reach this point, something went wrong.
+    printError("unknown expression in member access call!",
+               memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
 }
 
 void DeclResolver::processParenExpr(ParenExpr *parenExpr) {

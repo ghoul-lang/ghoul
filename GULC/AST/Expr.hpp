@@ -62,6 +62,8 @@ namespace gulc {
             RefFunction,
             RefGlobalVariable,
             RefEnumConstant,
+            RefStructMemberVariable,
+            RefStructMemberFunction,
 
             TempNamespaceRef
         };

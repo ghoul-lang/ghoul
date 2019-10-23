@@ -47,6 +47,7 @@
 #include <AST/Decls/EnumDecl.hpp>
 #include <AST/Decls/NamespaceDecl.hpp>
 #include <AST/Decls/TemplateFunctionDecl.hpp>
+#include <AST/Decls/StructDecl.hpp>
 #include "Parser.hpp"
 
 using namespace gulc;
@@ -317,10 +318,41 @@ qualifierFound:
             // TODO:
             printError("classes not yet supported!", startPosition, endPosition);
             return nullptr;
-        case TokenType::STRUCT:
-            // TODO:
-            printError("structs not yet supported!", startPosition, endPosition);
-            return nullptr;
+        case TokenType::STRUCT: {
+            _lexer.consumeType(TokenType::STRUCT);
+
+            std::string name = _lexer.peekToken().currentSymbol;
+
+            if (!_lexer.consumeType(TokenType::SYMBOL)) {
+                printError("expected struct name after `struct` keyword, found '" + name + "'!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            // TODO: Parse base type
+
+            if (!_lexer.consumeType(TokenType::LCURLY)) {
+                printError("expected opening '{' for struct, found '" + _lexer.peekToken().currentSymbol + "'!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            std::vector<Decl*> members{};
+
+            while (_lexer.peekType() != TokenType::RCURLY && _lexer.peekType() != TokenType::ENDOFFILE) {
+                members.push_back(parseTopLevelDecl());
+            }
+
+            endPosition = _lexer.peekToken().endPosition;
+
+            if (!_lexer.consumeType(TokenType::RCURLY)) {
+                printError("expected closing '}' for struct, found '" + _lexer.peekToken().currentSymbol + "'!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            return new StructDecl(name, _filePath, startPosition, endPosition, std::move(members));
+        }
         case TokenType::UNION:
             // TODO:
             printError("unions not yet supported!", startPosition, endPosition);
