@@ -18,6 +18,8 @@
 
 #include <AST/Stmt.hpp>
 #include <string>
+#include <vector>
+#include <AST/Expr.hpp>
 
 namespace gulc {
     class ContinueStmt : public Stmt {
@@ -31,7 +33,23 @@ namespace gulc {
         std::string label() const { return _label; }
 
         Stmt* deepCopy() const override {
-            return new ContinueStmt(startPosition(), endPosition(), _label);
+            std::vector<Expr*> copiedPreContinueCleanup;
+
+            for (Expr* preContinueCleanupExpr : preContinueCleanup) {
+                copiedPreContinueCleanup.push_back(preContinueCleanupExpr->deepCopy());
+            }
+
+            auto result = new ContinueStmt(startPosition(), endPosition(), _label);
+            result->preContinueCleanup = std::move(copiedPreContinueCleanup);
+            return result;
+        }
+
+        std::vector<Expr*> preContinueCleanup;
+
+        ~ContinueStmt() override {
+            for (Expr* preContinueCleanupExpr : preContinueCleanup) {
+                delete preContinueCleanupExpr;
+            }
         }
 
     private:

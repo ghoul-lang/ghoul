@@ -356,7 +356,7 @@ void ASTPrinter::printContinueStmt(const ContinueStmt *continueStmt, const std::
 }
 
 void ASTPrinter::printGotoStmt(const GotoStmt *gotoStmt, const std::string &prefix) {
-    std::cout << prefix << "| GotoStmt (name: " << gotoStmt->label() << ")" << std::endl;
+    std::cout << prefix << "| GotoStmt (name: " << gotoStmt->label << ")" << std::endl;
 }
 
 void ASTPrinter::printTryStmt(const TryStmt *tryStmt, const std::string &prefix) {

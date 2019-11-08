@@ -22,6 +22,7 @@
 
 namespace gulc {
     class NamespaceDecl;
+    class StructDecl;
 
     class Decl {
     public:
@@ -45,7 +46,10 @@ namespace gulc {
 
             Struct,
             Class,
-            Interface
+            Interface,
+
+            Constructor,
+            Destructor
         };
 
         Kind getDeclKind() const { return _kind; }
@@ -62,6 +66,7 @@ namespace gulc {
         virtual ~Decl() = default;
 
         NamespaceDecl* parentNamespace;
+        StructDecl* parentStruct;
 
     protected:
         Decl(Kind kind, std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition)

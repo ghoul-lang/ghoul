@@ -37,6 +37,9 @@ namespace gulc {
                               loopStmt->deepCopy());
         }
 
+        // This is used by the passes to store the number of local variables that exist before the while loop
+        unsigned int currentNumLocalVariables;
+
         ~DoStmt() override {
             delete condition;
             delete loopStmt;

@@ -18,6 +18,8 @@
 
 #include <AST/Stmt.hpp>
 #include <string>
+#include <vector>
+#include <AST/Expr.hpp>
 
 namespace gulc {
     class BreakStmt : public Stmt {
@@ -31,7 +33,23 @@ namespace gulc {
         std::string label() const { return _label; }
 
         Stmt* deepCopy() const override {
-            return new BreakStmt(startPosition(), endPosition(), _label);
+            std::vector<Expr*> copiedPreBreakCleanup;
+
+            for (Expr* preBreakCleanupExpr : preBreakCleanup) {
+                copiedPreBreakCleanup.push_back(preBreakCleanupExpr->deepCopy());
+            }
+
+            auto result = new BreakStmt(startPosition(), endPosition(), _label);
+            result->preBreakCleanup = std::move(copiedPreBreakCleanup);
+            return result;
+        }
+
+        std::vector<Expr*> preBreakCleanup;
+
+        ~BreakStmt() override {
+            for (Expr* preBreakCleanupExpr : preBreakCleanup) {
+                delete preBreakCleanupExpr;
+            }
         }
 
     private:

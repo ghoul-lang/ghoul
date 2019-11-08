@@ -190,10 +190,13 @@ namespace gulc {
                 copiedParameters.push_back(static_cast<ParameterDecl*>(parameter->deepCopy()));
             }
 
-            return new FunctionDecl(name(), sourceFile(),
-                                    startPosition(), endPosition(),
-                                    resultType->deepCopy(),
-                                    std::move(copiedParameters), static_cast<CompoundStmt*>(_body->deepCopy()));
+            auto result = new FunctionDecl(name(), sourceFile(),
+                                           startPosition(), endPosition(),
+                                           resultType->deepCopy(),
+                                           std::move(copiedParameters), static_cast<CompoundStmt*>(_body->deepCopy()));
+            result->parentNamespace = parentNamespace;
+            result->parentStruct = parentStruct;
+            return result;
         }
 
         ~TemplateFunctionDecl() override {

@@ -5,18 +5,47 @@ struct TestStruct
     int hm2;
     float hm;
 
+    TestStruct()
+    {
+        this.hm2 = 90;
+        this.hm = 0;
+    }
+
+    TestStruct(int hm2, float hm)
+    {
+        this.hm2 = hm2;
+        this.hm = hm;
+    }
+
     int memberFunctionTest(int param1)
     {
-        return param1 + 3;
+        return param1 + 20;
+    }
+
+    ~TestStruct()
+    {
+        hm2 = 0;
+        hm = 0;
     }
 }
 
-TestStruct idgaf;
-
 int main()
 {
-    TestStruct t;
+    int i = 40;
 
-    //return t.memberFunctionTest(12);
-    return 0;
+    for (TestStruct t(i, 0); i < 54; ++i)
+    {
+        TestStruct hmm(69, 1);
+
+        if (i == 52)
+        {
+            i = 12;
+            goto testLabel;
+        }
+    }
+
+    testLabel:
+    int j = 12;
+
+    return i;
 }

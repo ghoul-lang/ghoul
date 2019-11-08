@@ -60,6 +60,9 @@
 #include <AST/Decls/TemplateFunctionDecl.hpp>
 #include <AST/Decls/StructDecl.hpp>
 
+// TODO: We need to verify a `goto` is legal by checking that no new variables are declared between the goto and the
+//  label we're jumping to
+
 namespace gulc {
     // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
     class DeclResolver {
@@ -68,9 +71,9 @@ namespace gulc {
     public:
         DeclResolver()
                 : currentFileAst(nullptr), currentImports(nullptr), currentNamespace(nullptr), currentStruct(nullptr),
-                  returnType(nullptr), functionTemplateParams(nullptr), functionTemplateArgs(nullptr),
-                  functionParams(nullptr), exprIsFunctionCall(false), functionCallArgs(nullptr), labelNames(),
-                  functionLocalVariablesCount(0), functionLocalVariables() {}
+                  returnType(nullptr), currentFunction(nullptr), functionTemplateParams(nullptr),
+                  functionTemplateArgs(nullptr), functionParams(nullptr), exprIsFunctionCall(false),
+                  functionCallArgs(nullptr), labelNames(), functionLocalVariablesCount(0), functionLocalVariables() {}
 
         void processFile(std::vector<FileAST*>& files);
 
@@ -88,6 +91,9 @@ namespace gulc {
                              const std::vector<TemplateParameterDecl*>& functionCallTemplateParams = {},
                              const std::vector<Expr*>& functionCallTemplateArgs = {});
         bool templateArgsMatchParams(const std::vector<TemplateParameterDecl*>& params, const std::vector<Expr*>& args);
+        template<class T>
+        bool checkConstructorOrFunctionMatchesCall(T*& currentFoundDecl, T* checkDecl, const std::vector<Expr*>* args,
+                                                   bool* isExactMatch, bool* isAmbiguous);
         /// Returns false on error
         bool checkFunctionMatchesCall(FunctionDecl*& currentFoundFunction, FunctionDecl* checkFunction,
                                       bool* isExactMatch, bool* isAmbiguous);
@@ -103,6 +109,8 @@ namespace gulc {
         void processStmt(Stmt*& stmt);
         void processExpr(Expr*& expr);
 
+        void processConstructorDecl(ConstructorDecl* constructorDecl);
+        void processDestructorDecl(DestructorDecl* destructorDecl);
         void processEnumDecl(EnumDecl* enumDecl);
         void processFunctionDecl(FunctionDecl* functionDecl);
         void processGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
@@ -166,6 +174,7 @@ namespace gulc {
         NamespaceDecl* currentNamespace;
         StructDecl* currentStruct;
         Type* returnType;
+        FunctionDecl* currentFunction;
         const std::vector<TemplateParameterDecl*>* functionTemplateParams;
         const std::vector<Expr*>* functionTemplateArgs;
         const std::vector<ParameterDecl*>* functionParams;
@@ -178,11 +187,6 @@ namespace gulc {
         std::vector<LocalVariableDeclExpr*> functionLocalVariables;
 
         void labelResolved(const std::string& labelName) {
-//            if (labelNames.find(labelName) != labelNames.end()) {
-//                labelNames[labelName] = true;
-//            } else {
-//                labelNames.insert({ labelName, true });
-//            }
             labelNames.insert_or_assign(labelName, true);
         }
 

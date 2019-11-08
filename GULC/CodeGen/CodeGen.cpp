@@ -26,6 +26,7 @@
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
+#include "llvm/Transforms/Utils.h"
 
 #include <AST/Types/BuiltInType.hpp>
 #include <AST/Types/PointerType.hpp>
@@ -38,8 +39,8 @@
 #include <AST/Types/EnumType.hpp>
 #include <AST/Decls/EnumDecl.hpp>
 #include <AST/Types/StructType.hpp>
+#include <AST/Exprs/RefStructMemberFunctionExpr.hpp>
 #include "CodeGen.hpp"
-
 
 gulc::Module gulc::CodeGen::generate(gulc::FileAST* file) {
     llvm::LLVMContext* llvmContext = new llvm::LLVMContext();
@@ -129,7 +130,7 @@ llvm::Type *gulc::CodeGen::generateLlvmType(const gulc::Type* type) {
             }
 
             // Signed/unsigned ints...
-            // Thing to not here is that LLVM handles the signedness of a variable by the operation you used, similar to assembly. That is why we don't check if it is signed here.
+            // Thing to note here is that LLVM handles the signedness of a variable by the operation you used, similar to assembly. That is why we don't check if it is signed here.
             switch (builtInType->size()) {
                 case 1:
                     return llvm::Type::getInt8Ty(*llvmContext);
@@ -183,13 +184,13 @@ llvm::Type *gulc::CodeGen::generateLlvmType(const gulc::Type* type) {
     return nullptr;
 }
 
-std::vector<llvm::Type*> gulc::CodeGen::generateParamTypes(const std::vector<ParameterDecl*>& parameters) {
+std::vector<llvm::Type*> gulc::CodeGen::generateParamTypes(const std::vector<ParameterDecl*>& parameters,
+                                                           const StructDecl* parentStruct) {
     std::vector<llvm::Type*> paramTypes{};
     paramTypes.reserve(parameters.size());
 
-    // TODO: We might want to change this. This makes the assumption `generateParamTypes` is only called when generating a function normally
-    if (currentStruct) {
-        paramTypes.push_back(getLlvmStructType(currentStruct));
+    if (parentStruct) {
+        paramTypes.push_back(llvm::PointerType::getUnqual(getLlvmStructType(parentStruct)));
     }
 
     for (const ParameterDecl* parameterDecl : parameters) {
@@ -201,6 +202,12 @@ std::vector<llvm::Type*> gulc::CodeGen::generateParamTypes(const std::vector<Par
 
 void gulc::CodeGen::generateImportExtern(const gulc::Decl *decl) {
     switch (decl->getDeclKind()) {
+        case gulc::Decl::Kind::Constructor:
+            generateExternConstructorDecl(llvm::dyn_cast<ConstructorDecl>(decl));
+            break;
+        case gulc::Decl::Kind::Destructor:
+            generateExternDestructorDecl(llvm::dyn_cast<DestructorDecl>(decl));
+            break;
         case gulc::Decl::Kind::Enum:
             // We don't generate any code for the enum declaration...
             break;
@@ -349,6 +356,8 @@ llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
             return generateRefEnumConstant(llvm::dyn_cast<gulc::RefEnumConstantExpr>(expr));
         case gulc::Expr::Kind::RefStructMemberVariable:
             return generateRefStructMemberVariableExpr(llvm::dyn_cast<gulc::RefStructMemberVariableExpr>(expr));
+        case gulc::Expr::Kind::DestructLocalVariable:
+            return generateDestructLocalVariableExpr(llvm::dyn_cast<gulc::DestructLocalVariableExpr>(expr));
         default:
             printError("unexpected expression type in code generator!",
                        expr->startPosition(), expr->endPosition());
@@ -363,8 +372,25 @@ void gulc::CodeGen::addBlockAndSetInsertionPoint(llvm::BasicBlock* basicBlock) {
 }
 
 // Externs
+void gulc::CodeGen::generateExternConstructorDecl(const gulc::ConstructorDecl *constructorDecl) {
+    std::vector<llvm::Type*> paramTypes = generateParamTypes(constructorDecl->parameters, constructorDecl->parentStruct);
+    // Constructors can ONLY return void, they only modify the `this` reference...
+    llvm::Type* returnType = llvm::Type::getVoidTy(*llvmContext);
+    llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
+    llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::ExternalLinkage, constructorDecl->mangledName(), module);
+}
+
+void gulc::CodeGen::generateExternDestructorDecl(const gulc::DestructorDecl *destructorDecl) {
+    // Destructors DO NOT support parameters except for the single `this` parameter
+    std::vector<llvm::Type*> paramTypes = generateParamTypes({}, destructorDecl->parentStruct);
+    // Constructors can ONLY return void, they only modify the `this` reference...
+    llvm::Type* returnType = llvm::Type::getVoidTy(*llvmContext);
+    llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
+    llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::ExternalLinkage, destructorDecl->mangledName(), module);
+}
+
 void gulc::CodeGen::generateExternFunctionDecl(const FunctionDecl* functionDecl) {
-    std::vector<llvm::Type*> paramTypes = generateParamTypes(functionDecl->parameters);
+    std::vector<llvm::Type*> paramTypes = generateParamTypes(functionDecl->parameters, functionDecl->parentStruct);
     llvm::Type* returnType = generateLlvmType(functionDecl->resultType);
     llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
     llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::ExternalLinkage, functionDecl->mangledName(), module);
@@ -380,8 +406,87 @@ void gulc::CodeGen::generateExternGlobalVariableDecl(const GlobalVariableDecl* g
 }
 
 // Decls
+void gulc::CodeGen::generateConstructorDecl(const gulc::ConstructorDecl *constructorDecl, bool isInternal) {
+    std::vector<llvm::Type*> paramTypes = generateParamTypes(constructorDecl->parameters, constructorDecl->parentStruct);
+    // All constructors return void. We construct the `this` parameter. Memory allocation for the struct is
+    // NOT handled by the constructor
+    llvm::Type* returnType = llvm::Type::getVoidTy(*llvmContext);
+    llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
+    llvm::Function* function = module->getFunction(constructorDecl->mangledName());
+
+    if (!function) {
+        auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
+
+        if (isInternal) {
+            linkageType = llvm::Function::LinkageTypes::InternalLinkage;
+        }
+
+        function = llvm::Function::Create(functionType, linkageType, constructorDecl->mangledName(), module);
+    }
+
+    llvm::BasicBlock* funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", function);
+    irBuilder->SetInsertPoint(funcBody);
+    setCurrentFunction(function);
+
+    // Generate the function body
+    currentFunctionLocalVariablesCount = 0;
+    generateStmt(constructorDecl->body());
+    currentFunctionLocalVariablesCount = 0;
+
+    // TODO: CodeGen shouldn't have to handle this, this should be handled elsewhere (`CodeVerifier` should check that a function returns on all code paths)
+    irBuilder->CreateRetVoid();
+
+    // TODO: We might want to remove this.
+    verifyFunction(*function);
+    funcPass->run(*function);
+
+    // Reset the insertion point (this probably isn't needed but oh well)
+    irBuilder->ClearInsertionPoint();
+    currentFunction = nullptr;
+}
+
+void gulc::CodeGen::generateDestructorDecl(const gulc::DestructorDecl *destructorDecl, bool isInternal) {
+    // Destructors DO NOT support parameters except for the single `this` parameter
+    std::vector<llvm::Type*> paramTypes = generateParamTypes({}, destructorDecl->parentStruct);
+    // All constructors return void. We construct the `this` parameter. Memory allocation for the struct is
+    // NOT handled by the constructor
+    llvm::Type* returnType = llvm::Type::getVoidTy(*llvmContext);
+    llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
+    llvm::Function* function = module->getFunction(destructorDecl->mangledName());
+
+    if (!function) {
+        auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
+
+        if (isInternal) {
+            linkageType = llvm::Function::LinkageTypes::InternalLinkage;
+        }
+
+        function = llvm::Function::Create(functionType, linkageType, destructorDecl->mangledName(), module);
+    }
+
+    llvm::BasicBlock* funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", function);
+    irBuilder->SetInsertPoint(funcBody);
+    setCurrentFunction(function);
+
+    // Generate the function body
+    currentFunctionLocalVariablesCount = 0;
+    generateStmt(destructorDecl->body());
+    currentFunctionLocalVariablesCount = 0;
+
+    // TODO: CodeGen shouldn't have to handle this, this should be handled elsewhere (`CodeVerifier` should check that a function returns on all code paths)
+    irBuilder->CreateRetVoid();
+
+    // TODO: We might want to remove this.
+    verifyFunction(*function);
+    funcPass->run(*function);
+
+    // Reset the insertion point (this probably isn't needed but oh well)
+    irBuilder->ClearInsertionPoint();
+    currentFunction = nullptr;
+}
+
 llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *functionDecl, bool isInternal) {
-    std::vector<llvm::Type*> paramTypes = generateParamTypes(functionDecl->parameters);
+    std::vector<llvm::Type*> paramTypes = generateParamTypes(functionDecl->parameters, functionDecl->parentStruct);
     llvm::Type* returnType = generateLlvmType(functionDecl->resultType);
     llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
     llvm::Function* function = module->getFunction(functionDecl->mangledName());
@@ -468,12 +573,21 @@ void gulc::CodeGen::generateStructDecl(const gulc::StructDecl *structDecl, bool 
     const gulc::StructDecl* oldStruct = currentStruct;
     currentStruct = structDecl;
 
+    for (const ConstructorDecl* constructor : structDecl->constructors) {
+        // TODO: If the constructor is `private` or `internal` then `isInternal` must be set to true even if our `isInternal` is false
+        generateConstructorDecl(constructor, isInternal);
+    }
+
     for (const Decl* decl : structDecl->members) {
         if (llvm::isa<FunctionDecl>(decl)) {
             generateFunctionDecl(llvm::dyn_cast<FunctionDecl>(decl), isInternal);
         } else if (llvm::isa<TemplateFunctionDecl>(decl)) {
             generateTemplateFunctionDecl(llvm::dyn_cast<TemplateFunctionDecl>(decl), isInternal);
         }
+    }
+
+    if (structDecl->destructor != nullptr) {
+        generateDestructorDecl(structDecl->destructor, isInternal);
     }
 
     currentStruct = oldStruct;
@@ -499,11 +613,28 @@ void gulc::CodeGen::generateCompoundStmt(const gulc::CompoundStmt* compoundStmt)
 
 void gulc::CodeGen::generateReturnStmt(const gulc::ReturnStmt *returnStmt) {
     if (returnStmt->hasReturnValue()) {
-        irBuilder->CreateRet(generateExpr(returnStmt->returnValue));
-        return;
+        // TODO: The temporary local variable should be handled in a pass, NOT here
+        //  it will have to handle move semantics there rather than us doing a copy here
+        if (returnStmt->preReturnExprs.empty()) {
+            irBuilder->CreateRet(generateExpr(returnStmt->returnValue));
+        } else {
+            llvm::Value* returnValue = generateExpr(returnStmt->returnValue);
+            //llvm::AllocaInst* tmpReturnValue = irBuilder->CreateAlloca(returnValue->getType(), nullptr, "tmpret");
+            // TODO: Should this actually be volatile?
+            //irBuilder->CreateStore(returnValue, tmpReturnValue, false);
+
+            for (Expr* preReturnExpr : returnStmt->preReturnExprs) {
+                generateExpr(preReturnExpr);
+            }
+
+            irBuilder->CreateRet(returnValue);
+        }
     } else {
+        for (Expr* preReturnExpr : returnStmt->preReturnExprs) {
+            generateExpr(preReturnExpr);
+        }
+
         irBuilder->CreateRetVoid();
-        return;
     }
 }
 
@@ -528,12 +659,16 @@ void gulc::CodeGen::generateLabeledStmt(const gulc::LabeledStmt *labeledStmt) {
 }
 
 void gulc::CodeGen::generateGotoStmt(const gulc::GotoStmt *gotoStmt) {
-    if (currentFunctionLabelsContains(gotoStmt->label())) {
-        irBuilder->CreateBr(currentFunctionLabels[gotoStmt->label()]);
+    for (Expr* cleanupExpr : gotoStmt->preGotoCleanup) {
+        generateExpr(cleanupExpr);
+    }
+
+    if (currentFunctionLabelsContains(gotoStmt->label)) {
+        irBuilder->CreateBr(currentFunctionLabels[gotoStmt->label]);
     } else {
-        llvm::BasicBlock* newBasicBlock = llvm::BasicBlock::Create(*llvmContext, gotoStmt->label());
+        llvm::BasicBlock* newBasicBlock = llvm::BasicBlock::Create(*llvmContext, gotoStmt->label);
         irBuilder->CreateBr(newBasicBlock);
-        addCurrentFunctionLabel(gotoStmt->label(), newBasicBlock);
+        addCurrentFunctionLabel(gotoStmt->label, newBasicBlock);
     }
 }
 
@@ -555,8 +690,14 @@ void gulc::CodeGen::generateIfStmt(const gulc::IfStmt *ifStmt) {
 
     // Set the insert point to our true block then generate the statement for it...
     irBuilder->SetInsertPoint(trueBlock);
-    generateStmt(ifStmt->trueStmt);
-    irBuilder->CreateBr(mergeBlock);
+    if (ifStmt->trueStmt != nullptr) generateStmt(ifStmt->trueStmt);
+
+    // If the last inserted instruction is a branch and we insert a branch after it to the merge block an LLVM pass
+    // will mess up and remove the entire if statement...
+    if (irBuilder->GetInsertBlock()->getTerminator() == nullptr ||
+        !llvm::isa<llvm::BranchInst>(irBuilder->GetInsertBlock()->getTerminator())) {
+        irBuilder->CreateBr(mergeBlock);
+    }
 
     // And then add a jump to the merge block if there is a false statement
     if (ifStmt->hasFalseStmt()) {
@@ -564,8 +705,14 @@ void gulc::CodeGen::generateIfStmt(const gulc::IfStmt *ifStmt) {
         currentFunction->getBasicBlockList().push_back(falseBlock);
         irBuilder->SetInsertPoint(falseBlock);
         generateStmt(ifStmt->falseStmt);
-        // Branch to merge when done...
-        irBuilder->CreateBr(mergeBlock);
+
+        // If the last inserted instruction is a branch and we insert a branch after it to the merge block an LLVM pass
+        // will mess up and remove the entire if statement...
+        if (irBuilder->GetInsertBlock()->getTerminator() == nullptr ||
+            !llvm::isa<llvm::BranchInst>(irBuilder->GetInsertBlock()->getTerminator())) {
+            // Branch to merge when done...
+            irBuilder->CreateBr(mergeBlock);
+        }
     }
 
     // Add the merge block to the function and then set the insert point to it
@@ -609,7 +756,7 @@ void gulc::CodeGen::generateWhileStmt(const gulc::WhileStmt *whileStmt, const st
 
     // Generate the loop statement within the loop block then jump back to the continue block...
     enterNestedLoop(continueLoop, breakLoop);
-    generateStmt(whileStmt->loopStmt);
+    if (whileStmt->loopStmt != nullptr) generateStmt(whileStmt->loopStmt);
     leaveNestedLoop();
     irBuilder->CreateBr(continueLoop);
 
@@ -649,7 +796,7 @@ void gulc::CodeGen::generateDoStmt(const gulc::DoStmt* doStmt, const std::string
 
     // Generate the statement we loop on...
     enterNestedLoop(loopContinue, loopBreak);
-    generateStmt(doStmt->loopStmt);
+    if (doStmt->loopStmt != nullptr) generateStmt(doStmt->loopStmt);
     leaveNestedLoop();
     irBuilder->CreateBr(loopContinue);
 
@@ -692,9 +839,13 @@ void gulc::CodeGen::generateForStmt(const gulc::ForStmt* forStmt, const std::str
     irBuilder->CreateBr(loop);
     irBuilder->SetInsertPoint(loop);
 
-    llvm::Value* cond = generateExpr(forStmt->condition);
-    // If the condition is true we continue the loop, if not we break from the loop...
-    irBuilder->CreateCondBr(cond, hiddenContinueLoop, breakLoop);
+    if (forStmt->condition != nullptr) {
+        llvm::Value *cond = generateExpr(forStmt->condition);
+        // If the condition is true we continue the loop, if not we break from the loop...
+        irBuilder->CreateCondBr(cond, hiddenContinueLoop, breakLoop);
+    } else {
+        irBuilder->CreateBr(hiddenContinueLoop);
+    }
 
     // Set the hidden continue loop as the current insert point
     currentFunction->getBasicBlockList().push_back(hiddenContinueLoop);
@@ -709,7 +860,7 @@ void gulc::CodeGen::generateForStmt(const gulc::ForStmt* forStmt, const std::str
 
     // Generate the statement we loop on
     enterNestedLoop(continueLoop, breakLoop);
-    generateStmt(forStmt->loopStmt);
+    if (forStmt->loopStmt != nullptr) generateStmt(forStmt->loopStmt);
     leaveNestedLoop();
 
     currentLoopBlockContinue = oldLoopContinue;
@@ -721,7 +872,7 @@ void gulc::CodeGen::generateForStmt(const gulc::ForStmt* forStmt, const std::str
     irBuilder->SetInsertPoint(continueLoop);
 
     // Generate the iteration expression (usually `++i`)
-    generateExpr(forStmt->iterationExpr);
+    if (forStmt->iterationExpr != nullptr) generateExpr(forStmt->iterationExpr);
 
     // Branch back to the beginning of our loop...
     irBuilder->CreateBr(loop);
@@ -729,10 +880,18 @@ void gulc::CodeGen::generateForStmt(const gulc::ForStmt* forStmt, const std::str
     // And then finish off by adding the break point.
     currentFunction->getBasicBlockList().push_back(breakLoop);
     irBuilder->SetInsertPoint(breakLoop);
+
+    for (Expr* postLoopCleanupExpr : forStmt->postLoopCleanup) {
+        generateExpr(postLoopCleanupExpr);
+    }
 }
 
 void gulc::CodeGen::generateBreakStmt(const gulc::BreakStmt *breakStmt) {
     if (breakStmt->label().empty()) {
+        for (Expr* cleanupExpr : breakStmt->preBreakCleanup) {
+            generateExpr(cleanupExpr);
+        }
+
         irBuilder->CreateBr(currentLoopBlockBreak);
     } else {
         llvm::BasicBlock* breakBlock = getBreakBlock(breakStmt->label());
@@ -743,12 +902,20 @@ void gulc::CodeGen::generateBreakStmt(const gulc::BreakStmt *breakStmt) {
             return;
         }
 
+        for (Expr* cleanupExpr : breakStmt->preBreakCleanup) {
+            generateExpr(cleanupExpr);
+        }
+
         irBuilder->CreateBr(breakBlock);
     }
 }
 
 void gulc::CodeGen::generateContinueStmt(const gulc::ContinueStmt *continueStmt) {
     if (continueStmt->label().empty()) {
+        for (Expr* cleanupExpr : continueStmt->preContinueCleanup) {
+            generateExpr(cleanupExpr);
+        }
+
         irBuilder->CreateBr(currentLoopBlockContinue);
     } else {
         llvm::BasicBlock* continueBlock = getContinueBlock(continueStmt->label());
@@ -757,6 +924,10 @@ void gulc::CodeGen::generateContinueStmt(const gulc::ContinueStmt *continueStmt)
             printError("[INTERNAL] block '" + continueStmt->label() + "' not found!",
                        continueStmt->startPosition(), continueStmt->endPosition());
             return;
+        }
+
+        for (Expr* cleanupExpr : continueStmt->preContinueCleanup) {
+            generateExpr(cleanupExpr);
         }
 
         irBuilder->CreateBr(continueBlock);
@@ -980,7 +1151,45 @@ llvm::Value *gulc::CodeGen::generateFloatLiteralExpr(const gulc::FloatLiteralExp
 }
 
 llvm::Value *gulc::CodeGen::generateLocalVariableDeclExpr(const gulc::LocalVariableDeclExpr *localVariableDeclExpr) {
-    return addLocalVariable(localVariableDeclExpr->name(), generateLlvmType(localVariableDeclExpr->resultType));
+    llvm::AllocaInst* result = addLocalVariable(localVariableDeclExpr->name(),
+                                                generateLlvmType(localVariableDeclExpr->resultType));
+
+    if (localVariableDeclExpr->hasInitializer()) {
+        // If we have a constructor call...
+        if (localVariableDeclExpr->foundConstructor) {
+            llvm::Function* constructorFunc = module->getFunction(localVariableDeclExpr->foundConstructor->mangledName());
+
+            std::vector<llvm::Value*> llvmArgs{};
+            llvmArgs.reserve(localVariableDeclExpr->initializerArgs.size() + 1);
+            // We pass a reference to the local variable as the first argument of the constructor
+            // the constructor doesn't return anything. It modifies the `this` variable that we pass here
+            llvmArgs.push_back(result);
+
+            // Now add the rest of the initializer args (if there are any...)
+            for (Expr* initializerArg : localVariableDeclExpr->initializerArgs) {
+                llvmArgs.push_back(generateExpr(initializerArg));
+            }
+
+            // Call the constructor...
+            // We don't bother giving the result a name since constructors return void
+            irBuilder->CreateCall(constructorFunc, llvmArgs);
+
+            // Return the local variable reference normally...
+        } else {
+            // If we didn't find a constructor and there isn't exactly 1 argument then something is wrong...
+            if (localVariableDeclExpr->initializerArgs.size() != 1) {
+                printError("[INTERNAL] local variable has missing constructor reference!",
+                           localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
+            }
+
+            llvm::Value* initialValue = generateExpr(localVariableDeclExpr->initializerArgs[0]);
+
+            // Return the assignment...
+            return irBuilder->CreateStore(initialValue, result, false);
+        }
+    }
+
+    return result;
 }
 
 llvm::Value *gulc::CodeGen::generateIdentifierExpr(const gulc::IdentifierExpr *identifierExpr) {
@@ -1006,6 +1215,11 @@ llvm::Value *gulc::CodeGen::generateFunctionCallExpr(const gulc::FunctionCallExp
     llvm::Function* func = generateRefFunctionExpr(functionCallExpr->functionReference, &funcName);
 
     std::vector<llvm::Value*> llvmArgs{};
+
+    if (llvm::isa<RefStructMemberFunctionExpr>(functionCallExpr->functionReference)) {
+        auto refStructMemberVariable = llvm::dyn_cast<RefStructMemberFunctionExpr>(functionCallExpr->functionReference);
+        llvmArgs.push_back(generateExpr(refStructMemberVariable->objectRef));
+    }
 
     if (functionCallExpr->hasArguments()) {
         llvmArgs.reserve(functionCallExpr->arguments.size());
@@ -1196,6 +1410,7 @@ llvm::Value *gulc::CodeGen::generateRefStructMemberVariableExpr(const gulc::RefS
                    refStructMemberVariableExpr->startPosition(), refStructMemberVariableExpr->endPosition());
     }
 
+
     // NOTE: Not exactly sure whats wrong here but we'll just let LLVM handle getting the type...
 //    llvm::StructType* structType = getLlvmStructType(refStructMemberVariableExpr->structType->decl());
 //    llvm::PointerType* structPointerType = llvm::PointerType::getUnqual(structType);
@@ -1209,11 +1424,36 @@ llvm::Function *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr, s
             *nameOut = refFileFunction->function()->name();
             return module->getFunction(refFileFunction->function()->mangledName());
         }
+        case gulc::Expr::Kind::RefStructMemberFunction: {
+            auto refStructMemberFunction = llvm::dyn_cast<RefStructMemberFunctionExpr>(expr);
+            *nameOut = refStructMemberFunction->refFunction->name();
+            // TODO: Will this cause an error if the struct is declared after this? Should we handle structs how we do with namespace calls? Externing them?
+            return module->getFunction(refStructMemberFunction->refFunction->mangledName());
+        }
         default:
             printError("[INTERNAL] unsupported function reference!",
                        expr->startPosition(), expr->endPosition());
             return nullptr;
     }
+}
+
+llvm::Value *gulc::CodeGen::generateDestructLocalVariableExpr(const gulc::DestructLocalVariableExpr *destructLocalVariableExpr) {
+    llvm::AllocaInst* variableRef = getLocalVariableOrNull(destructLocalVariableExpr->localVariable->name());
+
+    llvm::Function* destructorFunc = module->getFunction(destructLocalVariableExpr->destructor->mangledName());
+
+    std::vector<llvm::Value*> llvmArgs{};
+    llvmArgs.reserve(1);
+    // We pass a reference to the local variable as the first argument of the destructor
+    // the destructor doesn't return anything. It modifies the `this` variable that we pass here
+    llvmArgs.push_back(variableRef);
+
+    // Call the destructor...
+    // We don't bother giving the result a name since destructors return void
+    irBuilder->CreateCall(destructorFunc, llvmArgs);
+
+    // We technically just return null...
+    return variableRef;
 }
 
 void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& value) {

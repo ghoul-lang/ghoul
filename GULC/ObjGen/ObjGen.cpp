@@ -87,7 +87,7 @@ gulc::ObjFile gulc::ObjGen::generate(gulc::Module module) {
 
     llvm::legacy::PassManager pass;
 
-    if (objTargetMachine->addPassesToEmitFile(pass, dest, llvm::TargetMachine::CGFT_ObjectFile)) {
+    if (objTargetMachine->addPassesToEmitFile(pass, dest, nullptr, llvm::TargetMachine::CGFT_ObjectFile)) {
         std::cerr << "Target Machine can't emit a file of this type" << std::endl;
         std::exit(1);
     }

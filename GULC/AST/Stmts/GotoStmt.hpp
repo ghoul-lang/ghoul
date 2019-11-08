@@ -18,6 +18,8 @@
 
 #include <AST/Stmt.hpp>
 #include <string>
+#include <AST/Expr.hpp>
+#include <vector>
 
 namespace gulc {
     class GotoStmt : public Stmt {
@@ -26,16 +28,26 @@ namespace gulc {
 
         GotoStmt(TextPosition startPosition, TextPosition endPosition, std::string label)
                 : Stmt(Kind::Goto, startPosition, endPosition),
-                  _label(std::move(label)) {}
+                  label(std::move(label)) {}
 
-        std::string label() const { return _label; }
+        std::string label;
 
         Stmt* deepCopy() const override {
-            return new GotoStmt(startPosition(), endPosition(), _label);
+            std::vector<Expr*> copiedPreGotoCleanup;
+
+            for (Expr* preContinueCleanupExpr : preGotoCleanup) {
+                copiedPreGotoCleanup.push_back(preContinueCleanupExpr->deepCopy());
+            }
+
+            auto result = new GotoStmt(startPosition(), endPosition(), label);
+            result->preGotoCleanup = std::move(copiedPreGotoCleanup);
+            return result;
         }
 
-    private:
-        std::string _label;
+        std::vector<Expr*> preGotoCleanup;
+
+        // This is used by the passes to store the number of local variables that exist in the context of the goto
+        unsigned int currentNumLocalVariables;
 
     };
 }

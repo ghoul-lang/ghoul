@@ -36,6 +36,9 @@ namespace gulc {
                                    labeledStmt->deepCopy());
         }
 
+        // This is used by the passes to store the number of local variables that were declared before the label
+        unsigned int currentNumLocalVariables;
+
         ~LabeledStmt() override {
             delete labeledStmt;
         }

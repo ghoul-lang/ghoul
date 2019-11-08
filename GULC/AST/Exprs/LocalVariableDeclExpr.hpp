@@ -18,6 +18,8 @@
 
 #include <AST/Expr.hpp>
 #include <string>
+#include <vector>
+#include <AST/Decls/ConstructorDecl.hpp>
 
 namespace gulc {
     class LocalVariableDeclExpr : public Expr {
@@ -27,14 +29,27 @@ namespace gulc {
         LocalVariableDeclExpr(TextPosition startPosition, TextPosition endPosition,
                               Expr* type, std::string name)
                 : Expr(Kind::LocalVariableDecl, startPosition, endPosition),
-                  type(type), _name(std::move(name)) {}
+                  type(type), foundConstructor(nullptr), _name(std::move(name)) {}
 
         Expr* type;
         std::string name() const { return _name; }
+        std::vector<Expr*> initializerArgs;
+        bool hasInitializer() const { return !initializerArgs.empty(); }
+
+        // NOTE: We don't own this pointer so we don't free it
+        ConstructorDecl* foundConstructor;
 
         Expr* deepCopy() const override {
+            std::vector<Expr*> copiedInitializerArgs{};
+
+            for (Expr* initializerArg : initializerArgs) {
+                copiedInitializerArgs.push_back(initializerArg->deepCopy());
+            }
+
             auto result = new LocalVariableDeclExpr(startPosition(), endPosition(),
                                                     type->deepCopy(), name());
+            result->initializerArgs = std::move(copiedInitializerArgs);
+            result->foundConstructor = foundConstructor;
             if (resultType) {
                 result->resultType = resultType->deepCopy();
             }
@@ -42,6 +57,10 @@ namespace gulc {
         }
 
         ~LocalVariableDeclExpr() override {
+            for (Expr* initializerArg : initializerArgs) {
+                delete initializerArg;
+            }
+
             delete type;
         }
 

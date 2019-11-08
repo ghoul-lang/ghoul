@@ -52,6 +52,7 @@
 #include <AST/Decls/TemplateFunctionDecl.hpp>
 #include <AST/Decls/StructDecl.hpp>
 #include <AST/Exprs/RefStructMemberVariableExpr.hpp>
+#include <AST/Exprs/DestructLocalVariableExpr.hpp>
 #include "Module.hpp"
 
 namespace gulc {
@@ -80,10 +81,14 @@ namespace gulc {
         void addBlockAndSetInsertionPoint(llvm::BasicBlock* basicBlock);
 
         // Externs
+        void generateExternConstructorDecl(const ConstructorDecl* constructorDecl);
+        void generateExternDestructorDecl(const DestructorDecl* destructorDecl);
         void generateExternFunctionDecl(const FunctionDecl* functionDecl);
         void generateExternGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl);
 
         // Decls
+        void generateConstructorDecl(const ConstructorDecl* constructorDecl, bool isInternal);
+        void generateDestructorDecl(const DestructorDecl* destructorDecl, bool isInternal);
         llvm::Function* generateFunctionDecl(const FunctionDecl* functionDecl, bool isInternal);
         llvm::GlobalVariable* generateGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl, bool isInternal);
         void generateNamespace(const NamespaceDecl* namespaceDecl);
@@ -104,7 +109,8 @@ namespace gulc {
 
         // Types
         llvm::Type* generateLlvmType(const gulc::Type* type);
-        std::vector<llvm::Type*> generateParamTypes(const std::vector<ParameterDecl*>& parameters);
+        std::vector<llvm::Type*> generateParamTypes(const std::vector<ParameterDecl*>& parameters,
+                                                    const StructDecl* parentStruct);
 
         // Exprs
         llvm::Constant* generateConstant(const Expr* expr);
@@ -124,6 +130,7 @@ namespace gulc {
         llvm::Value* generateRefParameterExpr(const RefParameterExpr* refParameterExpr);
         llvm::Value* generateRefGlobalVariableExpr(const RefGlobalVariableExpr* refGlobalFileVariableExpr);
         llvm::Value* generateRefStructMemberVariableExpr(const RefStructMemberVariableExpr* refStructMemberVariableExpr);
+        llvm::Value* generateDestructLocalVariableExpr(const DestructLocalVariableExpr* destructLocalVariableExpr);
 
         llvm::Function* generateRefFunctionExpr(const Expr* expr, std::string* nameOut);
 
@@ -189,7 +196,7 @@ namespace gulc {
         }
 
         llvm::AllocaInst* addLocalVariable(const std::string& varName, llvm::Type* llvmType) {
-            llvm::AllocaInst* allocaInst = this->entryBlockBuilder->CreateAlloca(llvmType, nullptr, varName);
+            llvm::AllocaInst* allocaInst = this->irBuilder->CreateAlloca(llvmType, nullptr, varName);
 
             ++currentFunctionLocalVariablesCount;
 
@@ -263,7 +270,9 @@ namespace gulc {
                 }
 
                 // TODO: Support `[packed]` attribute...
-                return llvm::StructType::create(*llvmContext, elements, structDecl->name(), false);
+                auto result = llvm::StructType::create(*llvmContext, elements, structDecl->name(), false);
+                llvmStructTypes.insert({structDecl, result});
+                return result;
             }
         }
 

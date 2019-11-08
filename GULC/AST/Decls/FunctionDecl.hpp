@@ -20,6 +20,8 @@
 #include <AST/Type.hpp>
 #include <vector>
 #include <AST/Stmts/CompoundStmt.hpp>
+#include <map>
+#include <AST/Stmts/LabeledStmt.hpp>
 #include "ParameterDecl.hpp"
 #include "TemplateParameterDecl.hpp"
 
@@ -65,12 +67,19 @@ namespace gulc {
                 copiedParameters.push_back(static_cast<ParameterDecl*>(parameter->deepCopy()));
             }
 
-            return new FunctionDecl(name(), sourceFile(),
-                                    startPosition(), endPosition(),
-                                    resultType->deepCopy(),
-                                    std::move(copiedParameters), static_cast<CompoundStmt*>(_body->deepCopy()),
-                                    std::move(copiedTemplateArguments));
+            auto result = new FunctionDecl(name(), sourceFile(),
+                                           startPosition(), endPosition(),
+                                           resultType->deepCopy(),
+                                           std::move(copiedParameters), static_cast<CompoundStmt*>(_body->deepCopy()),
+                                           std::move(copiedTemplateArguments));
+            result->parentNamespace = parentNamespace;
+            result->parentStruct = parentStruct;
+            result->labeledStmts = labeledStmts;
+            return result;
         }
+
+        // We DO NOT own this, this is ONLY to store a list of found labels for use in passes
+        std::map<std::string, LabeledStmt*> labeledStmts;
 
         ~FunctionDecl() override {
             for (Expr* templateArgument : templateArguments) {

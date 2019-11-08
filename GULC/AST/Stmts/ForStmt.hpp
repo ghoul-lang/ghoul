@@ -18,6 +18,7 @@
 
 #include <AST/Stmt.hpp>
 #include <AST/Expr.hpp>
+#include <vector>
 
 namespace gulc {
     class ForStmt : public Stmt {
@@ -34,12 +35,28 @@ namespace gulc {
         /// The expression that gets called every loop
         Expr* iterationExpr;
         Stmt* loopStmt;
+        // Expressions for cleaning up the preloop variables
+        std::vector<Expr*> postLoopCleanup;
 
         Stmt* deepCopy() const override {
-            return new ForStmt(startPosition(), endPosition(), preLoop->deepCopy(),
-                               condition->deepCopy(), iterationExpr->deepCopy(),
-                               loopStmt->deepCopy());
+            std::vector<Expr*> copiedPostLoopCleanup{};
+
+            for (Expr* preLoopCleanupExpr : postLoopCleanup) {
+                copiedPostLoopCleanup.push_back(preLoopCleanupExpr->deepCopy());
+            }
+
+            auto result = new ForStmt(startPosition(), endPosition(), preLoop->deepCopy(),
+                                      condition->deepCopy(), iterationExpr->deepCopy(),
+                                      loopStmt->deepCopy());
+
+            result->postLoopCleanup = std::move(copiedPostLoopCleanup);
+
+            return result;
         }
+
+        // This is used by the passes to store the number of local variables that exist in the context of the for loop
+        // This SHOULD contain the number of variables declared in `preLoop`
+        unsigned int currentNumLocalVariables;
 
         ~ForStmt() override {
             delete preLoop;

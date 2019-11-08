@@ -234,6 +234,60 @@ void DeclResolver::processExpr(Expr *&expr) {
 }
 
 // Decls
+void DeclResolver::processConstructorDecl(ConstructorDecl* constructorDecl) {
+    // We back up the old values since we will be
+    auto oldFunctionParams = functionParams;
+    auto oldReturnType = returnType;
+    auto oldFunctionLocalVariablesCount = functionLocalVariablesCount;
+    auto oldFunctionLocalVariables = std::move(functionLocalVariables);
+    auto oldLabelNames = std::move(labelNames);
+
+    if (constructorDecl->hasParameters()) {
+        functionParams = &constructorDecl->parameters;
+    } else {
+        functionParams = nullptr;
+    }
+
+    // TODO: Should we make it `void`?
+    returnType = nullptr;
+
+    // We reset to zero just in case.
+    functionLocalVariablesCount = 0;
+
+    processCompoundStmt(constructorDecl->body());
+
+    labelNames = std::move(oldLabelNames);
+    functionLocalVariablesCount = oldFunctionLocalVariablesCount;
+    functionLocalVariables = std::move(oldFunctionLocalVariables);
+    returnType = oldReturnType;
+    functionParams = oldFunctionParams;
+}
+
+void DeclResolver::processDestructorDecl(DestructorDecl *destructorDecl) {
+    // We back up the old values since we will be
+    auto oldFunctionParams = functionParams;
+    auto oldReturnType = returnType;
+    auto oldFunctionLocalVariablesCount = functionLocalVariablesCount;
+    auto oldFunctionLocalVariables = std::move(functionLocalVariables);
+    auto oldLabelNames = std::move(labelNames);
+
+    functionParams = nullptr;
+
+    // TODO: Should we make it `void`?
+    returnType = nullptr;
+
+    // We reset to zero just in case.
+    functionLocalVariablesCount = 0;
+
+    processCompoundStmt(destructorDecl->body());
+
+    labelNames = std::move(oldLabelNames);
+    functionLocalVariablesCount = oldFunctionLocalVariablesCount;
+    functionLocalVariables = std::move(oldFunctionLocalVariables);
+    returnType = oldReturnType;
+    functionParams = oldFunctionParams;
+}
+
 void DeclResolver::processEnumDecl(EnumDecl *enumDecl) {
     if (enumDecl->hasConstants()) {
         for (EnumConstantDecl* enumConstant : enumDecl->enumConstants()) {
@@ -291,7 +345,11 @@ void DeclResolver::processFunctionDecl(FunctionDecl *functionDecl) {
     // We reset to zero just in case.
     functionLocalVariablesCount = 0;
 
+    currentFunction = functionDecl;
+
     processCompoundStmt(functionDecl->body());
+
+    currentFunction = nullptr;
 
     labelNames = std::move(oldLabelNames);
     functionLocalVariablesCount = oldFunctionLocalVariablesCount;
@@ -348,8 +406,16 @@ void DeclResolver::processStructDecl(StructDecl *structDecl) {
     StructDecl* oldStruct = currentStruct;
     currentStruct = structDecl;
 
+    for (ConstructorDecl* constructor : structDecl->constructors) {
+        processConstructorDecl(constructor);
+    }
+
     for (Decl* decl : structDecl->members) {
         processDecl(decl);
+    }
+
+    if (structDecl->destructor != nullptr) {
+        processDestructorDecl(structDecl->destructor);
     }
 
     currentStruct = oldStruct;
@@ -418,31 +484,42 @@ void DeclResolver::processContinueStmt(ContinueStmt *continueStmt) {
 }
 
 void DeclResolver::processDoStmt(DoStmt *doStmt) {
-    processStmt(doStmt->loopStmt);
+    if (doStmt->loopStmt != nullptr) processStmt(doStmt->loopStmt);
     processExpr(doStmt->condition);
 }
 
 void DeclResolver::processForStmt(ForStmt *forStmt) {
+    // Since preloop can declare variables we have to back up and restore the old variables
+    // That way the `i` from `for (int i;;);` won't be accessible outside of the for loop
+    unsigned int oldLocalVariableCount = functionLocalVariablesCount;
+
     if (forStmt->preLoop != nullptr) processExpr(forStmt->preLoop);
     if (forStmt->condition != nullptr) processExpr(forStmt->condition);
     if (forStmt->iterationExpr != nullptr) processExpr(forStmt->iterationExpr);
 
-    processStmt(forStmt->loopStmt);
+    if (forStmt->loopStmt != nullptr) processStmt(forStmt->loopStmt);
+
+    functionLocalVariablesCount = oldLocalVariableCount;
 }
 
 void DeclResolver::processGotoStmt(GotoStmt *gotoStmt) {
-    if (!gotoStmt->label().empty()) {
-        addUnresolvedLabel(gotoStmt->label());
+    if (!gotoStmt->label.empty()) {
+        addUnresolvedLabel(gotoStmt->label);
     }
 }
 
 void DeclResolver::processIfStmt(IfStmt *ifStmt) {
     processExpr(ifStmt->condition);
-    processStmt(ifStmt->trueStmt);
+    if (ifStmt->trueStmt != nullptr) processStmt(ifStmt->trueStmt);
     if (ifStmt->hasFalseStmt()) processStmt(ifStmt->falseStmt);
 }
 
 void DeclResolver::processLabeledStmt(LabeledStmt *labeledStmt) {
+    // Store the number of local variables that were declared before us
+    labeledStmt->currentNumLocalVariables = functionLocalVariablesCount;
+
+    currentFunction->labeledStmts.insert({labeledStmt->label(), labeledStmt});
+
     processStmt(labeledStmt->labeledStmt);
 
     labelResolved(labeledStmt->label());
@@ -532,7 +609,7 @@ void DeclResolver::processTryFinallyStmt(TryFinallyStmt *tryFinallyStmt) {
 
 void DeclResolver::processWhileStmt(WhileStmt *whileStmt) {
     processExpr(whileStmt->condition);
-    processStmt(whileStmt->loopStmt);
+    if (whileStmt->loopStmt) processStmt(whileStmt->loopStmt);
 }
 
 // Exprs
@@ -1055,8 +1132,8 @@ bool DeclResolver::argsMatchParams(const std::vector<ParameterDecl*> &params, co
     return true;
 }
 
-bool DeclResolver::templateArgsMatchParams(const std::vector<TemplateParameterDecl*> &params,
-                                           const std::vector<Expr*> &args) {
+bool DeclResolver::templateArgsMatchParams(const std::vector<TemplateParameterDecl*>& params,
+                                           const std::vector<Expr*>& args) {
     for (std::size_t i = 0; i < params.size(); ++i) {
         if (i >= args.size()) {
             // If the index is greater than the number of arguments we have then there is only a match if the parameter at the index is optional
@@ -1096,21 +1173,23 @@ bool DeclResolver::templateArgsMatchParams(const std::vector<TemplateParameterDe
     return true;
 }
 
-bool DeclResolver::checkFunctionMatchesCall(FunctionDecl*& currentFoundFunction, FunctionDecl* checkFunction,
-                                            bool* isExactMatch, bool* isAmbiguous) {
+template<class T>
+bool DeclResolver::checkConstructorOrFunctionMatchesCall(T*& currentFoundDecl, T* checkDecl,
+                                                         const std::vector<Expr*>* args,
+                                                         bool* isExactMatch, bool* isAmbiguous) {
     bool checkIsExactMatch = false;
 
     // We check if the args are a match with the function parameters
-    if (argsMatchParams(checkFunction->parameters, functionCallArgs, &checkIsExactMatch)) {
+    if (argsMatchParams(checkDecl->parameters, args, &checkIsExactMatch)) {
         // If the current found function is an exact match and the checked function is exact then there is an ambiguity...
         if (*isExactMatch && checkIsExactMatch) {
             // We have to immediately exit if two functions are exact matches...
             return false;
-        // If neither found function is an exact match then there is an ambiguity...
-        //  BUT this kind of ambiguity can be solved if we find an exact match...
+            // If neither found function is an exact match then there is an ambiguity...
+            //  BUT this kind of ambiguity can be solved if we find an exact match...
         } else if (!(*isExactMatch || checkIsExactMatch)) {
-            if (currentFoundFunction == nullptr) {
-                currentFoundFunction = checkFunction;
+            if (currentFoundDecl == nullptr) {
+                currentFoundDecl = checkDecl;
             } else {
                 *isAmbiguous = true;
             }
@@ -1119,12 +1198,18 @@ bool DeclResolver::checkFunctionMatchesCall(FunctionDecl*& currentFoundFunction,
             if (checkIsExactMatch) {
                 *isAmbiguous = false;
             }
-            currentFoundFunction = checkFunction;
+            currentFoundDecl = checkDecl;
             *isExactMatch = checkIsExactMatch;
         }
     }
 
     return true;
+}
+
+bool DeclResolver::checkFunctionMatchesCall(FunctionDecl*& currentFoundFunction, FunctionDecl* checkFunction,
+                                            bool* isExactMatch, bool* isAmbiguous) {
+    return checkConstructorOrFunctionMatchesCall(currentFoundFunction, checkFunction,
+                                                 functionCallArgs, isExactMatch, isAmbiguous);
 }
 
 bool DeclResolver::checkTemplateFunctionMatchesCall(FunctionDecl *&currentFoundFunction,
@@ -1149,6 +1234,7 @@ bool DeclResolver::checkTemplateFunctionMatchesCall(FunctionDecl *&currentFoundF
 
     FunctionDecl* implementedFunction = nullptr;
 
+    // TODO: Can we convert this to use `checkConstructorOrFunctionMatchesCall`?
     // We check if the args are a match with the function parameters
     if (argsMatchParams(checkFunction->parameters, functionCallArgs, &checkIsExactMatch,
                         checkFunction->templateParameters, functionCallTemplateArgs)) {
@@ -1274,6 +1360,35 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         return;
     }
 
+    // This is a special identifier (but I don't want to go through the trouble of making it a real keyword right now, it really doesn't need to be...)
+    if (identifierExpr->name() == "this") {
+        if (!currentStruct) {
+            printError("use of keyword `this` outside of struct/class members is illegal!",
+                       identifierExpr->startPosition(), identifierExpr->endPosition());
+        }
+
+        if (identifierExpr->hasTemplateArguments()) {
+            printError("keyword `this` does not support template arguments!",
+                       identifierExpr->startPosition(), identifierExpr->endPosition());
+        }
+
+        // `this` is ALWAYS defined as parameter index `0` (when a function is a member of a struct/class, obviously `0` isn't `this` to namespace or file functions)
+        Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
+                                              identifierExpr->endPosition(),
+                                              0);
+        refParam->resultType = new ReferenceType({}, {}, new StructType({}, {}, currentStruct->name(), currentStruct));
+        // A parameter reference is an lvalue.
+        refParam->resultType->setIsLValue(true);
+        // NOTE: We still make it a `ReferenceType` above then immediately dereference it here so we create the correct
+        //  expressions for dereferencing the `this` parameter in our `CodeGen`
+        dereferenceReferences(refParam);
+
+        delete identifierExpr;
+
+        expr = refParam;
+        return;
+    }
+
     // Then we check local variables
     for (std::size_t i = 0; i < functionLocalVariablesCount; ++i) {
         if (functionLocalVariables[i]->name() == identifierExpr->name()) {
@@ -1337,9 +1452,10 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                                identifierExpr->startPosition(), identifierExpr->endPosition());
                 }
 
+                // `paramIndex` is shifted by one if `currentStruct` isn't null. This is because `0` is implicitly the `this` parameter
                 Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
                                                       identifierExpr->endPosition(),
-                                                      paramIndex);
+                                                      paramIndex + (currentStruct ? 1 : 0));
                 refParam->resultType = (*functionParams)[paramIndex]->type->deepCopy();
                 // A parameter reference is an lvalue.
                 refParam->resultType->setIsLValue(true);
@@ -1366,7 +1482,47 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         }
     }
 
-    // TODO: then class/struct members
+    // then class/struct members
+    if (currentStruct) {
+        for (GlobalVariableDecl* memberVariable : currentStruct->dataMembers) {
+            if (memberVariable->name() == identifierExpr->name()) {
+                if (identifierExpr->hasTemplateArguments()) {
+                    printError("member variable references cannot have template arguments!",
+                               identifierExpr->startPosition(), identifierExpr->endPosition());
+                }
+
+                // Ownership of this will be given to `RefStructMemberVariableExpr`. `RefParameterExpr` gets a copy.
+                StructType* structType = new StructType({}, {}, currentStruct->name(), currentStruct);
+
+                // `this` is ALWAYS defined as parameter index `0` (when a function is a member of a struct/class, obviously `0` isn't `this` to namespace or file functions)
+                Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
+                                                      identifierExpr->endPosition(),
+                                                      0);
+                refParam->resultType = new ReferenceType({}, {}, structType->deepCopy());
+                // A parameter reference is an lvalue.
+                refParam->resultType->setIsLValue(true);
+                // NOTE: We still make it a `ReferenceType` above then immediately dereference it here so we create the correct
+                //  expressions for dereferencing the `this` parameter in our `CodeGen`
+                dereferenceReferences(refParam);
+
+                // Ref the variable using the new `this` variable
+                auto refStructVariable = new RefStructMemberVariableExpr(identifierExpr->startPosition(),
+                                                                         identifierExpr->endPosition(),
+                                                                         refParam,
+                                                                         structType, memberVariable);
+                refStructVariable->resultType = memberVariable->type->deepCopy();
+                // A global variable reference is an lvalue.
+                refStructVariable->resultType->setIsLValue(true);
+
+                delete identifierExpr;
+
+                expr = refStructVariable;
+
+                return;
+            }
+        }
+    }
+
     // TODO: then class/struct template params
 
     // then current file
@@ -1444,15 +1600,11 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
 
         expr = refFileFunc;
 
-        // true xor true = false
-        // true xor false = true
-        // false xor true = true
-        // false xor false = false
-
         if (foundFunction->parentNamespace != nullptr) {
             currentFileAst->addImportExtern(foundFunction);
         }
 
+        // TODO: Shouldn't we modify `functionCallArgs` to make them implicitly casted?
         return;
     }
 
@@ -1506,6 +1658,69 @@ void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVari
         applyTemplateTypeArguments(resolvedTypeRefExpr->resolvedType);
 
         localVariableDeclExpr->resultType = resolvedTypeRefExpr->resolvedType->deepCopy();
+
+        // Find the correct constructor or verify a correct constructor exists...
+        // NOTE: We only check the constructor here if they provide initializer arguments
+        //  if no initializer is provided we will handle verification in `CodeVerifier` as there might be an initial
+        //  value we can't see here
+        if (localVariableDeclExpr->hasInitializer()) {
+            for (Expr*& initializerArg : localVariableDeclExpr->initializerArgs) {
+                processExpr(initializerArg);
+            }
+
+            if (localVariableDeclExpr->initializerArgs.size() > 1) {
+                if (!llvm::isa<StructType>(resolvedTypeRefExpr->resolvedType)) {
+                    printError("non-struct variables can only have 1 initializer argument! (found " + std::to_string(localVariableDeclExpr->initializerArgs.size()) + ")",
+                               localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
+                }
+
+                auto structType = llvm::dyn_cast<StructType>(resolvedTypeRefExpr->resolvedType);
+
+                ConstructorDecl* foundConstructor = nullptr;
+                // `isExactMatch` is used to check for ambiguity
+                bool isExactMatch = false;
+                bool isAmbiguous = false;
+
+                // TODO: Search the struct decl for a matching constructor
+                for (ConstructorDecl* constructorDecl : structType->decl()->constructors) {
+                    if (!checkConstructorOrFunctionMatchesCall(foundConstructor, constructorDecl,
+                                                               &localVariableDeclExpr->initializerArgs,
+                                                               &isExactMatch, &isAmbiguous)) {
+                        printError("initializer constructor call is ambiguous!",
+                                   localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
+                    }
+                }
+
+                if (!foundConstructor) {
+                    printError("no valid constructor found for the provided initializer arguments!",
+                               localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
+                }
+
+                if (isAmbiguous) {
+                    printError("initializer constructor call is ambiguous!",
+                               localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
+                }
+
+                if (!isExactMatch) {
+                    // TODO: Implicitly cast and extract default values from the constructor parameter list
+                }
+
+                currentFileAst->addImportExtern(foundConstructor);
+                localVariableDeclExpr->foundConstructor = foundConstructor;
+
+                // Since we found a found a constructor we have to convert any lvalues to rvalues and
+                // dereference references where it makes sense...
+                for (std::size_t i = 0; i < foundConstructor->parameters.size(); ++i) {
+                    if (!getTypeIsReference(foundConstructor->parameters[i]->type)) {
+                        dereferenceReferences(localVariableDeclExpr->initializerArgs[i]);
+                        convertLValueToRValue(localVariableDeclExpr->initializerArgs[i]);
+                    }
+                }
+            } else {
+                // If there is only one initializer argument then we will treat it as an assignment...
+                // TODO: We need to see if an implicit cast is required...
+            }
+        }
 
         addLocalVariable(localVariableDeclExpr);
     }
@@ -1904,4 +2119,5 @@ unsigned int DeclResolver::applyTemplateTypeArguments(Type*& type) {
         return applyTemplateTypeArguments(llvm::dyn_cast<RValueReferenceType>(type)->referenceToType);
     }
     // TODO: Whenever we support template types we need to also handle their argument types here...
+    return 0;
 }

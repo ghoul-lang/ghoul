@@ -46,9 +46,12 @@ namespace gulc {
                 copiedConstants.push_back(static_cast<EnumConstantDecl*>(enumConstantDecl->deepCopy()));
             }
 
-            return new EnumDecl(name(), sourceFile(),
-                                startPosition(), endPosition(),
-                                baseType->deepCopy(), std::move(copiedConstants));
+            auto result = new EnumDecl(name(), sourceFile(),
+                                       startPosition(), endPosition(),
+                                       baseType->deepCopy(), std::move(copiedConstants));
+            result->parentNamespace = parentNamespace;
+            result->parentStruct = parentStruct;
+            return result;
         }
 
         ~EnumDecl() override {

@@ -24,6 +24,7 @@
 #include <AST/TypeComparer.hpp>
 #include <AST/Types/UnresolvedType.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
+#include <AST/Types/StructType.hpp>
 #include "CodeVerifier.hpp"
 #include "DeclResolver.hpp"
 
@@ -358,6 +359,20 @@ void CodeVerifier::verifyExpr(Expr*& expr) {
 }
 
 // Decls
+void CodeVerifier::verifyConstructorDecl(ConstructorDecl *constructorDecl) {
+    // TODO: We have to verify a constructor with the same signature doesn't already exist...
+    currentFunctionReturnType = nullptr;
+    currentFunctionParameters = &constructorDecl->parameters;
+
+    currentFunctionLocalVariablesCount = 0;
+
+    verifyCompoundStmt(constructorDecl->body());
+
+    currentFunctionLocalVariablesCount = 0;
+
+    currentFunctionParameters = nullptr;
+}
+
 void CodeVerifier::verifyFunctionDecl(FunctionDecl *functionDecl) {
     if (checkFunctionExists(functionDecl)) {
         printError("function name '" + functionDecl->name() + "' is ambiguous with the current parameter types!",
@@ -373,6 +388,8 @@ void CodeVerifier::verifyFunctionDecl(FunctionDecl *functionDecl) {
     currentFunctionParameters = &functionDecl->parameters;
 
     currentFunctionLocalVariablesCount = 0;
+
+    validateGotoVariables.clear();
 
     verifyCompoundStmt(functionDecl->body());
 
@@ -409,7 +426,13 @@ void CodeVerifier::verifyStructDecl(StructDecl *structDecl) {
     StructDecl* oldStruct = currentStruct;
     currentStruct = structDecl;
 
+    for (ConstructorDecl* constructor : structDecl->constructors) {
+        verifyConstructorDecl(constructor);
+    }
+
     // TODO: We should make sure any members of the struct can actually be members of the struct...
+    // TODO: We will have to verify any of our member value-types do NOT reference our type. This is an expensive operation that will have to deep search the types
+    //  we should be able to speed this up in most scenarios by not requiring it for external dependencies (expect templated types, they can still contain references to our type)
     for (Decl* decl : structDecl->members) {
         verifyDecl(decl);
     }
@@ -452,13 +475,21 @@ void CodeVerifier::verifyCaseStmt(CaseStmt *caseStmt) {
 }
 
 void CodeVerifier::verifyCompoundStmt(CompoundStmt *compoundStmt) {
-    currentFunctionLocalVariablesCount = 0;
+    unsigned int oldLocalVariableCount = currentFunctionLocalVariablesCount;
 
     for (Stmt* stmt : compoundStmt->statements()) {
         verifyStmt(stmt);
     }
 
-    currentFunctionLocalVariablesCount = 0;
+    currentFunctionLocalVariablesCount = oldLocalVariableCount;
+
+    for (GotoStmt* gotoStmt : validateGotoVariables) {
+        // Only lower the number of local variables, never raise it
+        // This is to make it so we find the common parent between the `goto` and the labeled statement
+        if (currentFunctionLocalVariablesCount < gotoStmt->currentNumLocalVariables) {
+            gotoStmt->currentNumLocalVariables = currentFunctionLocalVariablesCount;
+        }
+    }
 }
 
 void CodeVerifier::verifyContinueStmt(ContinueStmt *continueStmt) {
@@ -466,29 +497,45 @@ void CodeVerifier::verifyContinueStmt(ContinueStmt *continueStmt) {
 }
 
 void CodeVerifier::verifyDoStmt(DoStmt *doStmt) {
-    verifyStmt(doStmt->loopStmt);
+    if (doStmt->loopStmt != nullptr) verifyStmt(doStmt->loopStmt);
     // TODO: Should we verify the condition result is a boolean?
     verifyExpr(doStmt->condition);
 }
 
 void CodeVerifier::verifyForStmt(ForStmt *forStmt) {
-    verifyExpr(forStmt->preLoop);
-    verifyExpr(forStmt->condition);
+    unsigned int oldLocalVariableCount = currentFunctionLocalVariablesCount;
 
-    verifyStmt(forStmt->loopStmt);
+    if (forStmt->preLoop != nullptr) verifyExpr(forStmt->preLoop);
+    if (forStmt->condition != nullptr) verifyExpr(forStmt->condition);
+    if (forStmt->iterationExpr != nullptr) verifyExpr(forStmt->iterationExpr);
 
-    verifyExpr(forStmt->iterationExpr);
+    if (forStmt->loopStmt != nullptr) verifyStmt(forStmt->loopStmt);
+
+    currentFunctionLocalVariablesCount = oldLocalVariableCount;
+
+    // We also perform this operation after `for` loops to remove the number of variables declared in the preloop
+    for (GotoStmt* gotoStmt : validateGotoVariables) {
+        // Only lower the number of local variables, never raise it
+        // This is to make it so we find the common parent between the `goto` and the labeled statement
+        if (currentFunctionLocalVariablesCount < gotoStmt->currentNumLocalVariables) {
+            gotoStmt->currentNumLocalVariables = currentFunctionLocalVariablesCount;
+        }
+    }
 }
 
 void CodeVerifier::verifyGotoStmt(GotoStmt *gotoStmt) {
-    // TODO: Nothing to do, The label should already have been checked in the `DeclResolver`?
+    // TODO: We need to verify the `goto` is allowed. While the label the `goto` references has already been verified to
+    //  exist we haven't verified that new local variables have been declared between here and the point we're jumping
+    //  to.
+    gotoStmt->currentNumLocalVariables = currentFunctionLocalVariablesCount;
+    validateGotoVariables.push_back(gotoStmt);
 }
 
 void CodeVerifier::verifyIfStmt(IfStmt *ifStmt) {
     // TODO: We should support stuff like `if (Widget^ w = new Button("Test")) {}`
-    verifyExpr(ifStmt->condition);
+    if (ifStmt->condition != nullptr) verifyExpr(ifStmt->condition);
 
-    verifyStmt(ifStmt->trueStmt);
+    if (ifStmt->trueStmt != nullptr) verifyStmt(ifStmt->trueStmt);
 
     if (ifStmt->hasFalseStmt()) {
         verifyStmt(ifStmt->falseStmt);
@@ -496,7 +543,18 @@ void CodeVerifier::verifyIfStmt(IfStmt *ifStmt) {
 }
 
 void CodeVerifier::verifyLabeledStmt(LabeledStmt *labeledStmt) {
-    // The label has already been checked for ambiguity in `DeclResovler`
+    // Validate any `goto` statements that reference this labeled statement.
+    for (GotoStmt* gotoStmt : validateGotoVariables) {
+        if (gotoStmt->label == labeledStmt->label()) {
+            if (currentFunctionLocalVariablesCount > gotoStmt->currentNumLocalVariables) {
+                printError("cannot jump from this goto to the referenced label, jump skips variable declarations!",
+                           gotoStmt->startPosition(), gotoStmt->endPosition());
+                return;
+            }
+        }
+    }
+
+    // The label has already been checked for ambiguity in `DeclResolver`
     verifyStmt(labeledStmt->labeledStmt);
 }
 
@@ -539,7 +597,7 @@ void CodeVerifier::verifyTryFinallyStmt(TryFinallyStmt *tryFinallyStmt) {
 
 void CodeVerifier::verifyWhileStmt(WhileStmt *whileStmt) {
     verifyExpr(whileStmt->condition);
-    verifyStmt(whileStmt->loopStmt);
+    if (whileStmt->loopStmt != nullptr) verifyStmt(whileStmt->loopStmt);
 }
 
 // Exprs
@@ -626,6 +684,13 @@ void CodeVerifier::verifyIntegerLiteralExpr(IntegerLiteralExpr *integerLiteralEx
 }
 
 void CodeVerifier::verifyLocalVariableDeclExpr(LocalVariableDeclExpr *localVariableDeclExpr) {
+    if (localVariableNameTaken(localVariableDeclExpr->name())) {
+        printError("local variable '" + localVariableDeclExpr->name() + "' redeclared as different type!",
+                   localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
+    }
+
+    addLocalVariable(localVariableDeclExpr);
+
     if (llvm::isa<UnresolvedTypeRefExpr>(localVariableDeclExpr->type)) {
         auto unresolvedTypeRef = llvm::dyn_cast<UnresolvedTypeRefExpr>(localVariableDeclExpr->type);
 
@@ -633,28 +698,21 @@ void CodeVerifier::verifyLocalVariableDeclExpr(LocalVariableDeclExpr *localVaria
                    localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
     }
 
-    // NOTE: I don't think this is needed since we check if a name is taken in the `DeclResolver`
-//    // Check the name is already in use...
-//    if (currentFunctionParameters != nullptr) {
-//        for (ParameterDecl* parameter : *currentFunctionParameters) {
-//            if (parameter->name() == localVariableDeclExpr->name()) {
-//                printError("local variable `" + localVariableDeclExpr->name() + "` shadows parameter of the same name!",
-//                           localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());;
-//                return;
-//            }
-//        }
-//    }
-//
-//    if (currentFunctionTemplateParameters != nullptr) {
-//        for (TemplateParameterDecl* templateParameter : *currentFunctionTemplateParameters) {
-//            if (templateParameter->name() == localVariableDeclExpr->name()) {
-//                printError("local variable `" + localVariableDeclExpr->name() + "` shadows template parameter of the same name!",
-//                           localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());;
-//                return;
-//            }
-//        }
-//    }
-//    // All other declarations are allowed to be shadowed, right?
+    if (llvm::isa<ResolvedTypeRefExpr>(localVariableDeclExpr->type)) {
+        auto resolvedTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(localVariableDeclExpr->type);
+
+        if (llvm::isa<StructType>(resolvedTypeRef->resolvedType)) {
+            auto structType = llvm::dyn_cast<StructType>(resolvedTypeRef->resolvedType);
+
+            // If the struct doesn't have an empty constructor and the local variable decl doesn't have an initializer
+            // then we print an error telling the user to call a valid constructor to initialize the type
+            if (!(structType->decl()->hasEmptyConstructor() || localVariableDeclExpr->hasInitializer())) {
+                printError("struct `" + resolvedTypeRef->resolvedType->getString() + "` "
+                           "does not have an empty constructor, please call a constructor to initialize type!",
+                           localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
+            }
+        }
+    }
 }
 
 void CodeVerifier::verifyLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr) {

@@ -23,6 +23,7 @@
 #include <Passes/NameMangler.hpp>
 #include <NameMangling/ItaniumMangler.hpp>
 #include <Passes/NamespacePrototyper.hpp>
+#include <Passes/Lifetimes.hpp>
 
 using namespace gulc;
 
@@ -51,6 +52,9 @@ int main() {
     // Resolve declarations
     DeclResolver declResolver;
     declResolver.processFile(parsedFiles);
+
+    Lifetimes lifetimes;
+    lifetimes.processFile(parsedFiles);
 
     // Mangle names (for overloading support)
     NameMangler nameMangler(new ItaniumMangler());

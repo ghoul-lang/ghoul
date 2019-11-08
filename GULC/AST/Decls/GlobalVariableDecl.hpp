@@ -36,11 +36,14 @@ namespace gulc {
         bool hasInitialValue() const { return initialValue != nullptr; }
 
         Decl* deepCopy() const override {
-            return new GlobalVariableDecl(name(), sourceFile(),
-                                          startPosition(), endPosition(),
-                                          type->deepCopy(),
-                                          // Using the safe navigation operator `?.` would be great...
-                                          initialValue ? initialValue->deepCopy() : nullptr);
+            auto result = new GlobalVariableDecl(name(), sourceFile(),
+                                                 startPosition(), endPosition(),
+                                                 type->deepCopy(),
+                                                 // Using the safe navigation operator `?.` would be great...
+                                                 initialValue ? initialValue->deepCopy() : nullptr);
+            result->parentNamespace = parentNamespace;
+            result->parentStruct = parentStruct;
+            return result;
         }
 
         ~GlobalVariableDecl() override {

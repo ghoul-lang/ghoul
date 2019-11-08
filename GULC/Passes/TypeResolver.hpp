@@ -80,6 +80,8 @@ namespace gulc {
         void processStmt(Stmt*& stmt);
         void processExpr(Expr*& expr);
 
+        void processConstructorDecl(ConstructorDecl* constructorDecl);
+        void processDestructorDecl(DestructorDecl* destructorDecl);
         void processEnumDecl(EnumDecl* enumDecl);
         void processFunctionDecl(FunctionDecl* functionDecl);
         void processGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);

@@ -26,11 +26,11 @@
 namespace gulc {
     class ManglerBase {
     public:
-        virtual std::string mangle(FunctionDecl* functionDecl) = 0;
-        virtual std::string mangle(GlobalVariableDecl* globalVariableDecl) = 0;
-        virtual void mangle(NamespaceDecl* namespaceDecl, const std::string& prefix = "") = 0;
+        virtual void mangle(FunctionDecl* functionDecl) = 0;
+        virtual void mangle(GlobalVariableDecl* globalVariableDecl) = 0;
+        virtual void mangle(NamespaceDecl* namespaceDecl) = 0;
+        virtual void mangle(StructDecl* structDecl) = 0;
         virtual void mangle(TemplateFunctionDecl* templateFunctionDecl) = 0;
-        virtual void mangle(StructDecl* structDecl, const std::string& prefix = "") = 0;
 
         virtual ~ManglerBase() = default;
     };

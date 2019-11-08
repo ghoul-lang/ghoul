@@ -31,12 +31,12 @@ void NameMangler::processDecl(Decl *decl) {
     switch (decl->getDeclKind()) {
         case Decl::Kind::Function: {
             auto function = llvm::dyn_cast<FunctionDecl>(decl);
-            function->setMangledName(_manglerBase->mangle(function));
+            _manglerBase->mangle(function);
             break;
         }
         case Decl::Kind::GlobalVariable: {
             auto globalVariable = llvm::dyn_cast<GlobalVariableDecl>(decl);
-            globalVariable->setMangledName(_manglerBase->mangle(globalVariable));
+            _manglerBase->mangle(globalVariable);
             break;
         }
         case Decl::Kind::Namespace: {

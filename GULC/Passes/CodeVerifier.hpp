@@ -80,6 +80,7 @@ namespace gulc {
         void verifyExpr(Expr*& expr);
 
         // Decls
+        void verifyConstructorDecl(ConstructorDecl* constructorDecl);
         // TODO: Support verifying that a function returns on every branch
         void verifyFunctionDecl(FunctionDecl* functionDecl);
         void verifyGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
@@ -136,6 +137,28 @@ namespace gulc {
         std::vector<ParameterDecl*>* currentFunctionParameters;
         unsigned int currentFunctionLocalVariablesCount;
         std::vector<LocalVariableDeclExpr*> currentFunctionLocalVariables;
+
+        /*
+         * NOTES:
+         * For every `goto` add it to a list of `validateGotoVariables` with the number of variables that have been
+         *  declared before it.
+         *
+         * For every ending of `CompoundStmt`, set the number of variables declared before the `goto` to the number of
+         *  variables that haven't been destructed
+         *  - ONLY set the number of local variables if it is LESS than the current number for the `goto` (this will
+         *   make it so we find the number of local variables declared in the common parent between the `goto` and
+         *   label)
+         *
+         * Once we reach the `label` that corresponds to the `goto`, check that the current number of local variables
+         *  is not greater than the number of local variables for the `goto`
+         *
+         * This increases the total memory requirements for compilation but reduces compilation time.
+         *
+         * Once we reach the end of the function if there are any `goto` statements left in this list then we ignore it
+         *  they are assumed to be valid (either they reference a label that precedes the `goto` or the label doesn't
+         *  have any new local variables in its context)
+         */
+        std::vector<GotoStmt*> validateGotoVariables;
 
         bool localVariableNameTaken(const std::string& varName) const {
             for (std::size_t i = 0; i < currentFunctionLocalVariablesCount; ++i) {

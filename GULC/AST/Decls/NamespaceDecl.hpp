@@ -49,6 +49,8 @@ namespace gulc {
                 newNestedDecls.push_back(nestedDecl->deepCopy());
             }
 
+            result->parentNamespace = parentNamespace;
+            result->parentStruct = parentStruct;
             return result;
         }
 

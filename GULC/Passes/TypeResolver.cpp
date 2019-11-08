@@ -448,6 +448,35 @@ void TypeResolver::processExpr(Expr *&expr) {
 }
 
 // Decls
+void TypeResolver::processConstructorDecl(ConstructorDecl *constructorDecl) {
+    if (constructorDecl->hasParameters()) {
+        bool shouldHaveDefaultArgument = false;
+
+        // Make sure all parameters after the first optional parameter are also optional
+        for (ParameterDecl* parameterDecl : constructorDecl->parameters) {
+            if (!resolveType(parameterDecl->type)) {
+                printError("could not find constructor parameter type!",
+                           parameterDecl->startPosition(), parameterDecl->endPosition());
+            }
+
+            if (parameterDecl->hasDefaultArgument()) {
+                if (!shouldHaveDefaultArgument) {
+                    shouldHaveDefaultArgument = true;
+                } else {
+                    printError("all parameters after the first optional parameter must also be optional!",
+                               parameterDecl->startPosition(), parameterDecl->endPosition());
+                }
+            }
+        }
+    }
+
+    processCompoundStmt(constructorDecl->body());
+}
+
+void TypeResolver::processDestructorDecl(DestructorDecl *destructorDecl) {
+    processCompoundStmt(destructorDecl->body());
+}
+
 void TypeResolver::processEnumDecl(EnumDecl *enumDecl) {
     if (!enumDecl->hasBaseType()) {
         // If the enum doesn't have a base type we default to an unsigned 32-bit integer
@@ -552,13 +581,27 @@ void TypeResolver::processStructDecl(StructDecl *structDecl) {
     currentStruct = structDecl;
 
     // TODO: Process base type
+    for (ConstructorDecl* constructor : structDecl->constructors) {
+        constructor->parentStruct = structDecl;
+        processConstructorDecl(constructor);
+    }
+
+    // TODO: Process base type
     for (Decl* decl : structDecl->members) {
+        decl->parentStruct = structDecl;
+
         // The variable pointers are stored into their own vector so we know the offsets of each variable within the struct
         if (llvm::isa<GlobalVariableDecl>(decl)) {
             structDecl->dataMembers.push_back(llvm::dyn_cast<GlobalVariableDecl>(decl));
         }
 
         processDecl(decl);
+    }
+
+    // TODO: Process base type
+    if (structDecl->destructor != nullptr) {
+        structDecl->destructor->parentStruct = structDecl;
+        processDestructorDecl(structDecl->destructor);
     }
 
     currentStruct = oldStruct;
@@ -635,16 +678,16 @@ void TypeResolver::processCompoundStmt(CompoundStmt *compoundStmt) {
 }
 
 void TypeResolver::processDoStmt(DoStmt *doStmt) {
-    processStmt(doStmt->loopStmt);
+    if (doStmt->loopStmt != nullptr) processStmt(doStmt->loopStmt);
     processExpr(doStmt->condition);
 }
 
 void TypeResolver::processForStmt(ForStmt *forStmt) {
-    processExpr(forStmt->preLoop);
-    processExpr(forStmt->condition);
-    processExpr(forStmt->iterationExpr);
+    if (forStmt->preLoop != nullptr) processExpr(forStmt->preLoop);
+    if (forStmt->condition != nullptr) processExpr(forStmt->condition);
+    if (forStmt->iterationExpr != nullptr) processExpr(forStmt->iterationExpr);
 
-    processStmt(forStmt->loopStmt);
+    if (forStmt->loopStmt != nullptr) processStmt(forStmt->loopStmt);
 }
 
 void TypeResolver::processIfStmt(IfStmt *ifStmt) {
@@ -703,7 +746,7 @@ void TypeResolver::processTryFinallyStmt(TryFinallyStmt *tryFinallyStmt) {
 
 void TypeResolver::processWhileStmt(WhileStmt *whileStmt) {
     processExpr(whileStmt->condition);
-    processStmt(whileStmt->loopStmt);
+    if (whileStmt->loopStmt != nullptr) processStmt(whileStmt->loopStmt);
 }
 
 // Exprs
@@ -923,17 +966,42 @@ void TypeResolver::processLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr)
 
     // If the type or prefix operator is a resolved type ref then it is a local variable declaration
     if (llvm::isa<ResolvedTypeRefExpr>(localVariableDeclOrPrefixOperatorCall->typeOrPrefixOperator)) {
-        if (!llvm::isa<IdentifierExpr>(localVariableDeclOrPrefixOperatorCall->nameOrExpr)) {
+        IdentifierExpr* nameExpr;
+        std::vector<Expr*> initializerArgs;
+
+        if (llvm::isa<IdentifierExpr>(localVariableDeclOrPrefixOperatorCall->nameOrExpr)) {
+            nameExpr = llvm::dyn_cast<IdentifierExpr>(localVariableDeclOrPrefixOperatorCall->nameOrExpr);
+        } else if (llvm::isa<FunctionCallExpr>(localVariableDeclOrPrefixOperatorCall->nameOrExpr)) {
+            // If we parsed a function call here but the `typeOrPrefixOperator` is a type then that means we parsed a
+            // condensed constructor call. I.e. `StructType t(param1, param2);`
+            auto functionCallExpr = llvm::dyn_cast<FunctionCallExpr>(localVariableDeclOrPrefixOperatorCall->nameOrExpr);
+
+            if (!llvm::isa<IdentifierExpr>(functionCallExpr->functionReference)) {
+                printError("unexpected expression where local variable name was expected!",
+                           localVariableDeclOrPrefixOperatorCall->nameOrExpr->startPosition(),
+                           localVariableDeclOrPrefixOperatorCall->nameOrExpr->endPosition());
+            }
+
+            nameExpr = llvm::dyn_cast<IdentifierExpr>(functionCallExpr->functionReference);
+            // Steal the function call arguments
+            initializerArgs = std::move(functionCallExpr->arguments);
+        } else {
             printError("unexpected expression where local variable name was expected!",
                        localVariableDeclOrPrefixOperatorCall->nameOrExpr->startPosition(),
                        localVariableDeclOrPrefixOperatorCall->nameOrExpr->endPosition());
+            return;
         }
 
-        auto nameExpr = llvm::dyn_cast<IdentifierExpr>(localVariableDeclOrPrefixOperatorCall->nameOrExpr);
+        // Process the initializer args
+        for (Expr*& initializerArg : initializerArgs) {
+            processExpr(initializerArg);
+        }
 
         auto newLocalVariableExpr = new LocalVariableDeclExpr(expr->startPosition(), expr->endPosition(),
                                                               localVariableDeclOrPrefixOperatorCall->typeOrPrefixOperator,
                                                               nameExpr->name());
+        // Set the initializer args (there might not be any...)
+        newLocalVariableExpr->initializerArgs = std::move(initializerArgs);
         // We steal this pointer.
         localVariableDeclOrPrefixOperatorCall->typeOrPrefixOperator = nullptr;
         delete localVariableDeclOrPrefixOperatorCall;

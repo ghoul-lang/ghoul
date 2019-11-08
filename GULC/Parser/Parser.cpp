@@ -48,6 +48,7 @@
 #include <AST/Decls/NamespaceDecl.hpp>
 #include <AST/Decls/TemplateFunctionDecl.hpp>
 #include <AST/Decls/StructDecl.hpp>
+#include <AST/Decls/ConstructorDecl.hpp>
 #include "Parser.hpp"
 
 using namespace gulc;
@@ -337,10 +338,25 @@ qualifierFound:
                 return nullptr;
             }
 
+            std::vector<ConstructorDecl*> constructors{};
             std::vector<Decl*> members{};
+            DestructorDecl* destructor = nullptr;
 
             while (_lexer.peekType() != TokenType::RCURLY && _lexer.peekType() != TokenType::ENDOFFILE) {
-                members.push_back(parseTopLevelDecl());
+                Decl* topLevelDecl = parseTopLevelDecl();
+
+                if (llvm::isa<ConstructorDecl>(topLevelDecl)) {
+                    constructors.push_back(llvm::dyn_cast<ConstructorDecl>(topLevelDecl));
+                } else if (llvm::isa<DestructorDecl>(topLevelDecl)) {
+                    if (destructor != nullptr) {
+                        printError("structs cannot have more than one destructor!",
+                                   topLevelDecl->startPosition(), topLevelDecl->endPosition());
+                    } else {
+                        destructor = llvm::dyn_cast<DestructorDecl>(topLevelDecl);
+                    }
+                } else {
+                    members.push_back(topLevelDecl);
+                }
             }
 
             endPosition = _lexer.peekToken().endPosition;
@@ -351,7 +367,8 @@ qualifierFound:
                 return nullptr;
             }
 
-            return new StructDecl(name, _filePath, startPosition, endPosition, std::move(members));
+            return new StructDecl(name, _filePath, startPosition, endPosition,
+                                  std::move(constructors), std::move(members), destructor);
         }
         case TokenType::UNION:
             // TODO:
@@ -423,6 +440,36 @@ qualifierFound:
 
             return new EnumDecl(name, _filePath, startPosition, endPosition, baseType, constants);
         }
+        case TokenType::TILDE: {
+            // Parse destructor
+            _lexer.consumeType(TokenType::TILDE);
+
+            std::string verifyName = _lexer.peekToken().currentSymbol;
+
+            if (!_lexer.consumeType(TokenType::SYMBOL)) {
+                printError("expected type name after destructor! (found '" + verifyName + "')",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            if (!_lexer.consumeType(TokenType::LPAREN)) {
+                printError("expected beginning `(` after destructor type name! (found '" + _lexer.peekToken().currentSymbol + "')",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            endPosition = _lexer.peekToken().endPosition;
+
+            if (!_lexer.consumeType(TokenType::RPAREN)) {
+                printError("expected ending `)` after destructor type name! (found '" + _lexer.peekToken().currentSymbol + "')",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                return nullptr;
+            }
+
+            CompoundStmt* compoundStmt = parseCompoundStmt();
+
+            return new DestructorDecl(verifyName, _filePath, startPosition, endPosition, compoundStmt);
+        }
         case TokenType::CONST:
         case TokenType::MUT:
         case TokenType::IMMUT:
@@ -432,17 +479,33 @@ qualifierFound:
             peekedToken = _lexer.peekToken();
             endPosition = peekedToken.endPosition;
 
+            bool parseConstructor = false;
             std::string name;
 
             // Parse the rest of the type and the name of the variable or function
             switch (peekedToken.tokenType) {
+                case TokenType::LPAREN:
+                    parseConstructor = true;
+
+                    if (!llvm::isa<UnresolvedType>(resultType)) {
+                        printError("unexpected expression where constructor name was expected!",
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                    }
+
+                    // What we parse as the type is actually the constructor name, so we steal the name
+                    name = llvm::dyn_cast<UnresolvedType>(resultType)->name();
+
+                    // Delete the old parsed type
+                    delete resultType;
+                    break;
                 case TokenType::SYMBOL:
                     // This is the function or variable declaration name
                     name = peekedToken.currentSymbol;
                     _lexer.consumeType(TokenType::SYMBOL);
                     break;
                 default:
-                    printError("unexpected token in top-level declaration! (found '" + _lexer.peekToken().currentSymbol + "')", startPosition, endPosition);
+                    printError("unexpected token in top-level declaration! (found '" + _lexer.peekToken().currentSymbol + "')",
+                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                     return nullptr;
             }
 
@@ -452,6 +515,11 @@ qualifierFound:
             // Detect if it is a variable or function and parse based on the detection
             switch (peekedToken.tokenType) {
                 case TokenType::LESS: { // Template Function
+                    if (parseConstructor) {
+                        printError("constructors cannot have template parameters! (or template function is missing a type?)",
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                    }
+
                     std::vector<TemplateParameterDecl*> templateParameters = parseTemplateParameterDecls(startPosition);
                     std::vector<ParameterDecl*> parameters = parseParameterDecls(startPosition);
                     // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
@@ -464,9 +532,18 @@ qualifierFound:
                     // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
                     CompoundStmt* compoundStmt = parseCompoundStmt();
 
-                    return new FunctionDecl(name, _filePath, startPosition, endPosition, resultType, parameters, compoundStmt);
+                    if (parseConstructor) {
+                        return new ConstructorDecl(name, _filePath, startPosition, endPosition, parameters, compoundStmt);
+                    } else {
+                        return new FunctionDecl(name, _filePath, startPosition, endPosition, resultType, parameters, compoundStmt);
+                    }
                 }
                 case TokenType::EQUALS: {
+                    if (parseConstructor) {
+                        printError("expected variable name, found '='!",
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                    }
+
                     _lexer.consumeType(TokenType::EQUALS);
                     Expr *initialValue = parseExpr(false, false);
 
@@ -481,6 +558,11 @@ qualifierFound:
                     return new GlobalVariableDecl(name, _filePath, startPosition, endPosition, resultType, initialValue);
                 }
                 case TokenType::SEMICOLON:
+                    if (parseConstructor) {
+                        printError("expected variable name, found ';'!",
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                    }
+
                     endPosition = _lexer.peekToken().endPosition;
 
                     if (!_lexer.consumeType(TokenType::SEMICOLON)) {
@@ -1025,7 +1107,12 @@ IfStmt *Parser::parseIfStmt() {
         return nullptr;
     }
 
-    Stmt* trueStmt = parseStmt();
+    Stmt* trueStmt = nullptr;
+
+    if (!_lexer.consumeType(TokenType::SEMICOLON)) {
+        trueStmt = parseStmt();
+    }
+
     Stmt* falseStmt = nullptr;
 
     if (_lexer.consumeType(TokenType::ELSE)) {
@@ -1062,8 +1149,12 @@ WhileStmt *Parser::parseWhileStmt() {
         return nullptr;
     }
 
-    Stmt* loopStmt = parseStmt();
-    endPosition = loopStmt->endPosition();
+    Stmt* loopStmt = nullptr;
+
+    if (!_lexer.consumeType(TokenType::SEMICOLON)) {
+        loopStmt = parseStmt();
+        endPosition = loopStmt->endPosition();
+    }
 
     return new WhileStmt(startPosition, endPosition, condition, loopStmt);
 }
@@ -1144,8 +1235,12 @@ ForStmt *Parser::parseForStmt() {
         }
     }
 
-    Stmt* loopStmt = parseStmt();
-    endPosition = loopStmt->endPosition();
+    Stmt* loopStmt = nullptr;
+
+    if (!_lexer.consumeType(TokenType::SEMICOLON)) {
+        loopStmt = parseStmt();
+        endPosition = loopStmt->endPosition();
+    }
 
     return new ForStmt(startPosition, endPosition, preLoop, condition, iterationExpr, loopStmt);
 }
@@ -1161,7 +1256,11 @@ DoStmt *Parser::parseDoStmt() {
     }
 
     // We don't require 'CompoundStmt', we allow `do callFunction(); while (true);`
-    Stmt* loopStmt = parseStmt();
+    Stmt* loopStmt = nullptr;
+
+    if (!_lexer.consumeType(TokenType::SEMICOLON)) {
+        loopStmt = parseStmt();
+    }
 
     if (!_lexer.consumeType(TokenType::WHILE)) {
         printError("expected matching 'while' statement for 'do' statement! (found '" + _lexer.peekToken().currentSymbol + "')",
@@ -1500,9 +1599,12 @@ Expr *Parser::parseAssignmentMisc(bool isStatement, bool templateTypingAllowed) 
     TextPosition endPosition;
     Expr* result = parseLogicalOr(isStatement, templateTypingAllowed);
 
+    // TODO: We need to handle more than just `SYMBOL`
     if (isStatement && _lexer.peekType() == TokenType::SYMBOL) {
-        // Variable names cannot have generics so we ignore generics
-        Expr* identifier = parseIdentifier(false, true);
+        // Variable names cannot have generics so we ignore generics (TODO: But type names can have generics? we shouldn't stop them from being parsed...)
+        // TODO: NOTE: We WILL parse postfix `++` and postfix `--` here. If this is a custom prefix operator call then
+        //  postfix `++`/`--` should be performed on the result of the operator...
+        Expr* identifier = parseCallPostfixOrMemberAccess(false, true);
         endPosition = identifier->endPosition();
         result = new LocalVariableDeclOrPrefixOperatorCallExpr(startPosition, endPosition, result, identifier);
     }

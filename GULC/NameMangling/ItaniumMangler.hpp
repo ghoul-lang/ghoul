@@ -16,18 +16,28 @@
 #ifndef GULC_ITANIUMMANGLER_HPP
 #define GULC_ITANIUMMANGLER_HPP
 
+#include <AST/Decls/ConstructorDecl.hpp>
 #include "ManglerBase.hpp"
 
 namespace gulc {
     class ItaniumMangler : public ManglerBase {
     public:
-        std::string mangle(FunctionDecl* functionDecl) override;
-        std::string mangle(GlobalVariableDecl* globalVariableDecl) override;
-        void mangle(NamespaceDecl* namespaceDecl, const std::string& prefix) override;
+        void mangle(FunctionDecl* functionDecl) override;
+        void mangle(GlobalVariableDecl* globalVariableDecl) override;
+        void mangle(NamespaceDecl* namespaceDecl) override;
+        void mangle(StructDecl* structDecl) override;
         void mangle(TemplateFunctionDecl* templateFunctionDecl) override;
-        void mangle(StructDecl* structDecl, const std::string& prefix) override;
 
     private:
+        void mangleFunction(FunctionDecl* functionDecl, const std::string& prefix, const std::string& nameSuffix);
+        void mangleVariable(GlobalVariableDecl* variableDecl, const std::string& prefix, const std::string& nameSuffix);
+        void mangleNamespace(NamespaceDecl* namespaceDecl, const std::string& prefix);
+        void mangleStruct(StructDecl* structDecl, const std::string& prefix);
+        void mangleTemplateFunction(TemplateFunctionDecl* templateFunctionDecl, const std::string& prefix, const std::string& nameSuffix);
+
+        void mangleConstructor(ConstructorDecl* constructorDecl, const std::string& prefix, const std::string& nameSuffix);
+        void mangleDestructor(DestructorDecl* destructorDecl, const std::string& prefix, const std::string& nameSuffix);
+
         std::string unqualifiedName(FunctionDecl* functionDecl);
         std::string unqualifiedName(GlobalVariableDecl* globalVariableDecl);
 

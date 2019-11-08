@@ -18,6 +18,7 @@
 
 #include <AST/Stmt.hpp>
 #include <AST/Expr.hpp>
+#include <vector>
 
 namespace gulc {
     class ReturnStmt : public Stmt {
@@ -25,7 +26,8 @@ namespace gulc {
         static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == Kind::Return; }
 
         ReturnStmt(TextPosition startPosition, TextPosition endPosition, Expr* returnValue = nullptr)
-                : Stmt(Kind::Return, startPosition, endPosition), returnValue(returnValue) {}
+                : Stmt(Kind::Return, startPosition, endPosition), returnValue(returnValue),
+                  preReturnExprs() {}
 
         Expr* returnValue;
         bool hasReturnValue() const { return returnValue != nullptr; }
@@ -35,7 +37,14 @@ namespace gulc {
                                   returnValue ? returnValue->deepCopy() : nullptr);
         }
 
+        // Expressions to run before we return
+        std::vector<Expr*> preReturnExprs;
+
         ~ReturnStmt() override {
+            for (Expr* preReturnExpr : preReturnExprs) {
+                delete preReturnExpr;
+            }
+
             delete returnValue;
         }
 

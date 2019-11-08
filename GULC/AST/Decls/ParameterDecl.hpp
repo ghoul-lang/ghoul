@@ -36,10 +36,13 @@ namespace gulc {
         bool hasDefaultArgument() const { return _defaultArgument != nullptr; }
 
         Decl* deepCopy() const override {
-            return new ParameterDecl(name(), sourceFile(),
-                                     startPosition(), endPosition(),
-                                     type->deepCopy(),
-                                     _defaultArgument ? _defaultArgument->deepCopy() : nullptr);
+            auto result = new ParameterDecl(name(), sourceFile(),
+                                            startPosition(), endPosition(),
+                                            type->deepCopy(),
+                                            _defaultArgument ? _defaultArgument->deepCopy() : nullptr);
+            result->parentNamespace = parentNamespace;
+            result->parentStruct = parentStruct;
+            return result;
         }
 
         ~ParameterDecl() override {

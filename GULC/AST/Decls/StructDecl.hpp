@@ -19,6 +19,8 @@
 #include <AST/Decl.hpp>
 #include <vector>
 #include "GlobalVariableDecl.hpp"
+#include "ConstructorDecl.hpp"
+#include "DestructorDecl.hpp"
 
 namespace gulc {
     class StructDecl : public Decl {
@@ -26,32 +28,70 @@ namespace gulc {
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Struct; }
 
         StructDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                   std::vector<Decl*> members)
+                   std::vector<ConstructorDecl*> constructors, std::vector<Decl*> members, DestructorDecl* destructor)
                 : Decl(Kind::Struct, std::move(name), std::move(sourceFile), startPosition, endPosition),
-                  members(std::move(members)) {}
+                  constructors(std::move(constructors)), members(std::move(members)), destructor(destructor),
+                  _hasEmptyConstructor(false) {
+            // Search to see if any of the constructors are empty
+            for (ConstructorDecl* constructor : this->constructors) {
+                if (constructor->parameters.empty()) {
+                    _hasEmptyConstructor = true;
+                    break;
+                }
+            }
+        }
 
         // These are just sorted references to already existing members within the `members` list, we do NOT free these as that would cause a double free issue.
         std::vector<GlobalVariableDecl*> dataMembers;
 
+        std::vector<ConstructorDecl*> constructors;
         std::vector<Decl*> members;
+        // There can only be one destructor
+        DestructorDecl* destructor;
+
+        bool hasEmptyConstructor() const { return _hasEmptyConstructor; }
 
         Decl* deepCopy() const override {
+            std::vector<ConstructorDecl*> copiedConstructors{};
             std::vector<Decl*> copiedMembers{};
+            DestructorDecl* copiedDestructor = nullptr;
+
+            for (ConstructorDecl* constructor : constructors) {
+                copiedConstructors.push_back(llvm::dyn_cast<ConstructorDecl>(constructor->deepCopy()));
+            }
 
             for (Decl* decl : members) {
                 copiedMembers.push_back(decl->deepCopy());
             }
 
-            return new StructDecl(name(), sourceFile(),
-                                  startPosition(), endPosition(),
-                                  std::move(copiedMembers));
+            if (destructor) {
+                copiedDestructor = llvm::dyn_cast<DestructorDecl>(destructor->deepCopy());
+            }
+
+            auto result = new StructDecl(name(), sourceFile(),
+                                         startPosition(), endPosition(),
+                                         std::move(copiedConstructors), std::move(copiedMembers), copiedDestructor);
+            result->parentNamespace = parentNamespace;
+            result->parentStruct = parentStruct;
+
+            return result;
         }
 
         ~StructDecl() override {
+            delete destructor;
+
+            for (ConstructorDecl* constructor : constructors) {
+                delete constructor;
+            }
+
             for (Decl* decl : members) {
                 delete decl;
             }
         }
+
+    private:
+        // This is needed to be able to declare local variable structs without constructor arguments (i.e. `TestStruct v;` instead of `TestStruct v(arg1, arg2, etc);`
+        bool _hasEmptyConstructor;
 
     };
 }

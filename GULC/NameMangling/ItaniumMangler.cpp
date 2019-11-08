@@ -24,69 +24,105 @@
 #include <AST/Types/EnumType.hpp>
 #include "ItaniumMangler.hpp"
 
+/*
+ * Assumption for destructors:
+ *  `D0` ??? references deleting? destructors CANNOT handle freeing the memory for the `this` variable (as it is a reference, NOT a pointer...) so we will ignore.
+ *  `D1` handles calling destructors in the vtable? maybe?
+ *  `D2` doesn't call destructors in vtable?
+ *
+ * So my assumption is that:
+ *  `D1` ONLY loops the vtable and calls destructors within the vtable (from child to oldest parent?)
+ *  `D2` is an actual destructor that destructs the members, `D2` will be called by `D1` if there are virtual destructors?
+ */
+
 using namespace gulc;
 //https://itanium-cxx-abi.github.io/cxx-abi/abi.html
 // TODO: If we every want to allow `extern` to a `C++` function we will need to support substitution.
 //  Even in the areas where substitution makes the result function longer than it would be without substitution using clang v6 and gcc v7.4.0
 
-std::string ItaniumMangler::mangle(FunctionDecl *functionDecl) {
-    // All mangled names start with "_Z"...
-    std::string mangledName = "_Z" + unqualifiedName(functionDecl);
+void ItaniumMangler::mangle(FunctionDecl *functionDecl) {
+    mangleFunction(functionDecl, "", "");
+}
 
-    // We only have to use <bare-function-name> since there isn't a namespace yet.
+void ItaniumMangler::mangle(GlobalVariableDecl *globalVariableDecl) {
+    mangleVariable(globalVariableDecl, "", "");
+}
+
+void ItaniumMangler::mangle(NamespaceDecl *namespaceDecl) {
+    mangleNamespace(namespaceDecl, "");
+}
+
+void ItaniumMangler::mangle(TemplateFunctionDecl *templateFunctionDecl) {
+    mangleTemplateFunction(templateFunctionDecl, "", "");
+}
+
+void ItaniumMangler::mangle(StructDecl *structDecl) {
+    mangleStruct(structDecl, "");
+}
+
+void ItaniumMangler::mangleFunction(FunctionDecl *functionDecl, const std::string &prefix, const std::string &nameSuffix) {
+    // All mangled names start with "_Z"...
+    std::string mangledName = "_Z" + prefix + unqualifiedName(functionDecl) + nameSuffix;
+
     mangledName += bareFunctionType(functionDecl->parameters);
 
-    return mangledName;
+    functionDecl->setMangledName(mangledName);
 }
 
-std::string ItaniumMangler::mangle(GlobalVariableDecl *globalVariableDecl) {
+void ItaniumMangler::mangleVariable(GlobalVariableDecl *variableDecl, const std::string &prefix, const std::string &nameSuffix) {
     // All mangled names start with "_Z"...
-    return "_Z" + unqualifiedName(globalVariableDecl);
+    variableDecl->setMangledName("_Z" + prefix + unqualifiedName(variableDecl) + nameSuffix);
 }
 
-void ItaniumMangler::mangle(NamespaceDecl *namespaceDecl, const std::string& prefix) {
+void ItaniumMangler::mangleNamespace(NamespaceDecl *namespaceDecl, const std::string &prefix) {
     std::string nPrefix = prefix + sourceName(namespaceDecl->name());
 
     for (Decl* decl : namespaceDecl->nestedDecls()) {
         if (llvm::isa<FunctionDecl>(decl)) {
-            auto functionDecl = llvm::dyn_cast<FunctionDecl>(decl);
-            functionDecl->setMangledName("_ZN" + nPrefix + unqualifiedName(functionDecl) + "E" + bareFunctionType(functionDecl->parameters));
+            mangleFunction(llvm::dyn_cast<FunctionDecl>(decl), "N" + nPrefix, "E");
         } else if (llvm::isa<GlobalVariableDecl>(decl)) {
-            auto globalVariableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
-            globalVariableDecl->setMangledName("_ZN" + nPrefix + unqualifiedName(globalVariableDecl) + "E");
+            mangleVariable(llvm::dyn_cast<GlobalVariableDecl>(decl), "N" + nPrefix, "E");
         } else if (llvm::isa<NamespaceDecl>(decl)) {
-            mangle(llvm::dyn_cast<NamespaceDecl>(decl), nPrefix);
+            mangleNamespace(llvm::dyn_cast<NamespaceDecl>(decl), nPrefix);
+        } else if (llvm::isa<StructDecl>(decl)) {
+            mangleStruct(llvm::dyn_cast<StructDecl>(decl), nPrefix);
         } else if (llvm::isa<TemplateFunctionDecl>(decl)) {
-            auto templateFunctionDecl = llvm::dyn_cast<TemplateFunctionDecl>(decl);
-
-            for (FunctionDecl* implementedFunction : templateFunctionDecl->implementedFunctions()) {
-                std::string templatePrefix = unqualifiedName(implementedFunction);
-                std::string templateArgsStr = templateArgs(templateFunctionDecl->templateParameters,
-                                                           implementedFunction->templateArguments);
-                std::string funcType = bareFunctionType(implementedFunction->parameters);
-
-                std::string mangledName = "_ZN" + nPrefix;
-                mangledName += templatePrefix;
-                mangledName += templateArgsStr + "E";
-                // NOTE: I can't seem to find where in the Itanium spec it says we do this, but GCC and clang both put the
-                //  function result type before the function type on template functions? But not normal functions?
-                mangledName += typeName(implementedFunction->resultType);
-                mangledName += funcType;
-
-                implementedFunction->setMangledName(mangledName);
-            }
+            mangleTemplateFunction(llvm::dyn_cast<TemplateFunctionDecl>(decl), "N" + nPrefix, "E");
         }
     }
 }
 
-void ItaniumMangler::mangle(TemplateFunctionDecl *templateFunctionDecl) {
+void ItaniumMangler::mangleStruct(StructDecl *structDecl, const std::string &prefix) {
+    std::string nPrefix = prefix + sourceName(structDecl->name());
+
+    for (ConstructorDecl* constructor : structDecl->constructors) {
+        mangleConstructor(constructor, "N" + nPrefix, "E");
+    }
+
+    for (Decl* decl : structDecl->members) {
+        if (llvm::isa<FunctionDecl>(decl)) {
+            mangleFunction(llvm::dyn_cast<FunctionDecl>(decl), "N" + nPrefix, "E");
+        } else if (llvm::isa<TemplateFunctionDecl>(decl)) {
+            mangleTemplateFunction(llvm::dyn_cast<TemplateFunctionDecl>(decl), "N" + nPrefix, "E");
+        }
+    }
+
+    if (structDecl->destructor != nullptr) {
+        mangleDestructor(structDecl->destructor, "N" + nPrefix, "E");
+    }
+}
+
+void ItaniumMangler::mangleTemplateFunction(TemplateFunctionDecl* templateFunctionDecl, const std::string& prefix, const std::string& nameSuffix) {
+    std::string nPrefix = "_Z" + prefix;
+
     for (FunctionDecl* implementedFunction : templateFunctionDecl->implementedFunctions()) {
         std::string templatePrefix = unqualifiedName(implementedFunction);
         std::string templateArgsStr = templateArgs(templateFunctionDecl->templateParameters,
                                                    implementedFunction->templateArguments);
         std::string funcType = bareFunctionType(implementedFunction->parameters);;
 
-        std::string mangledName = "_Z" + templatePrefix;
+        std::string mangledName = nPrefix + templatePrefix;
+        mangledName += nameSuffix;
         mangledName += templateArgsStr;
         // NOTE: I can't seem to find where in the Itanium spec it says we do this, but GCC and clang both put the
         //  function result type before the function type on template functions? But not normal functions?
@@ -97,14 +133,40 @@ void ItaniumMangler::mangle(TemplateFunctionDecl *templateFunctionDecl) {
     }
 }
 
-void ItaniumMangler::mangle(StructDecl *structDecl, const std::string& prefix) {
-    for (Decl* decl : structDecl->members) {
-        if (llvm::isa<FunctionDecl>(decl)) {
+void ItaniumMangler::mangleConstructor(ConstructorDecl *constructorDecl, const std::string &prefix, const std::string &nameSuffix) {
+    // All mangled names start with "_Z"...
+    std::string mangledName = "_Z" + prefix;
 
-        } else if (llvm::isa<TemplateFunctionDecl>(decl)) {
-
-        }
+    // We don't allow allocating within the constructor so we don't do export a `C3`
+    if (constructorDecl->assignsVTable()) {
+        mangledName += "C1";
+    } else {
+        mangledName += "C2";
     }
+
+    mangledName += nameSuffix;
+
+    // We only have to use <bare-function-name> since there isn't a namespace yet.
+    mangledName += bareFunctionType(constructorDecl->parameters);
+
+    constructorDecl->setMangledName(mangledName);
+}
+
+void ItaniumMangler::mangleDestructor(DestructorDecl *destructorDecl, const std::string &prefix, const std::string &nameSuffix) {
+    // All mangled names start with "_Z"...
+    std::string mangledName = "_Z" + prefix;
+
+    // TODO: Once we support virtual destructors we will also have to support `D1`
+    mangledName += "D2";
+
+    mangledName += nameSuffix;
+
+    // We only have to use <bare-function-name> since there isn't a namespace yet.
+    // NOTE: Destructors cannot have parameters but are considered functions so they have to have the 'v' specifier to
+    //  show it doesn't accept any parameters here
+    mangledName += "v";
+
+    destructorDecl->setMangledName(mangledName);
 }
 
 std::string ItaniumMangler::unqualifiedName(FunctionDecl *functionDecl) {
