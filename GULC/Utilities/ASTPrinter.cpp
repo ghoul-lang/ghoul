@@ -163,7 +163,6 @@ std::string ASTPrinter::getTypeName(const Type *type) {
 
             result += unresolvedType->name();
 
-            // TODO: We should support printing this out at some point.
             if (unresolvedType->hasTemplateArguments()) {
                 result += "<?>";
             }

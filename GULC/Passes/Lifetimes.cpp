@@ -117,10 +117,6 @@ void Lifetimes::processExpr(Expr *&expr) {
         case Expr::Kind::FunctionCall:
             processFunctionCallExpr(llvm::dyn_cast<FunctionCallExpr>(expr));
             break;
-        case Expr::Kind::Identifier:
-            // TODO: I don't think we need to handle these? Shouldn't these be errors at this point?
-            processIdentifierExpr(expr);
-            break;
         case Expr::Kind::ImplicitCast:
             processImplicitCastExpr(llvm::dyn_cast<ImplicitCastExpr>(expr));
             break;
@@ -222,7 +218,6 @@ void Lifetimes::processTemplateFunctionDecl(TemplateFunctionDecl *templateFuncti
 
 void Lifetimes::processTemplateFunctionDeclImplementation(TemplateFunctionDecl *templateFunctionDecl,
                                                           FunctionDecl *implementedFunction) {
-    // TODO: Should we do anything else?
     processFunctionDecl(implementedFunction);
 }
 
@@ -535,10 +530,6 @@ void Lifetimes::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
     processExpr(functionCallExpr->functionReference);
 }
 
-void Lifetimes::processIdentifierExpr(Expr *&identifierExpr) {
-    // TODO: Shouldn't this be an error at this point?
-}
-
 void Lifetimes::processImplicitCastExpr(ImplicitCastExpr *implicitCastExpr) {
     processExpr(implicitCastExpr->castee);
 }
@@ -611,8 +602,6 @@ DestructLocalVariableExpr *Lifetimes::destructLocalVariable(LocalVariableDeclExp
         auto structType = llvm::dyn_cast<StructType>(checkType);
         auto foundDestructor = structType->decl()->destructor;
 
-        // TODO: In the future when we support creating default destructors we will need to just skip structs that
-        //  don't have destructors (because not having a destructor will mean it didn't need a destructor)
         if (foundDestructor == nullptr) {
             printError("[INTERNAL] struct `" + structType->decl()->name() + "` is missing a destructor!",
                        localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
@@ -622,7 +611,6 @@ DestructLocalVariableExpr *Lifetimes::destructLocalVariable(LocalVariableDeclExp
         refLocal->resultType = localVariableDeclExpr->resultType->deepCopy();
         // A local variable reference is an lvalue.
         refLocal->resultType->setIsLValue(true);
-        // TODO: Do we need to dereference the local variable reference? I don't think we do...
 
         if (foundDestructor != nullptr) {
             currentFileAst->addImportExtern(foundDestructor);
@@ -649,8 +637,6 @@ DestructParameterExpr *Lifetimes::destructParameter(int64_t paramIndex, Paramete
         auto structType = llvm::dyn_cast<StructType>(checkType);
         auto foundDestructor = structType->decl()->destructor;
 
-        // TODO: In the future when we support creating default destructors we will need to just skip structs that
-        //  don't have destructors (because not having a destructor will mean it didn't need a destructor)
         if (foundDestructor == nullptr) {
             printError("[INTERNAL] struct `" + structType->decl()->name() + "` is missing a destructor!",
                        parameter->startPosition(), parameter->endPosition());
@@ -660,7 +646,6 @@ DestructParameterExpr *Lifetimes::destructParameter(int64_t paramIndex, Paramete
         refParameter->resultType = parameter->type->deepCopy();
         // A local variable reference is an lvalue.
         refParameter->resultType->setIsLValue(true);
-        // TODO: Do we need to dereference the local variable reference? I don't think we do...
 
         if (foundDestructor != nullptr) {
             currentFileAst->addImportExtern(foundDestructor);

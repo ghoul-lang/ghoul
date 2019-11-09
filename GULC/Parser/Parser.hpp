@@ -93,7 +93,6 @@ namespace gulc {
         Expr* parseEqualToNotEqualTo(bool isStatement, bool templateTypingAllowed);
         Expr* parseGreaterThanLessThan(bool isStatement, bool templateTypingAllowed);
         Expr* parseBitwiseShifts(bool isStatement, bool templateTypingAllowed);
-        // TODO: Verify everything is parsed in the correct order (make sure it's ((12 / 2) / 2) instead of (12 / (2 / 2)))
         Expr* parseAdditionSubtraction(bool isStatement, bool templateTypingAllowed);
         Expr* parseMultiplicationDivisionOrRemainder(bool isStatement, bool templateTypingAllowed);
         // TODO: We might want to add a function that is called before this one that will handle custom operators. It should use loop as long as PeekType is SYMBOL

@@ -29,7 +29,6 @@ namespace gulc {
         enum class Kind {
             TemplateFunction,
             Function,
-            // TODO: Add 'MemberFunctionDecl' (a.k.a. MethodDecl) and 'MemberPropertyDecl' (which is why we call it 'MemberFunctionDecl' instead of 'MethodDecl')
             // TODO: Create 'Property'
             Property,
             MemberFunction,

@@ -75,7 +75,7 @@ namespace gulc {
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
 
         void generateImportExtern(const Decl* decl);
-        llvm::GlobalObject* generateDecl(const Decl* decl, bool isInternal = true);
+        void generateDecl(const Decl* decl, bool isInternal = true);
         void generateStmt(const Stmt* stmt, const std::string& stmtName = "");
         llvm::Value* generateExpr(const Expr* expr);
 
@@ -91,8 +91,8 @@ namespace gulc {
         // Decls
         void generateConstructorDecl(const ConstructorDecl* constructorDecl, bool isInternal);
         void generateDestructorDecl(const DestructorDecl* destructorDecl, bool isInternal);
-        llvm::Function* generateFunctionDecl(const FunctionDecl* functionDecl, bool isInternal);
-        llvm::GlobalVariable* generateGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl, bool isInternal);
+        void generateFunctionDecl(const FunctionDecl* functionDecl, bool isInternal);
+        void generateGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl, bool isInternal);
         void generateNamespace(const NamespaceDecl* namespaceDecl);
         void generateStructDecl(const StructDecl* structDecl, bool isInternal);
         void generateTemplateFunctionDecl(const TemplateFunctionDecl* templateFunctionDecl, bool isInternal);

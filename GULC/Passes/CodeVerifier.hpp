@@ -81,7 +81,6 @@ namespace gulc {
 
         // Decls
         void verifyConstructorDecl(ConstructorDecl* constructorDecl);
-        // TODO: Support verifying that a function returns on every branch
         void verifyFunctionDecl(FunctionDecl* functionDecl);
         void verifyGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
         void verifyNamespaceDecl(NamespaceDecl* namespaceDecl);

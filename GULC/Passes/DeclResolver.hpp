@@ -60,9 +60,6 @@
 #include <AST/Decls/TemplateFunctionDecl.hpp>
 #include <AST/Decls/StructDecl.hpp>
 
-// TODO: We need to verify a `goto` is legal by checking that no new variables are declared between the goto and the
-//  label we're jumping to
-
 namespace gulc {
     // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
     class DeclResolver {

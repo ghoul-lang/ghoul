@@ -28,7 +28,6 @@
 
 using namespace gulc;
 
-// TODO: Should we just combine with `getTypeGreaterThan` as a `compareTypes`?
 // TODO: `ignoreQualifiers` should only ignore the first qualifiers...
 bool TypeComparer::getTypesAreSame(const Type* type1, const Type* type2, bool ignoreQualifiers) {
     if (type1->getTypeKind() == type2->getTypeKind()) {

@@ -524,9 +524,6 @@ void CodeVerifier::verifyForStmt(ForStmt *forStmt) {
 }
 
 void CodeVerifier::verifyGotoStmt(GotoStmt *gotoStmt) {
-    // TODO: We need to verify the `goto` is allowed. While the label the `goto` references has already been verified to
-    //  exist we haven't verified that new local variables have been declared between here and the point we're jumping
-    //  to.
     gotoStmt->currentNumLocalVariables = currentFunctionLocalVariablesCount;
     validateGotoVariables.push_back(gotoStmt);
 }
@@ -659,7 +656,8 @@ void CodeVerifier::verifyFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
 }
 
 void CodeVerifier::verifyIdentifierExpr(Expr *&identifierExpr) {
-    // TODO: We should verify the template parameters when we support them...
+    printError("[INTERNAL] identifier found in code verifier!",
+               identifierExpr->startPosition(), identifierExpr->endPosition());
 }
 
 void CodeVerifier::verifyImplicitCastExpr(ImplicitCastExpr *implicitCastExpr) {
@@ -767,7 +765,26 @@ void CodeVerifier::verifyUnresolvedTypeRefExpr(Expr *&expr) {
 }
 
 bool CodeVerifier::checkDeclNameInUse(const std::string &name, Decl* ignoreDecl, bool ignoreFunctions) {
-    // TODO: Check current class
+    // Check current struct/class
+    if (currentStruct != nullptr) {
+        for (Decl* checkDecl : currentStruct->members) {
+            if (ignoreDecl == checkDecl) continue;
+
+            if (checkDecl->name() == name) {
+                // If we're supposed to ignore functions and the `checkDecl` is a function or template function then we go to the next top level decl...
+                if (ignoreFunctions &&
+                    (llvm::isa<FunctionDecl>(checkDecl) || llvm::isa<TemplateFunctionDecl>(checkDecl))) {
+                    continue;
+                }
+
+                return true;
+            }
+        }
+
+        // If the current struct isn't null then we don't check the current namespace or current file file, we can differentiate between file and namespace declarations...
+        return false;
+    }
+
     // Check current namespace
     if (currentNamespace != nullptr) {
         for (Decl* checkDecl : currentNamespace->nestedDecls()) {
@@ -807,7 +824,28 @@ bool CodeVerifier::checkDeclNameInUse(const std::string &name, Decl* ignoreDecl,
 }
 
 bool CodeVerifier::checkFunctionExists(FunctionDecl *function) {
-    // TODO: Check current class
+    // Check current struct/class
+    if (currentStruct != nullptr) {
+        for (Decl* checkDecl : currentStruct->members) {
+            if (function == checkDecl) continue;
+
+            if (llvm::isa<FunctionDecl>(checkDecl)) {
+                auto functionDecl = llvm::dyn_cast<FunctionDecl>(checkDecl);
+
+                if (checkDecl->name() == function->name()) {
+                    // If the parameters are the same then we return saying the function exists...
+                    if (checkParamsAreSame(functionDecl->parameters, function->parameters)) {
+                        return true;
+                    }
+                    // Else we keep searching...
+                }
+            }
+        }
+
+        // If the current struct isn't null then we don't check the current namespace or current file, we can differentiate between file and namespace functions when calling...
+        return false;
+    }
+
     // Check current namespace
     if (currentNamespace != nullptr) {
         for (Decl* checkDecl : currentNamespace->nestedDecls()) {

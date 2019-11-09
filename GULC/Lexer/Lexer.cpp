@@ -92,10 +92,8 @@ Token Lexer::lexOneToken() {
 
     startPosition = TextPosition(_currentIndex, _currentLine, _currentColumn);
 
-    // TODO: This probably doesn't need to be a loop...
     for (; _currentIndex < _sourceCode.length(); ++_currentIndex, ++_currentColumn) {
         if (_sourceCode[_currentIndex] == '\r' || _sourceCode[_currentIndex] == '\n') {
-            // TODO: Should this be here?
             PARSE_AND_RETURN_IF_TOKEN_TEXT_NOT_EMPTY();
 
             ++_currentLine;
@@ -417,8 +415,6 @@ else { tmpString += (unescapedChar); }
                     }
                 case '/':
                     PARSE_AND_RETURN_IF_TOKEN_TEXT_NOT_EMPTY();
-
-                    // TODO: Should we try to store the text from the comments?
 
                     if (CHECK_NEXT_CHAR() == '=') {
                         ++_currentIndex;
@@ -764,10 +760,10 @@ Token Lexer::parseToken(std::string &tokenText, TextPosition startPosition) {
         result.metaType = TokenMetaType::KEYWORD;
         result.tokenType = TokenType::FINALLY;
         result.currentSymbol = "finally";
-    } else if (tokenText == "modifier") {
-        result.metaType = TokenMetaType::KEYWORD;
-        result.tokenType = TokenType::MODIFIER;
-        result.currentSymbol = "modifier";
+//    } else if (tokenText == "modifier") {
+//        result.metaType = TokenMetaType::KEYWORD;
+//        result.tokenType = TokenType::MODIFIER;
+//        result.currentSymbol = "modifier";
     } else {
         result.metaType = TokenMetaType::VALUE;
         result.tokenType = TokenType::SYMBOL;

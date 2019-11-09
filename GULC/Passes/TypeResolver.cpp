@@ -497,31 +497,6 @@ void TypeResolver::processEnumDecl(EnumDecl *enumDecl) {
 }
 
 void TypeResolver::processFunctionDecl(FunctionDecl *functionDecl) {
-    // TODO: Support template arguments...
-//    if (functionDecl->hasTemplateParameters()) {
-//        bool shouldHaveDefaultArgument = false;
-//
-//        // We allow `void func<typename T, T value>()` so we have to set the functionTemplateParams here...
-//        functionTemplateParams = &functionDecl->templateParameters;
-//
-//        for (TemplateParameterDecl* templateParameterDecl : functionDecl->templateParameters) {
-//            if (!resolveType(templateParameterDecl->type)) {
-//                printError("template parameter type `" + templateParameterDecl->type->getString() + "` was not found!",
-//                           templateParameterDecl->startPosition(), templateParameterDecl->endPosition());
-//            }
-//
-//            // Also make sure all template parameters after the first optional template parameter are also optional...
-//            if (templateParameterDecl->hasDefaultArgument()) {
-//                if (!shouldHaveDefaultArgument) {
-//                    shouldHaveDefaultArgument = true;
-//                } else {
-//                    printError("all template parameters after the first optional template parameter must also be optional!",
-//                               templateParameterDecl->startPosition(), templateParameterDecl->endPosition());
-//                }
-//            }
-//        }
-//    }
-
     // Resolve function return type...
     if (!resolveType(functionDecl->resultType)) {
         printError("could not find function return type `" + functionDecl->resultType->getString() + "`!",
@@ -787,7 +762,6 @@ Expr* TypeResolver::processIdentifierExprForDecl(Decl* decl, Expr*& expr) {
     auto identifierExpr = llvm::dyn_cast<IdentifierExpr>(expr);
 
     if (decl->name() == identifierExpr->name()) {
-        // TODO: Add all Decls that can be types as they're added...
         if (llvm::isa<EnumDecl>(decl)) {
             auto enumDecl = llvm::dyn_cast<EnumDecl>(decl);
 

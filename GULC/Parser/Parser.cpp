@@ -138,7 +138,6 @@ FileAST Parser::parseFile() {
  * @param startPosition - start position of the section of code that caused the error
  * @param endPosition - end position of the section of code that caused the error
  */
-// TODO: Support adding the error to a list and continuing? Or just cancelling the compilation of this file?
 void Parser::printError(const std::string& errorMessage, TextPosition startPosition, TextPosition endPosition) {
     std::cout << "gulc parser error[" << _filePath << ", "
                                    "{" << startPosition.line << ", " << startPosition.column << "} "
@@ -156,7 +155,6 @@ void Parser::printError(const std::string& errorMessage, TextPosition startPosit
  * @param startPosition - start position of the section of code to warn about
  * @param endPosition - end position of the section of code to warn about
  */
-// TODO: Support adding the warning to a list
 void Parser::printWarning(const std::string &warningMessage, TextPosition startPosition, TextPosition endPosition) {
     std::cout << "gulc parser warning[" << _filePath << ", "
                                      "{" << startPosition.line << ", " << startPosition.column << "} "
@@ -196,7 +194,6 @@ Decl *Parser::parseTopLevelDecl() {
      */
 
     while (peekedToken.metaType == TokenMetaType::MODIFIER) {
-        // TODO:
         switch (peekedToken.tokenType) {
             case TokenType::PUBLIC:
             case TokenType::PRIVATE:
@@ -243,8 +240,8 @@ Decl *Parser::parseTopLevelDecl() {
                 // We break from the loop if the token is `const`, `mut`, or `immut`
                 goto qualifierFound;
             default:
-                // TODO: Should this just be a warning instead?
-                printError("unknown modifier", peekedToken.startPosition, peekedToken.endPosition);
+                printError("unknown qualifier '" + peekedToken.currentSymbol + "'!",
+                           peekedToken.startPosition, peekedToken.endPosition);
                 return nullptr;
         }
 
@@ -316,7 +313,6 @@ qualifierFound:
             return resultNamespace;
         }
         case TokenType::CLASS:
-            // TODO:
             printError("classes not yet supported!", startPosition, endPosition);
             return nullptr;
         case TokenType::STRUCT: {
@@ -371,11 +367,9 @@ qualifierFound:
                                   std::move(constructors), std::move(members), destructor);
         }
         case TokenType::UNION:
-            // TODO:
             printError("unions not yet supported!", startPosition, endPosition);
             return nullptr;
         case TokenType::INTERFACE:
-            // TODO:
             printError("interfaces not yet supported!", startPosition, endPosition);
             return nullptr;
         case TokenType::ENUM: {
@@ -591,7 +585,7 @@ qualifierFound:
  * `class box<T>`
  * `struct fixed_array<typename T, size_t length>`
  *
- * @param startPosition - TODO: This probably isn't needed
+ * @param startPosition
  * @return `std::vector` of parsed `TemplateParameterDecl`s
  */
 std::vector<TemplateParameterDecl *> Parser::parseTemplateParameterDecls(TextPosition startPosition) {

@@ -149,7 +149,6 @@ llvm::Type *gulc::CodeGen::generateLlvmType(const gulc::Type* type) {
         }
         case gulc::Type::Kind::Pointer: {
             auto pointerType = llvm::dyn_cast<gulc::PointerType>(type);
-            // TODO: Is this right? What is the address space stuff?
             return llvm::PointerType::getUnqual(generateLlvmType(pointerType->pointToType));
         }
         case gulc::Type::Kind::Reference: {
@@ -224,32 +223,31 @@ void gulc::CodeGen::generateImportExtern(const gulc::Decl *decl) {
     }
 }
 
-llvm::GlobalObject* gulc::CodeGen::generateDecl(const gulc::Decl *decl, bool isInternal) {
+void gulc::CodeGen::generateDecl(const gulc::Decl *decl, bool isInternal) {
     switch (decl->getDeclKind()) {
         case gulc::Decl::Kind::Enum:
             // We don't generate any code for the enum declaration...
             break;
         case gulc::Decl::Kind::Function:
-            return generateFunctionDecl(llvm::dyn_cast<gulc::FunctionDecl>(decl), isInternal);
+            generateFunctionDecl(llvm::dyn_cast<gulc::FunctionDecl>(decl), isInternal);
+            break;
         case gulc::Decl::Kind::GlobalVariable:
-            return generateGlobalVariableDecl(llvm::dyn_cast<gulc::GlobalVariableDecl>(decl), isInternal);
+            generateGlobalVariableDecl(llvm::dyn_cast<gulc::GlobalVariableDecl>(decl), isInternal);
+            break;
         case gulc::Decl::Kind::Namespace:
             generateNamespace(llvm::dyn_cast<gulc::NamespaceDecl>(decl));
-            // TODO: Should `generateDecl` even return anything at this point?
-            return nullptr;
+            break;
         case gulc::Decl::Kind::Struct:
             generateStructDecl(llvm::dyn_cast<StructDecl>(decl), isInternal);
-            return nullptr;
+            break;
         case gulc::Decl::Kind::TemplateFunction:
             generateTemplateFunctionDecl(llvm::dyn_cast<gulc::TemplateFunctionDecl>(decl), isInternal);
-            return nullptr;
+            break;
         default:
             printError("internal - unsupported decl!",
                        decl->startPosition(), decl->endPosition());
             break;
     }
-
-	return nullptr;
 }
 
 void gulc::CodeGen::generateStmt(const gulc::Stmt *stmt, const std::string& stmtName) {
@@ -290,9 +288,6 @@ void gulc::CodeGen::generateStmt(const gulc::Stmt *stmt, const std::string& stmt
         case gulc::Stmt::Kind::While:
             return generateWhileStmt(llvm::dyn_cast<WhileStmt>(stmt), stmtName);
         case gulc::Stmt::Kind::Expr:
-            // TODO: Is this a memory leak? I can't figure out if we have to explicitly free the unused `Value*` or if LLVM is storing it somewhere else?
-            //  I even went so far as to check the `clang` code generator and they explicitly state they're ignoring an `LValue` result...
-            //  and when I go to the definition of `LValue` it has an `llvm::Value*` member that isn't freed in a constructor...
             generateExpr(llvm::dyn_cast<Expr>(stmt));
             break;
     }
@@ -437,7 +432,6 @@ void gulc::CodeGen::generateConstructorDecl(const gulc::ConstructorDecl *constru
     generateStmt(constructorDecl->body());
     currentFunctionLocalVariablesCount = 0;
 
-    // TODO: We might want to remove this.
     verifyFunction(*function);
     funcPass->run(*function);
 
@@ -474,7 +468,6 @@ void gulc::CodeGen::generateDestructorDecl(const gulc::DestructorDecl *destructo
     generateStmt(destructorDecl->body());
     currentFunctionLocalVariablesCount = 0;
 
-    // TODO: We might want to remove this.
     verifyFunction(*function);
     funcPass->run(*function);
 
@@ -483,7 +476,7 @@ void gulc::CodeGen::generateDestructorDecl(const gulc::DestructorDecl *destructo
     currentFunction = nullptr;
 }
 
-llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *functionDecl, bool isInternal) {
+void gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *functionDecl, bool isInternal) {
     std::vector<llvm::Type*> paramTypes = generateParamTypes(functionDecl->parameters, functionDecl->parentStruct);
     llvm::Type* returnType = generateLlvmType(functionDecl->resultType);
     llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
@@ -508,18 +501,15 @@ llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *fu
     generateStmt(functionDecl->body());
     currentFunctionLocalVariablesCount = 0;
 
-    // TODO: We might want to remove this.
     verifyFunction(*function);
     funcPass->run(*function);
 
     // Reset the insertion point (this probably isn't needed but oh well)
     irBuilder->ClearInsertionPoint();
 	currentFunction = nullptr;
-
-    return function;
 }
 
-llvm::GlobalVariable *gulc::CodeGen::generateGlobalVariableDecl(const gulc::GlobalVariableDecl *globalVariableDecl, bool isInternal) {
+void gulc::CodeGen::generateGlobalVariableDecl(const gulc::GlobalVariableDecl *globalVariableDecl, bool isInternal) {
     llvm::GlobalVariable* checkExtern = module->getGlobalVariable(globalVariableDecl->name(), true);
 
     llvm::Constant* initialValue = nullptr;
@@ -533,7 +523,7 @@ llvm::GlobalVariable *gulc::CodeGen::generateGlobalVariableDecl(const gulc::Glob
             checkExtern->setInitializer(initialValue);
         }
 
-        return checkExtern;
+        return;
     } else {
         llvm::Type* llvmType = generateLlvmType(globalVariableDecl->type);
 
@@ -545,8 +535,8 @@ llvm::GlobalVariable *gulc::CodeGen::generateGlobalVariableDecl(const gulc::Glob
             linkageType = llvm::Function::LinkageTypes::InternalLinkage;
         }
 
-        return new llvm::GlobalVariable(*module, llvmType, isConstant, linkageType, initialValue,
-                                        globalVariableDecl->mangledName());
+        new llvm::GlobalVariable(*module, llvmType, isConstant, linkageType, initialValue,
+                                 globalVariableDecl->mangledName());
     }
 }
 
@@ -566,7 +556,9 @@ void gulc::CodeGen::generateStructDecl(const gulc::StructDecl *structDecl, bool 
     currentStruct = structDecl;
 
     for (const ConstructorDecl* constructor : structDecl->constructors) {
-        // TODO: If the constructor is `private` or `internal` then `isInternal` must be set to true even if our `isInternal` is false
+        // TODO: If the constructor is `private` then `isInternal` must be set to true even if our `isInternal` is false
+        //  NOTE: We don't do this for `internal` since `internal` can still be accessed by other objects in the same
+        //   project
         generateConstructorDecl(constructor, isInternal);
     }
 
@@ -1124,7 +1116,8 @@ llvm::Value *gulc::CodeGen::generateFloatLiteralExpr(const gulc::FloatLiteralExp
                 return llvm::ConstantFP::get(*llvmContext, llvm::APFloat(llvm::APFloat::IEEEsingle(), floatLiteralExpr->numberValue()));
             case 8:
                 return llvm::ConstantFP::get(*llvmContext, llvm::APFloat(llvm::APFloat::IEEEdouble(), floatLiteralExpr->numberValue()));
-            // case 16: // TODO: Support the quad
+            case 16:
+                return llvm::ConstantFP::get(*llvmContext, llvm::APFloat(llvm::APFloat::IEEEquad(), floatLiteralExpr->numberValue()));
             default:
                 printError("unsupported floating point size!",
                            floatLiteralExpr->startPosition(), floatLiteralExpr->endPosition());
@@ -1269,7 +1262,7 @@ llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperato
                 return irBuilder->CreateNeg(rvalue, "negtmp");
             }
         } else if (prefixOperatorExpr->operatorName() == "&" || prefixOperatorExpr->operatorName() == ".ref") {
-            // TODO: Should we try to do error checking here?
+            // NOTE: All error checking for this should be performed in a pass before the code generator
             return lvalue;
         } else if (prefixOperatorExpr->operatorName() != "+") {
             printError("unknown built in prefix operator '" + prefixOperatorExpr->operatorName() +  "'!",
@@ -1414,7 +1407,6 @@ llvm::Function *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr, s
         case gulc::Expr::Kind::RefStructMemberFunction: {
             auto refStructMemberFunction = llvm::dyn_cast<RefStructMemberFunctionExpr>(expr);
             *nameOut = refStructMemberFunction->refFunction->name();
-            // TODO: Will this cause an error if the struct is declared after this? Should we handle structs how we do with namespace calls? Externing them?
             return module->getFunction(refStructMemberFunction->refFunction->mangledName());
         }
         default:

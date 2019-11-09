@@ -236,7 +236,6 @@ void DeclResolver::processConstructorDecl(ConstructorDecl* constructorDecl) {
         functionParams = nullptr;
     }
 
-    // TODO: Should we make it `void`?
     returnType = nullptr;
 
     // We reset to zero just in case.
@@ -261,7 +260,6 @@ void DeclResolver::processDestructorDecl(DestructorDecl *destructorDecl) {
 
     functionParams = nullptr;
 
-    // TODO: Should we make it `void`?
     returnType = nullptr;
 
     // We reset to zero just in case.
@@ -296,8 +294,6 @@ void DeclResolver::processFunctionDecl(FunctionDecl *functionDecl) {
         parameter->typeTemplateParamNumber = applyTemplateTypeArguments(parameter->type);
     }
 
-
-    // TODO: This might be wrong. What if we want to return `const [{struct type}]`? the `const` affects all members of the struct type...
     if (llvm::isa<ConstType>(functionDecl->resultType)) {
         printWarning("`const` qualifier unneeded on function result type, function return types are already `const` qualified!",
                      functionDecl->startPosition(), functionDecl->endPosition());
@@ -575,11 +571,7 @@ bool DeclResolver::processGotoStmt(GotoStmt *gotoStmt) {
         addUnresolvedLabel(gotoStmt->label);
     }
 
-    // TODO: Is this correct? Regardless of where we are in the function here a goto is basically a return
-    //  and the label where we go to will be checked if it returns at all code paths... but all code after this is
-    //  unreachable
-    // TODO: Even IF this goto goes back above us this will still be an infinite loop
-    return true;
+    return false;
 }
 
 bool DeclResolver::processIfStmt(IfStmt *ifStmt) {
@@ -1090,7 +1082,6 @@ void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
         auto functionPointerType = llvm::dyn_cast<FunctionPointerType>(functionCallExpr->functionReference->resultType);
 
         for (std::size_t i = 0; i < functionCallExpr->arguments.size(); ++i) {
-            // TODO: We will also have to handle implicit casting at some point...
             if (!getTypeIsReference(functionPointerType->paramTypes[i])) {
                 convertLValueToRValue(functionCallExpr->arguments[i]);
             }
@@ -1135,19 +1126,6 @@ bool DeclResolver::canImplicitCast(const Type* to, const Type* from) {
             // If `to` and `from` are both built in types then they CAN be implicitly casted...
             return true;
         }
-        // TODO: Should we support implicit casting to/from enums
-//        else if (llvm::isa<EnumType>(from)) {
-//            auto enumType = llvm::dyn_cast<EnumType>(from);
-//            return canImplicitCast(to, enumType->baseType());
-//        }
-    // TODO: Should we support implicit casting to/from enums
-//    } else if (llvm::isa<EnumType>(to)) {
-//        auto enumType = llvm::dyn_cast<EnumType>(to);
-//
-//        if (llvm::isa<BuiltInType>(from)) {
-//            // TODO: This might need to be changed...
-//            return canImplicitCast(enumType->baseType(), from);
-//        }
     } else if (llvm::isa<PointerType>(to)) {
         auto toPtr = llvm::dyn_cast<PointerType>(to);
 
@@ -1404,7 +1382,7 @@ void DeclResolver::processIdentifierExprForDecl(Decl *checkDecl, IdentifierExpr*
         globalVariableRef->resultType = variableDecl->type->deepCopy();
         // A global variable reference is an lvalue.
         globalVariableRef->resultType->setIsLValue(true);
-        // TODO: Should we dereference global variables? Can globals even be references?
+        // NOTE: Global variables cannot be references currently
         //dereferenceReferences(globalVariableRef);
 //                delete identifierExpr;
 //                expr = globalVariableRef;
@@ -1469,7 +1447,6 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         delete identifierExpr;
 
         expr = new ResolvedTypeRefExpr(expr->startPosition(), expr->endPosition(), resolvedType);
-        // TODO: Is this really even needed?
         expr->resultType = resolvedType->deepCopy();
         return;
     }
@@ -1544,9 +1521,6 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                 } else {
                     resultExpr = (*functionTemplateArgs)[i]->deepCopy();
                 }
-
-                // TODO: Is this needed? I don't think it should be. We should handle `processExpr` WAY before we reach this point...
-                //processExpr(resultExpr);
 
                 // Delete the old identifier and set expression where it used to reside to now be the template argument value.
                 delete identifierExpr;
@@ -1718,7 +1692,6 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
             currentFileAst->addImportExtern(foundFunction);
         }
 
-        // TODO: Shouldn't we modify `functionCallArgs` to make them implicitly casted?
         return;
     }
 
@@ -1795,7 +1768,6 @@ void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVari
                 bool isExactMatch = false;
                 bool isAmbiguous = false;
 
-                // TODO: Search the struct decl for a matching constructor
                 for (ConstructorDecl* constructorDecl : structType->decl()->constructors) {
                     if (!checkConstructorOrFunctionMatchesCall(foundConstructor, constructorDecl,
                                                                &localVariableDeclExpr->initializerArgs,
@@ -1858,7 +1830,6 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
 
     // TODO: Support operator overloading the `.` and `->` operators
     // TODO: `public override T operator.() => return this.whatever_T_is;` this can ONLY be supported when the implementing class/struct has NO public facing functions
-    // TODO: MemberAccessCallExpr can ALSO be a namespace path to a type. We will need to take this into account at some point.
 //    processExpr(memberAccessCallExpr->objectRef);
 //    processIdentifierExpr(memberAccessCallExpr->member);
     if (llvm::isa<TempNamespaceRefExpr>(memberAccessCallExpr->objectRef)) {

@@ -96,7 +96,6 @@ namespace gulc {
         void processExplicitCastExpr(ExplicitCastExpr* explicitCastExpr);
         void processFloatLiteralExpr(FloatLiteralExpr* floatLiteralExpr);
         void processFunctionCallExpr(FunctionCallExpr* functionCallExpr);
-        void processIdentifierExpr(Expr*& identifierExpr);
         void processImplicitCastExpr(ImplicitCastExpr* implicitCastExpr);
         void processIndexerCallExpr(IndexerCallExpr* indexerCallExpr);
         void processIntegerLiteralExpr(IntegerLiteralExpr* integerLiteralExpr);

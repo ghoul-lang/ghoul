@@ -25,7 +25,6 @@ namespace gulc {
     public:
         static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::UnresolvedTypeRef; }
 
-        // TODO: Do we need to have template arguments?
         UnresolvedTypeRefExpr(TextPosition startPosition, TextPosition endPosition,
                               Type* unresolvedType)
                 : Expr(Kind::UnresolvedTypeRef, startPosition, endPosition),

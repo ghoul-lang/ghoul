@@ -59,7 +59,7 @@ namespace gulc {
 		TRY,
 		CATCH,
 		FINALLY,
-		MODIFIER, // TODO: Should we do this?
+//		MODIFIER,
 		KEYWORD,
 		CHECK,
 
@@ -131,7 +131,6 @@ namespace gulc {
 		COMMA, // ','
 		LPAREN, // '('
 		RPAREN, // ')'
-		// TODO: Probably not needed.
 		ENDOFFILE // might be removed, just used to double check everything is parsed correctly
 	};
 }

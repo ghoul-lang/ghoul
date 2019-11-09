@@ -26,7 +26,6 @@ namespace gulc {
 		TokenType tokenType;
 		//TokenMetaType tokMetaType;
 		TokenMetaType metaType;
-		// TODO: Decide if these should be put in a union?
 		std::string currentSymbol;
 		unsigned int currentChar;
 		TextPosition startPosition;

@@ -45,12 +45,12 @@ int main()
         if (i == 52)
         {
             i = 12;
-            return getMemberFunctionTest(hmm);
+            break;
         }
     }
 
     testLabel:
     int j = 12;
 
-    return i;
+    return 12 / 2 / 2;
 }
