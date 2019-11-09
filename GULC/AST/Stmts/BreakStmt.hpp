@@ -41,6 +41,7 @@ namespace gulc {
 
             auto result = new BreakStmt(startPosition(), endPosition(), _label);
             result->preBreakCleanup = std::move(copiedPreBreakCleanup);
+            result->isUnreachable = isUnreachable;
             return result;
         }
 

@@ -20,10 +20,31 @@
 using namespace gulc;
 
 void NameMangler::processFile(std::vector<FileAST*>& files) {
+    // Prepass to mangle declared type names
+    for (FileAST* fileAst : files) {
+        for (Decl *decl : fileAst->topLevelDecls()) {
+            processTypeDecl(decl);
+        }
+    }
+
     for (FileAST* fileAst : files) {
         for (Decl *decl : fileAst->topLevelDecls()) {
             processDecl(decl);
         }
+    }
+}
+
+void NameMangler::processTypeDecl(Decl *decl) {
+    switch (decl->getDeclKind()) {
+        case Decl::Kind::Enum:
+            _manglerBase->mangleDecl(llvm::dyn_cast<EnumDecl>(decl));
+            break;
+        case Decl::Kind::Namespace:
+            _manglerBase->mangleDecl(llvm::dyn_cast<NamespaceDecl>(decl));
+            break;
+        case Decl::Kind::Struct:
+            _manglerBase->mangleDecl(llvm::dyn_cast<StructDecl>(decl));
+            break;
     }
 }
 

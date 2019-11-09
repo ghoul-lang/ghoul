@@ -358,6 +358,10 @@ llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
             return generateRefStructMemberVariableExpr(llvm::dyn_cast<gulc::RefStructMemberVariableExpr>(expr));
         case gulc::Expr::Kind::DestructLocalVariable:
             return generateDestructLocalVariableExpr(llvm::dyn_cast<gulc::DestructLocalVariableExpr>(expr));
+        case gulc::Expr::Kind::DestructParameter:
+            return generateDestructParameterExpr(llvm::dyn_cast<gulc::DestructParameterExpr>(expr));
+        case gulc::Expr::Kind::DestructMemberVariable:
+            return generateDestructMemberVariableExpr(llvm::dyn_cast<gulc::DestructMemberVariableExpr>(expr));
         default:
             printError("unexpected expression type in code generator!",
                        expr->startPosition(), expr->endPosition());
@@ -433,9 +437,6 @@ void gulc::CodeGen::generateConstructorDecl(const gulc::ConstructorDecl *constru
     generateStmt(constructorDecl->body());
     currentFunctionLocalVariablesCount = 0;
 
-    // TODO: CodeGen shouldn't have to handle this, this should be handled elsewhere (`CodeVerifier` should check that a function returns on all code paths)
-    irBuilder->CreateRetVoid();
-
     // TODO: We might want to remove this.
     verifyFunction(*function);
     funcPass->run(*function);
@@ -473,9 +474,6 @@ void gulc::CodeGen::generateDestructorDecl(const gulc::DestructorDecl *destructo
     generateStmt(destructorDecl->body());
     currentFunctionLocalVariablesCount = 0;
 
-    // TODO: CodeGen shouldn't have to handle this, this should be handled elsewhere (`CodeVerifier` should check that a function returns on all code paths)
-    irBuilder->CreateRetVoid();
-
     // TODO: We might want to remove this.
     verifyFunction(*function);
     funcPass->run(*function);
@@ -509,12 +507,6 @@ llvm::Function* gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *fu
     currentFunctionLocalVariablesCount = 0;
     generateStmt(functionDecl->body());
     currentFunctionLocalVariablesCount = 0;
-
-    // TODO: CodeGen shouldn't have to handle this, this should be handled elsewhere (`CodeVerifier` should check that a function returns on all code paths)
-    if (llvm::isa<BuiltInType>(functionDecl->resultType) &&
-            llvm::dyn_cast<BuiltInType>(functionDecl->resultType)->size() == 0) {
-        irBuilder->CreateRetVoid();
-    }
 
     // TODO: We might want to remove this.
     verifyFunction(*function);
@@ -613,15 +605,10 @@ void gulc::CodeGen::generateCompoundStmt(const gulc::CompoundStmt* compoundStmt)
 
 void gulc::CodeGen::generateReturnStmt(const gulc::ReturnStmt *returnStmt) {
     if (returnStmt->hasReturnValue()) {
-        // TODO: The temporary local variable should be handled in a pass, NOT here
-        //  it will have to handle move semantics there rather than us doing a copy here
         if (returnStmt->preReturnExprs.empty()) {
             irBuilder->CreateRet(generateExpr(returnStmt->returnValue));
         } else {
             llvm::Value* returnValue = generateExpr(returnStmt->returnValue);
-            //llvm::AllocaInst* tmpReturnValue = irBuilder->CreateAlloca(returnValue->getType(), nullptr, "tmpret");
-            // TODO: Should this actually be volatile?
-            //irBuilder->CreateStore(returnValue, tmpReturnValue, false);
 
             for (Expr* preReturnExpr : returnStmt->preReturnExprs) {
                 generateExpr(preReturnExpr);
@@ -1454,6 +1441,44 @@ llvm::Value *gulc::CodeGen::generateDestructLocalVariableExpr(const gulc::Destru
 
     // We technically just return null...
     return variableRef;
+}
+
+llvm::Value *gulc::CodeGen::generateDestructParameterExpr(const gulc::DestructParameterExpr *destructParameterExpr) {
+    llvm::Value* parameterRef = generateRefParameterExpr(destructParameterExpr->parameter);
+
+    llvm::Function* destructorFunc = module->getFunction(destructParameterExpr->destructor->mangledName());
+
+    std::vector<llvm::Value*> llvmArgs{};
+    llvmArgs.reserve(1);
+    // We pass a reference to the local variable as the first argument of the destructor
+    // the destructor doesn't return anything. It modifies the `this` variable that we pass here
+    llvmArgs.push_back(parameterRef);
+
+    // Call the destructor...
+    // We don't bother giving the result a name since destructors return void
+    irBuilder->CreateCall(destructorFunc, llvmArgs);
+
+    // We technically just return null...
+    return parameterRef;
+}
+
+llvm::Value *gulc::CodeGen::generateDestructMemberVariableExpr(const gulc::DestructMemberVariableExpr *destructMemberVariableExpr) {
+    llvm::Value* memberVariableRef = generateRefStructMemberVariableExpr(destructMemberVariableExpr->memberVariable);
+
+    llvm::Function* destructorFunc = module->getFunction(destructMemberVariableExpr->destructor->mangledName());
+
+    std::vector<llvm::Value*> llvmArgs{};
+    llvmArgs.reserve(1);
+    // We pass a reference to the local variable as the first argument of the destructor
+    // the destructor doesn't return anything. It modifies the `this` variable that we pass here
+    llvmArgs.push_back(memberVariableRef);
+
+    // Call the destructor...
+    // We don't bother giving the result a name since destructors return void
+    irBuilder->CreateCall(destructorFunc, llvmArgs);
+
+    // We technically just return null...
+    return memberVariableRef;
 }
 
 void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& value) {

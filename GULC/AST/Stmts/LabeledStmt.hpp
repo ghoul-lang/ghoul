@@ -32,8 +32,10 @@ namespace gulc {
         Stmt* labeledStmt;
 
         Stmt* deepCopy() const override {
-            return new LabeledStmt(startPosition(), endPosition(), _label,
-                                   labeledStmt->deepCopy());
+            auto result = new LabeledStmt(startPosition(), endPosition(), _label,
+                                          labeledStmt->deepCopy());
+            result->isUnreachable = isUnreachable;
+            return result;
         }
 
         // This is used by the passes to store the number of local variables that were declared before the label

@@ -67,7 +67,9 @@ namespace gulc {
 
             TempNamespaceRef,
 
-            DestructLocalVariable
+            DestructLocalVariable,
+            DestructParameter,
+            DestructMemberVariable
         };
 
         Kind getExprKind() const { return _kind; }

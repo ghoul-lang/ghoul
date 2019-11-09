@@ -42,8 +42,10 @@ namespace gulc {
                 copiedCases.push_back(static_cast<CaseStmt*>(caseStmt->deepCopy()));
             }
 
-            return new SwitchStmt(startPosition(), endPosition(), condition->deepCopy(),
-                                  std::move(copiedCases));
+            auto result = new SwitchStmt(startPosition(), endPosition(),
+                                         condition->deepCopy(), std::move(copiedCases));
+            result->isUnreachable = isUnreachable;
+            return result;
         }
 
         ~SwitchStmt() override {

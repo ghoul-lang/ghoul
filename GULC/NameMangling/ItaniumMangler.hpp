@@ -22,6 +22,10 @@
 namespace gulc {
     class ItaniumMangler : public ManglerBase {
     public:
+        void mangleDecl(EnumDecl* enumDecl) override;
+        void mangleDecl(StructDecl* structDecl) override;
+        void mangleDecl(NamespaceDecl* namespaceDecl) override;
+
         void mangle(FunctionDecl* functionDecl) override;
         void mangle(GlobalVariableDecl* globalVariableDecl) override;
         void mangle(NamespaceDecl* namespaceDecl) override;
@@ -29,6 +33,10 @@ namespace gulc {
         void mangle(TemplateFunctionDecl* templateFunctionDecl) override;
 
     private:
+        void mangleDeclEnum(EnumDecl* enumDecl, const std::string& prefix, const std::string& nameSuffix);
+        void mangleDeclStruct(StructDecl* structDecl, const std::string& prefix, const std::string& nameSuffix);
+        void mangleDeclNamespace(NamespaceDecl* namespaceDecl, const std::string& prefix);
+
         void mangleFunction(FunctionDecl* functionDecl, const std::string& prefix, const std::string& nameSuffix);
         void mangleVariable(GlobalVariableDecl* variableDecl, const std::string& prefix, const std::string& nameSuffix);
         void mangleNamespace(NamespaceDecl* namespaceDecl, const std::string& prefix);

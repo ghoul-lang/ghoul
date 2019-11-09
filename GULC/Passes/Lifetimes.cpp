@@ -5,6 +5,7 @@
 #include <AST/Types/ConstType.hpp>
 #include <AST/Types/MutType.hpp>
 #include <AST/Types/ImmutType.hpp>
+#include <AST/Types/ReferenceType.hpp>
 #include "Lifetimes.hpp"
 
 using namespace gulc;
@@ -157,18 +158,26 @@ void Lifetimes::processExpr(Expr *&expr) {
 
 // Decls
 void Lifetimes::processConstructorDecl(ConstructorDecl *constructorDecl) {
+    functionParams = &constructorDecl->parameters;
+
     processCompoundStmt(constructorDecl->body(), true);
 }
 
 void Lifetimes::processDestructorDecl(DestructorDecl *destructorDecl) {
+    currentFunctionIsDestructor = true;
+
+    functionParams = nullptr;
+
     processCompoundStmt(destructorDecl->body(), true);
+
+    currentFunctionIsDestructor = false;
 }
 
 void Lifetimes::processFunctionDecl(FunctionDecl *functionDecl) {
     currentLocalVariablesCount = 0;
 
     currentFunction = functionDecl;
-
+    functionParams = &functionDecl->parameters;
 
     processCompoundStmt(functionDecl->body(), true);
 
@@ -340,7 +349,7 @@ void Lifetimes::processLabeledStmt(LabeledStmt *labeledStmt) {
 }
 
 void Lifetimes::processReturnStmt(ReturnStmt *returnStmt) {
-    processExpr(returnStmt->returnValue);
+    if (returnStmt->returnValue != nullptr) processExpr(returnStmt->returnValue);
 
     // Add the destructor calls to the pre return expression list
     for (int64_t i = static_cast<int64_t>(currentLocalVariablesCount) - 1; i >= 0; --i) {
@@ -350,7 +359,67 @@ void Lifetimes::processReturnStmt(ReturnStmt *returnStmt) {
             returnStmt->preReturnExprs.push_back(destructLocalVariableExpr);
         }
     }
-    // TODO: Destruct parameters
+
+    // We only destruct parameters on return statements
+    if (functionParams != nullptr) {
+        for (int64_t i = static_cast<int64_t>(functionParams->size()) - 1; i >= 0; --i) {
+            DestructParameterExpr *destructParameterExpr = destructParameter(i, (*functionParams)[i]);
+
+            if (destructParameterExpr != nullptr) {
+                returnStmt->preReturnExprs.push_back(destructParameterExpr);
+            }
+        }
+    }
+
+    if (currentFunctionIsDestructor) {
+        for (int64_t i = static_cast<int64_t>(currentStruct->dataMembers.size()) - 1; i >= 0; --i) {
+            GlobalVariableDecl* memberVariable = currentStruct->dataMembers[i];
+
+            Type* checkType = memberVariable->type;
+
+            if (llvm::isa<ConstType>(checkType)) {
+                checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
+            } else if (llvm::isa<MutType>(checkType)) {
+                checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
+            } else if (llvm::isa<ImmutType>(checkType)) {
+                checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
+            }
+
+            if (llvm::isa<StructType>(checkType)) {
+                auto structType = llvm::dyn_cast<StructType>(checkType);
+
+                if (structType->decl()->destructor == nullptr) {
+                    printError("[INTERNAL] struct `" + structType->decl()->name() + "` is missing a destructor!",
+                               memberVariable->startPosition(), memberVariable->endPosition());
+                }
+
+                // TODO: Clean this up. A lot of this code already exists in `DeclResolver`...
+                StructType *thisType = new StructType({}, {}, currentStruct->name(), currentStruct);
+
+                RefParameterExpr *refThisParam = new RefParameterExpr({}, {}, 0);
+                refThisParam->resultType = new ReferenceType({}, {}, thisType->deepCopy());
+                // A parameter reference is an lvalue.
+                refThisParam->resultType->setIsLValue(true);
+
+                // Dereference the `this` parameter
+                auto derefThisParam = new PrefixOperatorExpr(refThisParam->startPosition(),
+                                                             refThisParam->endPosition(),
+                                                             ".deref", refThisParam);
+                derefThisParam->resultType = thisType->deepCopy();
+                // A dereferenced value is an lvalue
+                derefThisParam->resultType->setIsLValue(true);
+
+                RefStructMemberVariableExpr *refMemberVariable = new RefStructMemberVariableExpr({}, {}, derefThisParam,
+                                                                                                 thisType,
+                                                                                                 memberVariable);
+
+                DestructMemberVariableExpr *destructMemberVariable =
+                        new DestructMemberVariableExpr({}, {}, refMemberVariable, structType->decl()->destructor);
+
+                returnStmt->preReturnExprs.push_back(destructMemberVariable);
+            }
+        }
+    }
 }
 
 void Lifetimes::processSwitchStmt(SwitchStmt *switchStmt) {
@@ -560,6 +629,44 @@ DestructLocalVariableExpr *Lifetimes::destructLocalVariable(LocalVariableDeclExp
         }
 
         return new DestructLocalVariableExpr({}, {}, refLocal, foundDestructor);
+    } else {
+        return nullptr;
+    }
+}
+
+DestructParameterExpr *Lifetimes::destructParameter(int64_t paramIndex, ParameterDecl* parameter) {
+    Type* checkType = parameter->type;
+
+    if (llvm::isa<ConstType>(checkType)) {
+        checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
+    } else if (llvm::isa<MutType>(checkType)) {
+        checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
+    } else if (llvm::isa<ImmutType>(checkType)) {
+        checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
+    }
+
+    if (llvm::isa<StructType>(checkType)) {
+        auto structType = llvm::dyn_cast<StructType>(checkType);
+        auto foundDestructor = structType->decl()->destructor;
+
+        // TODO: In the future when we support creating default destructors we will need to just skip structs that
+        //  don't have destructors (because not having a destructor will mean it didn't need a destructor)
+        if (foundDestructor == nullptr) {
+            printError("[INTERNAL] struct `" + structType->decl()->name() + "` is missing a destructor!",
+                       parameter->startPosition(), parameter->endPosition());
+        }
+
+        RefParameterExpr* refParameter = new RefParameterExpr({}, {}, paramIndex);
+        refParameter->resultType = parameter->type->deepCopy();
+        // A local variable reference is an lvalue.
+        refParameter->resultType->setIsLValue(true);
+        // TODO: Do we need to dereference the local variable reference? I don't think we do...
+
+        if (foundDestructor != nullptr) {
+            currentFileAst->addImportExtern(foundDestructor);
+        }
+
+        return new DestructParameterExpr({}, {}, refParameter, foundDestructor);
     } else {
         return nullptr;
     }

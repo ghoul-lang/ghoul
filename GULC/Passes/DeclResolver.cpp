@@ -112,59 +112,47 @@ void DeclResolver::processDecl(Decl *decl) {
     }
 }
 
-void DeclResolver::processStmt(Stmt *&stmt) {
+bool DeclResolver::processStmt(Stmt *&stmt) {
     switch (stmt->getStmtKind()) {
         case Stmt::Kind::Break:
-            processBreakStmt(llvm::dyn_cast<BreakStmt>(stmt));
-            break;
+            return processBreakStmt(llvm::dyn_cast<BreakStmt>(stmt));
         case Stmt::Kind::Case:
-            processCaseStmt(llvm::dyn_cast<CaseStmt>(stmt));
-            break;
+            return processCaseStmt(llvm::dyn_cast<CaseStmt>(stmt));
         case Stmt::Kind::Compound:
-            processCompoundStmt(llvm::dyn_cast<CompoundStmt>(stmt));
-            break;
+            return processCompoundStmt(llvm::dyn_cast<CompoundStmt>(stmt), false);
         case Stmt::Kind::Continue:
-            processContinueStmt(llvm::dyn_cast<ContinueStmt>(stmt));
-            break;
+            return processContinueStmt(llvm::dyn_cast<ContinueStmt>(stmt));
         case Stmt::Kind::Do:
-            processDoStmt(llvm::dyn_cast<DoStmt>(stmt));
-            break;
+            return processDoStmt(llvm::dyn_cast<DoStmt>(stmt));
         case Stmt::Kind::For:
-            processForStmt(llvm::dyn_cast<ForStmt>(stmt));
-            break;
+            return processForStmt(llvm::dyn_cast<ForStmt>(stmt));
         case Stmt::Kind::Goto:
-            processGotoStmt(llvm::dyn_cast<GotoStmt>(stmt));
-            break;
+            return processGotoStmt(llvm::dyn_cast<GotoStmt>(stmt));
         case Stmt::Kind::If:
-            processIfStmt(llvm::dyn_cast<IfStmt>(stmt));
-            break;
+            return processIfStmt(llvm::dyn_cast<IfStmt>(stmt));
         case Stmt::Kind::Labeled:
-            processLabeledStmt(llvm::dyn_cast<LabeledStmt>(stmt));
-            break;
+            return processLabeledStmt(llvm::dyn_cast<LabeledStmt>(stmt));
         case Stmt::Kind::Return:
-            processReturnStmt(llvm::dyn_cast<ReturnStmt>(stmt));
-            break;
+            return processReturnStmt(llvm::dyn_cast<ReturnStmt>(stmt));
         case Stmt::Kind::Switch:
-            processSwitchStmt(llvm::dyn_cast<SwitchStmt>(stmt));
-            break;
+            return processSwitchStmt(llvm::dyn_cast<SwitchStmt>(stmt));
         case Stmt::Kind::Try:
-            processTryStmt(llvm::dyn_cast<TryStmt>(stmt));
-            break;
+            return processTryStmt(llvm::dyn_cast<TryStmt>(stmt));
         case Stmt::Kind::TryCatch:
-            processTryCatchStmt(llvm::dyn_cast<TryCatchStmt>(stmt));
-            break;
+            return processTryCatchStmt(llvm::dyn_cast<TryCatchStmt>(stmt));
         case Stmt::Kind::TryFinally:
-            processTryFinallyStmt(llvm::dyn_cast<TryFinallyStmt>(stmt));
-            break;
+            return processTryFinallyStmt(llvm::dyn_cast<TryFinallyStmt>(stmt));
         case Stmt::Kind::While:
-            processWhileStmt(llvm::dyn_cast<WhileStmt>(stmt));
-            break;
+            return processWhileStmt(llvm::dyn_cast<WhileStmt>(stmt));
         case Stmt::Kind::Expr: {
             auto expr = llvm::dyn_cast<Expr>(stmt);
             processExpr(expr);
             stmt = expr;
         }
     }
+
+    // Anything not returning in the above statement means it doesn't return
+    return false;
 }
 
 void DeclResolver::processExpr(Expr *&expr) {
@@ -254,7 +242,7 @@ void DeclResolver::processConstructorDecl(ConstructorDecl* constructorDecl) {
     // We reset to zero just in case.
     functionLocalVariablesCount = 0;
 
-    processCompoundStmt(constructorDecl->body());
+    processCompoundStmt(constructorDecl->body(), true);
 
     labelNames = std::move(oldLabelNames);
     functionLocalVariablesCount = oldFunctionLocalVariablesCount;
@@ -279,7 +267,7 @@ void DeclResolver::processDestructorDecl(DestructorDecl *destructorDecl) {
     // We reset to zero just in case.
     functionLocalVariablesCount = 0;
 
-    processCompoundStmt(destructorDecl->body());
+    processCompoundStmt(destructorDecl->body(), true);
 
     labelNames = std::move(oldLabelNames);
     functionLocalVariablesCount = oldFunctionLocalVariablesCount;
@@ -347,7 +335,7 @@ void DeclResolver::processFunctionDecl(FunctionDecl *functionDecl) {
 
     currentFunction = functionDecl;
 
-    processCompoundStmt(functionDecl->body());
+    processCompoundStmt(functionDecl->body(), true);
 
     currentFunction = nullptr;
 
@@ -416,6 +404,16 @@ void DeclResolver::processStructDecl(StructDecl *structDecl) {
 
     if (structDecl->destructor != nullptr) {
         processDestructorDecl(structDecl->destructor);
+    } else {
+        // If there isn't a provided destructor then we provide one here that is empty, it will be filled with member
+        // variable destructor calls in `Lifetimes`
+        CompoundStmt* defaultDestructorBody = new CompoundStmt({}, {}, {});
+        // We add a single `return` to the default destructor body. This will allow `Lifetimes` to add the member
+        // destructors to the default destructor
+        defaultDestructorBody->statements().push_back(new ReturnStmt({}, {}, nullptr));
+
+        structDecl->destructor = new DestructorDecl(structDecl->name(), structDecl->sourceFile(), {}, {},
+                                                    defaultDestructorBody);
     }
 
     currentStruct = oldStruct;
@@ -453,42 +451,106 @@ void DeclResolver::processTemplateFunctionDeclImplementation(TemplateFunctionDec
 }
 
 // Stmts
-void DeclResolver::processBreakStmt(BreakStmt *breakStmt) {
+bool DeclResolver::processBreakStmt(BreakStmt *breakStmt) {
     if (!breakStmt->label().empty()) {
         addUnresolvedLabel(breakStmt->label());
     }
+
+    // NOTE: This is an iffy scenario. We need a way to say "all code after this is unreachable" but not that there is
+    // a return
+    return false;
 }
 
-void DeclResolver::processCaseStmt(CaseStmt *caseStmt) {
+bool DeclResolver::processCaseStmt(CaseStmt *caseStmt) {
     if (caseStmt->hasCondition()) {
         processExpr(caseStmt->condition);
     }
 
-    processStmt(caseStmt->trueStmt);
+    return processStmt(caseStmt->trueStmt);
 }
 
-void DeclResolver::processCompoundStmt(CompoundStmt *compoundStmt) {
+bool DeclResolver::processCompoundStmt(CompoundStmt *compoundStmt, bool isFunctionBody) {
+    bool returnsOnAllCodePaths = false;
+
     unsigned int oldLocalVariableCount = functionLocalVariablesCount;
 
     for (Stmt*& stmt : compoundStmt->statements()) {
-        processStmt(stmt);
+        if (processStmt(stmt)) {
+            returnsOnAllCodePaths = true;
+        }
     }
 
     functionLocalVariablesCount = oldLocalVariableCount;
+
+    if (isFunctionBody && !returnsOnAllCodePaths) {
+        // If `returnType` is null that means we're in either a constructor or a destructor
+        if (returnType == nullptr) {
+            // Add in a default return at the end of the body
+            compoundStmt->statements().push_back(new ReturnStmt({}, {}, nullptr));
+        } else {
+            Type *checkType = returnType;
+
+            if (llvm::isa<ConstType>(checkType)) {
+                checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
+            } else if (llvm::isa<MutType>(checkType)) {
+                checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
+            } else if (llvm::isa<ImmutType>(checkType)) {
+                checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
+            }
+
+            if (llvm::isa<BuiltInType>(checkType)) {
+                auto builtInType = llvm::dyn_cast<BuiltInType>(checkType);
+
+                if (builtInType->size() == 0) {
+                    // Add in a default return at the end of the body
+                    compoundStmt->statements().push_back(new ReturnStmt({}, {}, nullptr));
+                } else {
+                    // We can safely reference 'currentFunction' since both `ConstructorDecl` and 'DestructorDecl`
+                    // return void
+                    printError("function '" + currentFunction->name() + "' does not return on all code paths!",
+                               currentFunction->startPosition(), currentFunction->endPosition());
+                }
+            } else {
+                // We can safely reference 'currentFunction' since both `ConstructorDecl` and 'DestructorDecl`
+                // return void
+                printError("function '" + currentFunction->name() + "' does not return on all code paths!",
+                           currentFunction->startPosition(), currentFunction->endPosition());
+            }
+        }
+    }
+
+    return returnsOnAllCodePaths;
 }
 
-void DeclResolver::processContinueStmt(ContinueStmt *continueStmt) {
+bool DeclResolver::processContinueStmt(ContinueStmt *continueStmt) {
     if (!continueStmt->label().empty()) {
         addUnresolvedLabel(continueStmt->label());
     }
+
+    // NOTE: This is an iffy scenario. We need a way to say "all code after this is unreachable" but not that there is
+    // a return
+    return false;
 }
 
-void DeclResolver::processDoStmt(DoStmt *doStmt) {
-    if (doStmt->loopStmt != nullptr) processStmt(doStmt->loopStmt);
+bool DeclResolver::processDoStmt(DoStmt *doStmt) {
+    // If the loop statement is null then we can't return on all code paths
+    bool returnsOnAllCodePaths = doStmt->loopStmt != nullptr;
+
+    if (doStmt->loopStmt != nullptr) {
+        if (!processStmt(doStmt->loopStmt)) {
+            returnsOnAllCodePaths = false;
+        }
+    }
+
     processExpr(doStmt->condition);
+
+    return returnsOnAllCodePaths;
 }
 
-void DeclResolver::processForStmt(ForStmt *forStmt) {
+bool DeclResolver::processForStmt(ForStmt *forStmt) {
+    // If the loop statement is null then we can't return on all code paths
+    bool returnsOnAllCodePaths = forStmt->loopStmt != nullptr;
+
     // Since preloop can declare variables we have to back up and restore the old variables
     // That way the `i` from `for (int i;;);` won't be accessible outside of the for loop
     unsigned int oldLocalVariableCount = functionLocalVariablesCount;
@@ -497,35 +559,67 @@ void DeclResolver::processForStmt(ForStmt *forStmt) {
     if (forStmt->condition != nullptr) processExpr(forStmt->condition);
     if (forStmt->iterationExpr != nullptr) processExpr(forStmt->iterationExpr);
 
-    if (forStmt->loopStmt != nullptr) processStmt(forStmt->loopStmt);
+    if (forStmt->loopStmt != nullptr) {
+        if (!processStmt(forStmt->loopStmt)) {
+            returnsOnAllCodePaths = false;
+        }
+    }
 
     functionLocalVariablesCount = oldLocalVariableCount;
+
+    return returnsOnAllCodePaths;
 }
 
-void DeclResolver::processGotoStmt(GotoStmt *gotoStmt) {
+bool DeclResolver::processGotoStmt(GotoStmt *gotoStmt) {
     if (!gotoStmt->label.empty()) {
         addUnresolvedLabel(gotoStmt->label);
     }
+
+    // TODO: Is this correct? Regardless of where we are in the function here a goto is basically a return
+    //  and the label where we go to will be checked if it returns at all code paths... but all code after this is
+    //  unreachable
+    // TODO: Even IF this goto goes back above us this will still be an infinite loop
+    return true;
 }
 
-void DeclResolver::processIfStmt(IfStmt *ifStmt) {
+bool DeclResolver::processIfStmt(IfStmt *ifStmt) {
+    // If there isn't a statement for the `true` part of the if statement then we cannot return on all code paths
+    // UNLESS we can evaluate the if statement to always be false and the `false` part isn't null
+    bool returnsOnAllCodePaths = ifStmt->trueStmt != nullptr;
+
     processExpr(ifStmt->condition);
-    if (ifStmt->trueStmt != nullptr) processStmt(ifStmt->trueStmt);
-    if (ifStmt->hasFalseStmt()) processStmt(ifStmt->falseStmt);
+
+    if (ifStmt->trueStmt != nullptr) {
+        if (!processStmt(ifStmt->trueStmt)) {
+            returnsOnAllCodePaths = false;
+        }
+    }
+
+    if (ifStmt->hasFalseStmt()) {
+        if (!processStmt(ifStmt->falseStmt)) {
+            returnsOnAllCodePaths = false;
+        }
+    } else {
+        // If there isn't an `else` statement then this can't be detected as returning on all code paths unless we
+        // evaluate the condition to always be true...
+        returnsOnAllCodePaths = false;
+    }
+
+    return returnsOnAllCodePaths;
 }
 
-void DeclResolver::processLabeledStmt(LabeledStmt *labeledStmt) {
+bool DeclResolver::processLabeledStmt(LabeledStmt *labeledStmt) {
     // Store the number of local variables that were declared before us
     labeledStmt->currentNumLocalVariables = functionLocalVariablesCount;
 
     currentFunction->labeledStmts.insert({labeledStmt->label(), labeledStmt});
 
-    processStmt(labeledStmt->labeledStmt);
-
     labelResolved(labeledStmt->label());
+
+    return processStmt(labeledStmt->labeledStmt);
 }
 
-void DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
+bool DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
     if (returnStmt->hasReturnValue()) {
         processExpr(returnStmt->returnValue);
 
@@ -574,42 +668,62 @@ void DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
             returnStmt->returnValue = implicitCastExpr;
         }
     }
+
+    return true;
 }
 
-void DeclResolver::processSwitchStmt(SwitchStmt *switchStmt) {
+bool DeclResolver::processSwitchStmt(SwitchStmt *switchStmt) {
+    bool returnsOnAllCodePaths = !switchStmt->cases().empty();
+
     // TODO: Should we add the type of 'SwitchStmt::condition' to the context?
     processExpr(switchStmt->condition);
 
     for (CaseStmt* caseStmt : switchStmt->cases()) {
-        processCaseStmt(caseStmt);
+        if (!processCaseStmt(caseStmt)) {
+            returnsOnAllCodePaths = false;
+        }
     }
+
+    return returnsOnAllCodePaths;
 }
 
-void DeclResolver::processTryStmt(TryStmt *tryStmt) {
-    processCompoundStmt(tryStmt->encapsulatedStmt);
+bool DeclResolver::processTryStmt(TryStmt *tryStmt) {
+    bool returnsOnAllCodePaths = true;
+
+    if (!processCompoundStmt(tryStmt->encapsulatedStmt, false)) {
+        returnsOnAllCodePaths = false;
+    }
 
     if (tryStmt->hasCatchStmts()) {
         for (TryCatchStmt*& catchStmt : tryStmt->catchStmts()) {
-            processTryCatchStmt(catchStmt);
+            if (!processTryCatchStmt(catchStmt)) {
+                returnsOnAllCodePaths = false;
+            }
         }
     }
 
     if (tryStmt->hasFinallyStmt()) {
-        processTryFinallyStmt(tryStmt->finallyStmt);
+        if (!processTryFinallyStmt(tryStmt->finallyStmt)) {
+            returnsOnAllCodePaths = false;
+        }
     }
+
+    return returnsOnAllCodePaths;
 }
 
-void DeclResolver::processTryCatchStmt(TryCatchStmt *tryCatchStmt) {
-    processCompoundStmt(tryCatchStmt->handlerStmt);
+bool DeclResolver::processTryCatchStmt(TryCatchStmt *tryCatchStmt) {
+    return processCompoundStmt(tryCatchStmt->handlerStmt, false);
 }
 
-void DeclResolver::processTryFinallyStmt(TryFinallyStmt *tryFinallyStmt) {
-    processCompoundStmt(tryFinallyStmt->handlerStmt);
+bool DeclResolver::processTryFinallyStmt(TryFinallyStmt *tryFinallyStmt) {
+    return processCompoundStmt(tryFinallyStmt->handlerStmt, false);
 }
 
-void DeclResolver::processWhileStmt(WhileStmt *whileStmt) {
+bool DeclResolver::processWhileStmt(WhileStmt *whileStmt) {
     processExpr(whileStmt->condition);
-    if (whileStmt->loopStmt) processStmt(whileStmt->loopStmt);
+    if (whileStmt->loopStmt) return processStmt(whileStmt->loopStmt);
+
+    return false;
 }
 
 // Exprs
@@ -984,8 +1098,8 @@ void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
             Type* checkParamType = functionPointerType->paramTypes[i];
             Type* checkArgType = functionCallExpr->arguments[i]->resultType;
 
-            if (llvm::isa<ReferenceType>(checkParamType)) checkParamType = llvm::dyn_cast<ReferenceType>(checkArgType)->referenceToType;
-            if (llvm::isa<RValueReferenceType>(checkParamType)) checkParamType = llvm::dyn_cast<RValueReferenceType>(checkArgType)->referenceToType;
+            if (llvm::isa<ReferenceType>(checkParamType)) checkParamType = llvm::dyn_cast<ReferenceType>(checkParamType)->referenceToType;
+            if (llvm::isa<RValueReferenceType>(checkParamType)) checkParamType = llvm::dyn_cast<RValueReferenceType>(checkParamType)->referenceToType;
             if (llvm::isa<ReferenceType>(checkArgType)) checkArgType = llvm::dyn_cast<ReferenceType>(checkArgType)->referenceToType;
             if (llvm::isa<RValueReferenceType>(checkArgType)) checkArgType = llvm::dyn_cast<RValueReferenceType>(checkArgType)->referenceToType;
 

@@ -22,23 +22,49 @@
 #include <AST/Types/BuiltInType.hpp>
 #include <iostream>
 #include <AST/Types/EnumType.hpp>
+#include <AST/Types/StructType.hpp>
 #include "ItaniumMangler.hpp"
-
-/*
- * Assumption for destructors:
- *  `D0` ??? references deleting? destructors CANNOT handle freeing the memory for the `this` variable (as it is a reference, NOT a pointer...) so we will ignore.
- *  `D1` handles calling destructors in the vtable? maybe?
- *  `D2` doesn't call destructors in vtable?
- *
- * So my assumption is that:
- *  `D1` ONLY loops the vtable and calls destructors within the vtable (from child to oldest parent?)
- *  `D2` is an actual destructor that destructs the members, `D2` will be called by `D1` if there are virtual destructors?
- */
 
 using namespace gulc;
 //https://itanium-cxx-abi.github.io/cxx-abi/abi.html
 // TODO: If we every want to allow `extern` to a `C++` function we will need to support substitution.
 //  Even in the areas where substitution makes the result function longer than it would be without substitution using clang v6 and gcc v7.4.0
+
+void ItaniumMangler::mangleDecl(EnumDecl *enumDecl) {
+    mangleDeclEnum(enumDecl, "", "");
+}
+
+void ItaniumMangler::mangleDecl(StructDecl *structDecl) {
+    mangleDeclStruct(structDecl, "", "");
+}
+
+void ItaniumMangler::mangleDecl(NamespaceDecl *namespaceDecl) {
+    mangleDeclNamespace(namespaceDecl, "");
+}
+
+void ItaniumMangler::mangleDeclEnum(EnumDecl *enumDecl, const std::string &prefix, const std::string &nameSuffix) {
+    std::string nPrefix = prefix + sourceName(enumDecl->name());
+    enumDecl->setMangledName(nPrefix + nameSuffix);
+}
+
+void ItaniumMangler::mangleDeclStruct(StructDecl *structDecl, const std::string &prefix, const std::string &nameSuffix) {
+    std::string nPrefix = prefix + sourceName(structDecl->name());
+    structDecl->setMangledName(nPrefix + nameSuffix);
+}
+
+void ItaniumMangler::mangleDeclNamespace(NamespaceDecl *namespaceDecl, const std::string &prefix) {
+    std::string nPrefix = prefix + sourceName(namespaceDecl->name());
+
+    for (Decl* decl : namespaceDecl->nestedDecls()) {
+        if (llvm::isa<EnumDecl>(decl)) {
+            mangleDeclEnum(llvm::dyn_cast<EnumDecl>(decl), "N" + nPrefix, "E");
+        } else if (llvm::isa<NamespaceDecl>(decl)) {
+            mangleDeclNamespace(llvm::dyn_cast<NamespaceDecl>(decl), nPrefix);
+        } else if (llvm::isa<StructDecl>(decl)) {
+            mangleDeclStruct(llvm::dyn_cast<StructDecl>(decl), "N" + nPrefix, "E");
+        }
+    }
+}
 
 void ItaniumMangler::mangle(FunctionDecl *functionDecl) {
     mangleFunction(functionDecl, "", "");
@@ -227,7 +253,12 @@ std::string ItaniumMangler::typeName(gulc::Type *type) {
         }
     } else if (llvm::isa<EnumType>(type)) {
         auto enumType = llvm::dyn_cast<EnumType>(type);
-        return "Te" + sourceName(enumType->name());
+        // TODO: When do we add 'Te' in front of this?? Neither clang nor gcc seem to do it in my tests
+        return /*"Te" + */enumType->decl()->mangledName();
+    } else if (llvm::isa<StructType>(type)) {
+        auto structType = llvm::dyn_cast<StructType>(type);
+        // TODO: When do we add 'Ts' in front of this?? Neither clang nor gcc seem to do it in my tests
+        return /*"Ts" + */structType->decl()->mangledName();
     } else if (llvm::isa<PointerType>(type)) {
         return "P" + typeName(llvm::dyn_cast<PointerType>(type)->pointToType);
     } else if (llvm::isa<ReferenceType>(type)) {

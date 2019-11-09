@@ -35,35 +35,26 @@
 #include <AST/Exprs/MemberAccessCallExpr.hpp>
 #include <AST/Exprs/DestructLocalVariableExpr.hpp>
 #include <AST/FileAST.hpp>
-
-// TODO: We need to support destructors in situations where we use `goto` and `break [label];`/`continue [label];`
-//  in these situations we will have to find a common `CompoundStmt` parent that we traverse back to when finding the
-//  correct number of variables to destruct...
-
-// TODO: We also need to support destructors when we `return`. This will destruct ALL local variables
-
-// TODO: We need to destruct parameters on return too
-
-// TODO: We should also check `goto` for when we try to `goto` somewhere that might have variables declared before the
-//  label that don't exist from where we `goto`. We MIGHT be able to do this by storing the number of local variables
-//  that exist in the context of the `LabelStmt` and checking that it is equal to the number of local variables that
-//  currently exist within the common parent. If the `goto` has more local variables then there is an error...
-
-// TODO: We might want to consider not allowing `goto` to jump from one child to another. Only allow jumping from
-//  a child to the same child or a child to a parent or grandparent. This would simplify the destructor call generation
+#include <AST/Exprs/DestructParameterExpr.hpp>
+#include <AST/Exprs/DestructMemberVariableExpr.hpp>
 
 namespace gulc {
     /**
      * The `Lifetimes` pass handles resolving empty constructors, placing/calling destructors,
      * verifying accessed variables have been initialized,
      * and will at some point handle `lifetime` verifications
+     *
+     * NOTE: `DeclResolver` will create a `default` destructor that is empty if no destructor is provided. We will
+     *  handle added member destructor calls in here to the default destructor the same way we would add them to
+     *  custom destructors.
      */
     class Lifetimes {
     public:
         Lifetimes()
                 : currentFileAst(nullptr), currentFunction(nullptr), currentNamespace(nullptr),
                   currentStruct(nullptr), currentLocalVariablesCount(0), currentLocalVariables(),
-                  exprTemporaryObjects(), currentLoop(nullptr) {}
+                  exprTemporaryObjects(), currentLoop(nullptr), currentFunctionIsDestructor(false),
+                  functionParams(nullptr) {}
 
         void processFile(std::vector<FileAST*>& files);
 
@@ -118,6 +109,7 @@ namespace gulc {
         void processTernaryExpr(TernaryExpr* ternaryExpr);
 
         DestructLocalVariableExpr* destructLocalVariable(LocalVariableDeclExpr* localVariableDeclExpr);
+        DestructParameterExpr* destructParameter(int64_t paramIndex, ParameterDecl* parameter);
         void destructLocalVariablesDeclaredAfterLoop(Stmt* loop, std::vector<Expr*>& addToList);
 
         // Context members
@@ -131,6 +123,9 @@ namespace gulc {
         // complete
         std::vector<LocalVariableDeclExpr*> exprTemporaryObjects;
         Stmt* currentLoop;
+        // This is used to tell `processReturnStmt` that it should destruct member variables on return
+        bool currentFunctionIsDestructor;
+        const std::vector<ParameterDecl*>* functionParams;
 
         // Add local variable to the current local variables, these are used to keep track of variables we will have to
         // destruct

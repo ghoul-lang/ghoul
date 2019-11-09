@@ -35,8 +35,11 @@ namespace gulc {
         bool hasFalseStmt() const { return falseStmt != nullptr; }
 
         Stmt* deepCopy() const override {
-            return new IfStmt(startPosition(), endPosition(), condition->deepCopy(),
-                              trueStmt->deepCopy(), falseStmt ? falseStmt->deepCopy() : nullptr);
+            auto result = new IfStmt(startPosition(), endPosition(),
+                                     condition->deepCopy(), trueStmt->deepCopy(),
+                                     falseStmt ? falseStmt->deepCopy() : nullptr);
+            result->isUnreachable = isUnreachable;
+            return result;
         }
 
         ~IfStmt() override  {

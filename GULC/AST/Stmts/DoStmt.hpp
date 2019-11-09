@@ -33,8 +33,10 @@ namespace gulc {
         Stmt* loopStmt;
 
         Stmt* deepCopy() const override {
-            return new DoStmt(startPosition(), endPosition(), condition->deepCopy(),
-                              loopStmt->deepCopy());
+            auto result = new DoStmt(startPosition(), endPosition(),
+                                     condition->deepCopy(), loopStmt->deepCopy());
+            result->isUnreachable = isUnreachable;
+            return result;
         }
 
         // This is used by the passes to store the number of local variables that exist before the while loop

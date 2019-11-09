@@ -35,6 +35,7 @@ namespace gulc {
             if (resultType) {
                 result->resultType = resultType->deepCopy();
             }
+            result->isUnreachable = isUnreachable;
             return result;
         }
 

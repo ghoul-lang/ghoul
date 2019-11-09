@@ -33,8 +33,10 @@ namespace gulc {
         bool hasReturnValue() const { return returnValue != nullptr; }
 
         Stmt* deepCopy() const override {
-            return new ReturnStmt(startPosition(), endPosition(),
-                                  returnValue ? returnValue->deepCopy() : nullptr);
+            auto result = new ReturnStmt(startPosition(), endPosition(),
+                                         returnValue ? returnValue->deepCopy() : nullptr);
+            result->isUnreachable = isUnreachable;
+            return result;
         }
 
         // Expressions to run before we return

@@ -23,6 +23,7 @@
 #include <AST/Types/ReferenceType.hpp>
 #include <AST/Types/FunctionPointerType.hpp>
 #include <iostream>
+#include <AST/Types/StructType.hpp>
 #include "TypeComparer.hpp"
 
 using namespace gulc;
@@ -60,7 +61,13 @@ bool TypeComparer::getTypesAreSame(const Type* type1, const Type* type2, bool ig
                 auto enumType1 = llvm::dyn_cast<EnumType>(type1);
                 auto enumType2 = llvm::dyn_cast<EnumType>(type2);
 
-                return enumType1->name() == enumType2->name();
+                return enumType1->decl() == enumType2->decl();
+            }
+            case Type::Kind::Struct: {
+                auto structType1 = llvm::dyn_cast<StructType>(type1);
+                auto structType2 = llvm::dyn_cast<StructType>(type2);
+
+                return structType1->decl() == structType2->decl();
             }
             case Type::Kind::FunctionTemplateTypenameRef: {
                 auto pointerType1 = llvm::dyn_cast<PointerType>(type1);

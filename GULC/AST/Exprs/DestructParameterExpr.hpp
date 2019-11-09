@@ -13,31 +13,30 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_DESTRUCTLOCALVARIABLEEXPR_HPP
-#define GULC_DESTRUCTLOCALVARIABLEEXPR_HPP
+#ifndef GULC_DESTRUCTPARAMETEREXPR_HPP
+#define GULC_DESTRUCTPARAMETEREXPR_HPP
 
 #include <AST/Expr.hpp>
-#include "RefLocalVariableExpr.hpp"
+#include <AST/Decls/DestructorDecl.hpp>
+#include "RefParameterExpr.hpp"
 
 namespace gulc {
-    class RefLocalVariableExpr;
-
-    class DestructLocalVariableExpr : public Expr {
+    class DestructParameterExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::DestructLocalVariable; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::DestructParameter; }
 
-        DestructLocalVariableExpr(TextPosition startPosition, TextPosition endPosition,
-                                  RefLocalVariableExpr* localVariable, DestructorDecl* destructor)
-                : Expr(Kind::DestructLocalVariable, startPosition, endPosition),
-                  localVariable(localVariable), destructor(destructor) {}
+        DestructParameterExpr(TextPosition startPosition, TextPosition endPosition,
+                              RefParameterExpr* parameter, DestructorDecl* destructor)
+                : Expr(Kind::DestructParameter, startPosition, endPosition),
+                  parameter(parameter), destructor(destructor) {}
 
-        RefLocalVariableExpr* localVariable;
+        RefParameterExpr* parameter;
         // We don't own this so we don't delete it
         DestructorDecl* destructor;
 
         Expr* deepCopy() const override{
-            auto result = new DestructLocalVariableExpr(startPosition(), endPosition(),
-                                                        llvm::dyn_cast<RefLocalVariableExpr>(localVariable->deepCopy()),
+            auto result = new DestructParameterExpr(startPosition(), endPosition(),
+                                                        llvm::dyn_cast<RefParameterExpr>(parameter->deepCopy()),
                                                         destructor);
             if (resultType) {
                 result->resultType = resultType->deepCopy();
@@ -46,11 +45,10 @@ namespace gulc {
             return result;
         }
 
-        ~DestructLocalVariableExpr() override {
-            delete localVariable;
+        ~DestructParameterExpr() override {
+            delete parameter;
         }
-
     };
 }
 
-#endif //GULC_DESTRUCTLOCALVARIABLEEXPR_HPP
+#endif //GULC_DESTRUCTPARAMETEREXPR_HPP

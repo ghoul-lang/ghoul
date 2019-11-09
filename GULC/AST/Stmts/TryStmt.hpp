@@ -61,10 +61,12 @@ namespace gulc {
                 copiedCatchStmts.push_back(static_cast<TryCatchStmt*>(catchStmt->deepCopy()));
             }
 
-            return new TryStmt(startPosition(), endPosition(),
-                               static_cast<CompoundStmt*>(encapsulatedStmt->deepCopy()),
-                               std::move(copiedCatchStmts),
-                               static_cast<TryFinallyStmt*>(finallyStmt->deepCopy()));
+            auto result =  new TryStmt(startPosition(), endPosition(),
+                                       static_cast<CompoundStmt*>(encapsulatedStmt->deepCopy()),
+                                       std::move(copiedCatchStmts),
+                                       static_cast<TryFinallyStmt*>(finallyStmt->deepCopy()));
+            result->isUnreachable = isUnreachable;
+            return result;
         }
 
         ~TryStmt() override {

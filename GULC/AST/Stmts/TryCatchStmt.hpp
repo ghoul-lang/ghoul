@@ -39,9 +39,11 @@ namespace gulc {
         bool hasExceptionDecl() const { return exceptionType != nullptr; }
 
         Stmt* deepCopy() const override {
-            return new TryCatchStmt(startPosition(), endPosition(),
-                                    exceptionType->deepCopy(), exceptionVarName,
-                                    static_cast<CompoundStmt*>(handlerStmt->deepCopy()));
+            auto result = new TryCatchStmt(startPosition(), endPosition(),
+                                           exceptionType->deepCopy(), exceptionVarName,
+                                           static_cast<CompoundStmt*>(handlerStmt->deepCopy()));
+            result->isUnreachable = isUnreachable;
+            return result;
         }
 
         ~TryCatchStmt() override {

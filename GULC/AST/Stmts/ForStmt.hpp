@@ -50,6 +50,7 @@ namespace gulc {
                                       loopStmt->deepCopy());
 
             result->postLoopCleanup = std::move(copiedPostLoopCleanup);
+            result->isUnreachable = isUnreachable;
 
             return result;
         }

@@ -37,7 +37,10 @@ namespace gulc {
                 copiedStatements.push_back(statement->deepCopy());
             }
 
-            return new CompoundStmt(startPosition(), endPosition(), std::move(copiedStatements));
+            auto result = new CompoundStmt(startPosition(), endPosition(),
+                                           std::move(copiedStatements));
+            result->isUnreachable = isUnreachable;
+            return result;
         }
 
     private:

@@ -53,6 +53,8 @@
 #include <AST/Decls/StructDecl.hpp>
 #include <AST/Exprs/RefStructMemberVariableExpr.hpp>
 #include <AST/Exprs/DestructLocalVariableExpr.hpp>
+#include <AST/Exprs/DestructParameterExpr.hpp>
+#include <AST/Exprs/DestructMemberVariableExpr.hpp>
 #include "Module.hpp"
 
 namespace gulc {
@@ -131,6 +133,8 @@ namespace gulc {
         llvm::Value* generateRefGlobalVariableExpr(const RefGlobalVariableExpr* refGlobalFileVariableExpr);
         llvm::Value* generateRefStructMemberVariableExpr(const RefStructMemberVariableExpr* refStructMemberVariableExpr);
         llvm::Value* generateDestructLocalVariableExpr(const DestructLocalVariableExpr* destructLocalVariableExpr);
+        llvm::Value* generateDestructParameterExpr(const DestructParameterExpr* destructParameterExpr);
+        llvm::Value* generateDestructMemberVariableExpr(const DestructMemberVariableExpr* destructMemberVariableExpr);
 
         llvm::Function* generateRefFunctionExpr(const Expr* expr, std::string* nameOut);
 

@@ -22,10 +22,17 @@
 #include <AST/Decls/NamespaceDecl.hpp>
 #include <AST/Decls/TemplateFunctionDecl.hpp>
 #include <AST/Decls/StructDecl.hpp>
+#include <AST/Decls/EnumDecl.hpp>
 
 namespace gulc {
     class ManglerBase {
     public:
+        // We have to do a prepass on declared types to mangle their names because we will need to access them as
+        // parameters in the function signature
+        virtual void mangleDecl(EnumDecl* enumDecl) = 0;
+        virtual void mangleDecl(StructDecl* structDecl) = 0;
+        virtual void mangleDecl(NamespaceDecl* namespaceDecl) = 0;
+
         virtual void mangle(FunctionDecl* functionDecl) = 0;
         virtual void mangle(GlobalVariableDecl* globalVariableDecl) = 0;
         virtual void mangle(NamespaceDecl* namespaceDecl) = 0;

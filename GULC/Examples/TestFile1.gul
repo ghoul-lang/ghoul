@@ -29,6 +29,11 @@ struct TestStruct
     }
 }
 
+int getMemberFunctionTest(TestStruct& ts)
+{
+    return ts.hm2;
+}
+
 int main()
 {
     int i = 40;
@@ -40,7 +45,7 @@ int main()
         if (i == 52)
         {
             i = 12;
-            goto testLabel;
+            return getMemberFunctionTest(hmm);
         }
     }
 

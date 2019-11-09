@@ -41,6 +41,7 @@ namespace gulc {
 
             auto result = new GotoStmt(startPosition(), endPosition(), label);
             result->preGotoCleanup = std::move(copiedPreGotoCleanup);
+            result->isUnreachable = isUnreachable;
             return result;
         }
 

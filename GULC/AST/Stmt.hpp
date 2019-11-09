@@ -50,11 +50,13 @@ namespace gulc {
 
         virtual Stmt* deepCopy() const = 0;
 
+        bool isUnreachable;
+
         virtual ~Stmt() = default;
 
     protected:
         Stmt(Kind kind, TextPosition startPosition, TextPosition endPosition)
-                : _kind(kind), _startPosition(startPosition), _endPosition(endPosition) {}
+                : _kind(kind), _startPosition(startPosition), _endPosition(endPosition), isUnreachable(false) {}
 
     private:
         const Kind _kind;

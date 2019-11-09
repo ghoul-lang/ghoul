@@ -106,7 +106,7 @@ namespace gulc {
         void printDebugWarning(const std::string& message);
 
         void processDecl(Decl* decl);
-        void processStmt(Stmt*& stmt);
+        bool processStmt(Stmt*& stmt);
         void processExpr(Expr*& expr);
 
         void processConstructorDecl(ConstructorDecl* constructorDecl);
@@ -121,21 +121,21 @@ namespace gulc {
                                                        std::vector<Expr*>& templateArgs,
                                                        FunctionDecl* implementedFunction);
 
-        void processBreakStmt(BreakStmt* breakStmt);
-        void processCaseStmt(CaseStmt* caseStmt);
-        void processCompoundStmt(CompoundStmt* compoundStmt);
-        void processContinueStmt(ContinueStmt* continueStmt);
-        void processDoStmt(DoStmt* doStmt);
-        void processForStmt(ForStmt* forStmt);
-        void processGotoStmt(GotoStmt* gotoStmt);
-        void processIfStmt(IfStmt* ifStmt);
-        void processLabeledStmt(LabeledStmt* labeledStmt);
-        void processReturnStmt(ReturnStmt* returnStmt);
-        void processSwitchStmt(SwitchStmt* switchStmt);
-        void processTryStmt(TryStmt* tryStmt);
-        void processTryCatchStmt(TryCatchStmt* tryCatchStmt);
-        void processTryFinallyStmt(TryFinallyStmt* tryFinallyStmt);
-        void processWhileStmt(WhileStmt* whileStmt);
+        bool processBreakStmt(BreakStmt* breakStmt);
+        bool processCaseStmt(CaseStmt* caseStmt);
+        bool processCompoundStmt(CompoundStmt* compoundStmt, bool isFunctionBody);
+        bool processContinueStmt(ContinueStmt* continueStmt);
+        bool processDoStmt(DoStmt* doStmt);
+        bool processForStmt(ForStmt* forStmt);
+        bool processGotoStmt(GotoStmt* gotoStmt);
+        bool processIfStmt(IfStmt* ifStmt);
+        bool processLabeledStmt(LabeledStmt* labeledStmt);
+        bool processReturnStmt(ReturnStmt* returnStmt);
+        bool processSwitchStmt(SwitchStmt* switchStmt);
+        bool processTryStmt(TryStmt* tryStmt);
+        bool processTryCatchStmt(TryCatchStmt* tryCatchStmt);
+        bool processTryFinallyStmt(TryFinallyStmt* tryFinallyStmt);
+        bool processWhileStmt(WhileStmt* whileStmt);
 
         void processBinaryOperatorExpr(Expr*& expr);
         void processCharacterLiteralExpr(CharacterLiteralExpr* characterLiteralExpr);
