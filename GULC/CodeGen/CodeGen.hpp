@@ -202,13 +202,13 @@ namespace gulc {
         llvm::AllocaInst* addLocalVariable(const std::string& varName, llvm::Type* llvmType) {
             llvm::AllocaInst* allocaInst = this->irBuilder->CreateAlloca(llvmType, nullptr, varName);
 
-            ++currentFunctionLocalVariablesCount;
-
             if (currentFunctionLocalVariablesCount >= currentFunctionLocalVariables.size()) {
                 currentFunctionLocalVariables.push_back(allocaInst);
             } else {
-                currentFunctionLocalVariables[currentFunctionLocalVariablesCount - 1] = allocaInst;
+                currentFunctionLocalVariables[currentFunctionLocalVariablesCount] = allocaInst;
             }
+
+            ++currentFunctionLocalVariablesCount;
 
             return allocaInst;
         }
@@ -224,15 +224,15 @@ namespace gulc {
         }
 
         void enterNestedLoop(llvm::BasicBlock* continueLoop, llvm::BasicBlock* breakLoop) {
-            ++nestedLoopCount;
-
             if (nestedLoopCount >= nestedLoopContinues.size()) {
                 nestedLoopContinues.push_back(continueLoop);
                 nestedLoopBreaks.push_back(breakLoop);
             } else {
-                nestedLoopContinues[nestedLoopCount - 1] = continueLoop;
-                nestedLoopBreaks[nestedLoopCount - 1] = breakLoop;
+                nestedLoopContinues[nestedLoopCount] = continueLoop;
+                nestedLoopBreaks[nestedLoopCount] = breakLoop;
             }
+
+            ++nestedLoopCount;
         }
 
         void leaveNestedLoop() {

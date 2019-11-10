@@ -28,8 +28,10 @@ namespace gulc {
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Struct; }
 
         StructDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                   std::vector<ConstructorDecl*> constructors, std::vector<Decl*> members, DestructorDecl* destructor)
-                : Decl(Kind::Struct, std::move(name), std::move(sourceFile), startPosition, endPosition),
+                   Visibility visibility, std::vector<ConstructorDecl*> constructors, std::vector<Decl*> members,
+                   DestructorDecl* destructor)
+                : Decl(Kind::Struct, std::move(name), std::move(sourceFile), startPosition, endPosition,
+                       visibility),
                   constructors(std::move(constructors)), members(std::move(members)), destructor(destructor),
                   _hasEmptyConstructor(false) {
             // Search to see if any of the constructors are empty
@@ -70,6 +72,7 @@ namespace gulc {
 
             auto result = new StructDecl(name(), sourceFile(),
                                          startPosition(), endPosition(),
+                                         visibility(),
                                          std::move(copiedConstructors), std::move(copiedMembers), copiedDestructor);
             result->parentNamespace = parentNamespace;
             result->parentStruct = parentStruct;

@@ -31,14 +31,16 @@ namespace gulc {
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Function; }
 
         FunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                     Type* resultType, std::vector<ParameterDecl*> parameters, CompoundStmt* body)
-                : FunctionDecl(std::move(name), std::move(sourceFile), startPosition, endPosition, resultType,
-                               std::move(parameters), body, {}) {}
+                     Visibility visibility, Type* resultType, std::vector<ParameterDecl*> parameters,
+                     CompoundStmt* body)
+                : FunctionDecl(std::move(name), std::move(sourceFile), startPosition, endPosition, visibility,
+                               resultType, std::move(parameters), body, {}) {}
 
         FunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                     Type* resultType, std::vector<ParameterDecl*> parameters, CompoundStmt* body,
-                     std::vector<Expr*> templateArguments)
-                : Decl(Kind::Function, std::move(name), std::move(sourceFile), startPosition, endPosition),
+                     Visibility visibility, Type* resultType, std::vector<ParameterDecl*> parameters,
+                     CompoundStmt* body, std::vector<Expr*> templateArguments)
+                : Decl(Kind::Function, std::move(name), std::move(sourceFile), startPosition, endPosition,
+                       visibility),
                   templateArguments(std::move(templateArguments)), resultType(resultType),
                   parameters(std::move(parameters)), _body(body), _isMain(false) {
             if (this->name() == "main") {
@@ -69,6 +71,7 @@ namespace gulc {
 
             auto result = new FunctionDecl(name(), sourceFile(),
                                            startPosition(), endPosition(),
+                                           visibility(),
                                            resultType->deepCopy(),
                                            std::move(copiedParameters), static_cast<CompoundStmt*>(_body->deepCopy()),
                                            std::move(copiedTemplateArguments));

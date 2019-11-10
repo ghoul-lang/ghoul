@@ -5,19 +5,19 @@ struct TestStruct
     int hm2;
     float hm;
 
-    TestStruct()
+    public TestStruct()
     {
         this.hm2 = 90;
         this.hm = 0;
     }
 
-    TestStruct(int hm2, float hm)
+    public TestStruct(int hm2, float hm)
     {
         this.hm2 = hm2;
         this.hm = hm;
     }
 
-    int memberFunctionTest(int param1)
+    public int memberFunctionTest(int param1)
     {
         return param1 + 20;
     }
@@ -37,6 +37,7 @@ int getMemberFunctionTest(TestStruct& ts)
 int main()
 {
     int i = 40;
+    TestStruct tsp;
 
     for (TestStruct t(i, 0); i < 54; ++i)
     {
@@ -50,7 +51,9 @@ int main()
     }
 
     testLabel:
-    int j = 12;
+    int j;
 
-    return 12 / 2 / 2;
+    j = 12;
+
+    return j;
 }

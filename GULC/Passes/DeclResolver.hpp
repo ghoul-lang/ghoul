@@ -59,6 +59,7 @@
 #include <AST/Decls/NamespaceDecl.hpp>
 #include <AST/Decls/TemplateFunctionDecl.hpp>
 #include <AST/Decls/StructDecl.hpp>
+#include <AST/Types/StructType.hpp>
 
 namespace gulc {
     // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
@@ -134,7 +135,7 @@ namespace gulc {
         bool processTryFinallyStmt(TryFinallyStmt* tryFinallyStmt);
         bool processWhileStmt(WhileStmt* whileStmt);
 
-        void processBinaryOperatorExpr(Expr*& expr);
+        void processBinaryOperatorExpr(Expr*& expr, bool isNestedBinaryOperator);
         void processCharacterLiteralExpr(CharacterLiteralExpr* characterLiteralExpr);
         void processExplicitCastExpr(ExplicitCastExpr* explicitCastExpr);
         void processFloatLiteralExpr(FloatLiteralExpr* floatLiteralExpr);
@@ -146,7 +147,7 @@ namespace gulc {
         void processImplicitCastExpr(ImplicitCastExpr* implicitCastExpr);
         void processIndexerCallExpr(IndexerCallExpr* indexerCallExpr);
         void processIntegerLiteralExpr(IntegerLiteralExpr* integerLiteralExpr);
-        void processLocalVariableDeclExpr(LocalVariableDeclExpr* localVariableDeclExpr);
+        void processLocalVariableDeclExpr(LocalVariableDeclExpr* localVariableDeclExpr, bool hasInitialValue);
         void processLocalVariableDeclOrPrefixOperatorCallExpr(Expr*& expr);
         void processMemberAccessCallExpr(Expr*& expr);
         void processParenExpr(ParenExpr* parenExpr);
@@ -220,13 +221,13 @@ namespace gulc {
         }
 
         void addLocalVariable(LocalVariableDeclExpr* localVariableDeclExpr) {
-            ++functionLocalVariablesCount;
-
             if (functionLocalVariablesCount >= functionLocalVariables.size()) {
                 functionLocalVariables.push_back(localVariableDeclExpr);
             } else {
-                functionLocalVariables[functionLocalVariablesCount - 1] = localVariableDeclExpr;
+                functionLocalVariables[functionLocalVariablesCount] = localVariableDeclExpr;
             }
+
+            ++functionLocalVariablesCount;
         }
     };
 }

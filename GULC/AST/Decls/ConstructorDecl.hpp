@@ -26,8 +26,9 @@ namespace gulc {
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Constructor; }
 
         ConstructorDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                        std::vector<ParameterDecl*> parameters, CompoundStmt* body)
-                : Decl(Kind::Constructor, std::move(name), std::move(sourceFile), startPosition, endPosition),
+                        Visibility visibility, std::vector<ParameterDecl*> parameters, CompoundStmt* body)
+                : Decl(Kind::Constructor, std::move(name), std::move(sourceFile), startPosition, endPosition,
+                       visibility),
                   parameters(std::move(parameters)), _body(body), _assignsVTable(false) {}
 
         std::vector<ParameterDecl*> parameters;
@@ -44,6 +45,7 @@ namespace gulc {
 
             auto result = new ConstructorDecl(name(), sourceFile(),
                                               startPosition(), endPosition(),
+                                              visibility(),
                                               std::move(copiedParameters),
                                               static_cast<CompoundStmt*>(_body->deepCopy()));
             result->parentNamespace = parentNamespace;

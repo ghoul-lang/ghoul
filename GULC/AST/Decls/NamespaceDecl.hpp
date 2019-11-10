@@ -25,7 +25,8 @@ namespace gulc {
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Namespace; }
 
         NamespaceDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition)
-                : Decl(Kind::Namespace, std::move(name), std::move(sourceFile), startPosition, endPosition),
+                : Decl(Kind::Namespace, std::move(name), std::move(sourceFile), startPosition, endPosition,
+                       Visibility::Unspecified),
                   _nestedDecls(), _isPrototype(false) {}
 
         void makePrototype() { _isPrototype = true; }

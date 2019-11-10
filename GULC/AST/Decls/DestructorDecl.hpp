@@ -26,7 +26,8 @@ namespace gulc {
 
         DestructorDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
                        CompoundStmt *body)
-                : Decl(Kind::Destructor, std::move(name), std::move(sourceFile), startPosition, endPosition),
+                : Decl(Kind::Destructor, std::move(name), std::move(sourceFile), startPosition, endPosition,
+                       Visibility::Unspecified),
                   _body(body) {}
 
         CompoundStmt *body() const { return _body; }

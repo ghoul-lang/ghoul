@@ -76,7 +76,7 @@ namespace gulc {
         NamespaceDecl* validateImportPath(NamespaceDecl* checkNamespace, const std::vector<std::string>& checkPath,
                                           std::size_t currentPathIndex);
 
-        void processDecl(Decl* decl);
+        void processDecl(Decl* decl, Decl::Visibility visibilityIfUnspecified);
         void processStmt(Stmt*& stmt);
         void processExpr(Expr*& expr);
 

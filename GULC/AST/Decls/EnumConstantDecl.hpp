@@ -26,7 +26,8 @@ namespace gulc {
 
         EnumConstantDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
                          Expr* constantValue)
-                : Decl(Kind::EnumConstant, std::move(name), std::move(sourceFile), startPosition, endPosition),
+                : Decl(Kind::EnumConstant, std::move(name), std::move(sourceFile), startPosition, endPosition,
+                       Visibility::Unspecified),
                   constantValue(constantValue) {}
 
         Expr* constantValue;

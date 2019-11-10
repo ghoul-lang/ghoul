@@ -186,13 +186,13 @@ namespace gulc {
         }
 
         void addLocalVariable(LocalVariableDeclExpr* localVariableDeclExpr) {
-            ++currentFunctionLocalVariablesCount;
-
             if (currentFunctionLocalVariablesCount >= currentFunctionLocalVariables.size()) {
                 currentFunctionLocalVariables.push_back(localVariableDeclExpr);
             } else {
-                currentFunctionLocalVariables[currentFunctionLocalVariablesCount - 1] = localVariableDeclExpr;
+                currentFunctionLocalVariables[currentFunctionLocalVariablesCount] = localVariableDeclExpr;
             }
+
+            ++currentFunctionLocalVariablesCount;
         }
 
     };

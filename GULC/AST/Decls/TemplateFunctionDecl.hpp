@@ -36,16 +36,19 @@ namespace gulc {
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::TemplateFunction; }
 
         TemplateFunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                             Type* resultType, std::vector<TemplateParameterDecl*> templateParameters,
+                             Visibility visibility, Type* resultType,
+                             std::vector<TemplateParameterDecl*> templateParameters,
                              std::vector<ParameterDecl*> parameters, CompoundStmt* body)
-                : TemplateFunctionDecl(std::move(name), std::move(sourceFile), startPosition, endPosition, resultType,
-                                       std::move(templateParameters), std::move(parameters), body, {}) {}
+                : TemplateFunctionDecl(std::move(name), std::move(sourceFile), startPosition, endPosition, visibility,
+                                       resultType, std::move(templateParameters), std::move(parameters), body, {}) {}
 
         TemplateFunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                             Type* resultType, std::vector<TemplateParameterDecl*> templateParameters,
+                             Visibility visibility, Type* resultType,
+                             std::vector<TemplateParameterDecl*> templateParameters,
                              std::vector<ParameterDecl*> parameters, CompoundStmt* body,
                              std::vector<FunctionDecl*> implementedFunctions)
-                : Decl(Kind::TemplateFunction, std::move(name), std::move(sourceFile), startPosition, endPosition),
+                : Decl(Kind::TemplateFunction, std::move(name), std::move(sourceFile), startPosition, endPosition,
+                       visibility),
                   resultType(resultType), templateParameters(std::move(templateParameters)),
                   parameters(std::move(parameters)), _body(body),
                   _implementedFunctions(std::move(implementedFunctions)) {}
@@ -168,6 +171,7 @@ namespace gulc {
 
             auto newFunction = new FunctionDecl(name(), sourceFile(),
                                                 startPosition(), endPosition(),
+                                                visibility(),
                                                 resultType->deepCopy(), copiedParameters,
                                                 static_cast<CompoundStmt*>(_body->deepCopy()),
                                                 resultTemplateArguments);
@@ -192,6 +196,7 @@ namespace gulc {
 
             auto result = new FunctionDecl(name(), sourceFile(),
                                            startPosition(), endPosition(),
+                                           visibility(),
                                            resultType->deepCopy(),
                                            std::move(copiedParameters), static_cast<CompoundStmt*>(_body->deepCopy()));
             result->parentNamespace = parentNamespace;

@@ -25,6 +25,7 @@
 #include <AST/Types/UnresolvedType.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
 #include <AST/Types/StructType.hpp>
+#include <AST/VisibilityChecker.hpp>
 #include "CodeVerifier.hpp"
 #include "DeclResolver.hpp"
 
@@ -605,27 +606,42 @@ void CodeVerifier::verifyBinaryOperatorExpr(Expr *&expr) {
     verifyExpr(binaryOperatorExpr->rightValue);
 
     if (binaryOperatorExpr->isBuiltInAssignmentOperator()) {
-        // If the left value of the assignment isn't a local variable declaration then we check for assignability...
-        if (!llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue) &&
-            !typeIsAssignable(binaryOperatorExpr->leftValue->resultType)) {
-            if (llvm::isa<ConstType>(binaryOperatorExpr->leftValue->resultType)) {
-                printError("cannot assign to const-qualified left value!",
+        // If the left value of the assignment is a local variable we check that the local variable declaration doesn't
+        // have an initializer
+        if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
+            auto localVariableDecl = llvm::dyn_cast<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue);
+
+            if (binaryOperatorExpr->operatorName() != "=") {
+                printError("local variable declarations cannot be used in any other binary operator expressions besides '='!",
+                           binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+            }
+
+            if (localVariableDecl->hasInitializer()) {
+                printError("having both an intializer and an initial assignment with `=` is not allowed!",
+                           expr->startPosition(), expr->endPosition());
+            }
+        } else {
+            // If the left value of the assignment isn't a local variable declaration then we check for assignability...
+            if (!typeIsAssignable(binaryOperatorExpr->leftValue->resultType)) {
+                if (llvm::isa<ConstType>(binaryOperatorExpr->leftValue->resultType)) {
+                    printError("cannot assign to const-qualified left value!",
+                               binaryOperatorExpr->leftValue->startPosition(),
+                               binaryOperatorExpr->leftValue->endPosition());
+                    return;
+                }
+
+                if (llvm::isa<ImmutType>(binaryOperatorExpr->leftValue->resultType)) {
+                    printError("cannot assign to immut-qualified left value!",
+                               binaryOperatorExpr->leftValue->startPosition(),
+                               binaryOperatorExpr->leftValue->endPosition());
+                    return;
+                }
+
+                printError("cannot assign to an rvalue!",
                            binaryOperatorExpr->leftValue->startPosition(),
                            binaryOperatorExpr->leftValue->endPosition());
                 return;
             }
-
-            if (llvm::isa<ImmutType>(binaryOperatorExpr->leftValue->resultType)) {
-                printError("cannot assign to immut-qualified left value!",
-                           binaryOperatorExpr->leftValue->startPosition(),
-                           binaryOperatorExpr->leftValue->endPosition());
-                return;
-            }
-
-            printError("cannot assign to an rvalue!",
-                       binaryOperatorExpr->leftValue->startPosition(),
-                       binaryOperatorExpr->leftValue->endPosition());
-            return;
         }
     }
 }
@@ -708,6 +724,15 @@ void CodeVerifier::verifyLocalVariableDeclExpr(LocalVariableDeclExpr *localVaria
                 printError("struct `" + resolvedTypeRef->resolvedType->getString() + "` "
                            "does not have an empty constructor, please call a constructor to initialize type!",
                            localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
+            }
+
+            if (localVariableDeclExpr->foundConstructor != nullptr) {
+                if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
+                                                              localVariableDeclExpr->foundConstructor)) {
+                    printError("struct '" + structType->getString() +
+                               "' does not have a publicly visible constructor with the specified arguments!",
+                               localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
+                }
             }
         }
     }

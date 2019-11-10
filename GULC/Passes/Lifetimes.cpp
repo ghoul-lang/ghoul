@@ -6,6 +6,7 @@
 #include <AST/Types/MutType.hpp>
 #include <AST/Types/ImmutType.hpp>
 #include <AST/Types/ReferenceType.hpp>
+#include <AST/VisibilityChecker.hpp>
 #include "Lifetimes.hpp"
 
 using namespace gulc;
@@ -462,52 +463,63 @@ void Lifetimes::processWhileStmt(WhileStmt *whileStmt) {
 void Lifetimes::processBinaryOperatorExpr(Expr *&expr) {
     auto binaryOperatorExpr = llvm::dyn_cast<BinaryOperatorExpr>(expr);
 
+    processExpr(binaryOperatorExpr->leftValue);
+    processExpr(binaryOperatorExpr->rightValue);
+
+    // TODO: Once we support copy and move constructors we will have to support replacing assignments with
+    //  either a copy or move constructor
     // Replace any assignments with constructor calls if we can...
-    if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
-        auto localVariableDeclExpr = llvm::dyn_cast<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue);
-
-        if (localVariableDeclExpr->hasInitializer()) {
-            printError("use of initializer with an assignment operator `=` is not allowed!",
-                       expr->startPosition(), expr->endPosition());
-        }
-
-        if (llvm::isa<ResolvedTypeRefExpr>(localVariableDeclExpr->type)) {
-            auto localVariableTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(localVariableDeclExpr->type);
-
-            if (TypeComparer::getTypesAreSame(localVariableTypeRef->resolvedType,
-                                              binaryOperatorExpr->rightValue->resultType)) {
-                Type* initializerType = binaryOperatorExpr->rightValue->resultType;
-                localVariableDeclExpr->initializerArgs.push_back(binaryOperatorExpr->rightValue);
-
-                // Remove any reference to the local variable declaration and the initial argument
-                // Then delete the no longer needed binary operator expression
-                binaryOperatorExpr->leftValue = nullptr;
-                binaryOperatorExpr->rightValue = nullptr;
-                delete binaryOperatorExpr;
-                // Make the local variable declaration the new expression where the binary operator once was
-                expr = localVariableDeclExpr;
-
-                // If the resolved type of the local variable is a struct then we search for a constructor
-                if (llvm::isa<StructType>(localVariableTypeRef->resolvedType)) {
-                    auto checkStructType = llvm::dyn_cast<StructType>(localVariableTypeRef->resolvedType);
-
-                    for (ConstructorDecl* checkConstructor : checkStructType->decl()->constructors) {
-                        // TODO: Once we support `copy` and `move` constructors this will have to change...
-                        if (checkConstructor->parameters.size() == 1) {
-                            // If the types are the same we set the local variable's constructor reference and break from the loop
-                            if (TypeComparer::getTypesAreSame(checkConstructor->parameters[0]->type, initializerType)) {
-                                localVariableDeclExpr->foundConstructor = checkConstructor;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // We still pass the local variable declaration to be processed so we keep track of it for destruction
-        processLocalVariableDeclExpr(localVariableDeclExpr);
-    }
+//    if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
+//        auto localVariableDeclExpr = llvm::dyn_cast<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue);
+//
+//        if (localVariableDeclExpr->hasInitializer()) {
+//            printError("use of initializer with an assignment operator `=` is not allowed!",
+//                       expr->startPosition(), expr->endPosition());
+//        }
+//
+//        if (llvm::isa<ResolvedTypeRefExpr>(localVariableDeclExpr->type)) {
+//            auto localVariableTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(localVariableDeclExpr->type);
+//
+//            if (TypeComparer::getTypesAreSame(localVariableTypeRef->resolvedType,
+//                                              binaryOperatorExpr->rightValue->resultType)) {
+//                Type* initializerType = binaryOperatorExpr->rightValue->resultType;
+//                localVariableDeclExpr->initializerArgs.push_back(binaryOperatorExpr->rightValue);
+//
+//                // Remove any reference to the local variable declaration and the initial argument
+//                // Then delete the no longer needed binary operator expression
+//                binaryOperatorExpr->leftValue = nullptr;
+//                binaryOperatorExpr->rightValue = nullptr;
+//                delete binaryOperatorExpr;
+//                // Make the local variable declaration the new expression where the binary operator once was
+//                expr = localVariableDeclExpr;
+//
+//                // If the resolved type of the local variable is a struct then we search for a constructor
+//                if (llvm::isa<StructType>(localVariableTypeRef->resolvedType)) {
+//                    auto checkStructType = llvm::dyn_cast<StructType>(localVariableTypeRef->resolvedType);
+//
+//                    for (ConstructorDecl* checkConstructor : checkStructType->decl()->constructors) {
+//                        // Skip any constructors not visible to us
+//                        if (!VisibilityChecker::canAccessStructMember(checkStructType, currentStruct,
+//                                                                      checkConstructor)) {
+//                            continue;
+//                        }
+//
+//                        // TODO: Once we support `copy` and `move` constructors this will have to change...
+//                        if (checkConstructor->parameters.size() == 1) {
+//                            // If the types are the same we set the local variable's constructor reference and break from the loop
+//                            if (TypeComparer::getTypesAreSame(checkConstructor->parameters[0]->type, initializerType)) {
+//                                localVariableDeclExpr->foundConstructor = checkConstructor;
+//                                break;
+//                            }
+//                        }
+//                    }
+//                }
+//            }
+//        }
+//
+//        // We still pass the local variable declaration to be processed so we keep track of it for destruction
+//        processLocalVariableDeclExpr(localVariableDeclExpr);
+//    }
 }
 
 void Lifetimes::processCharacterLiteralExpr(CharacterLiteralExpr *characterLiteralExpr) {

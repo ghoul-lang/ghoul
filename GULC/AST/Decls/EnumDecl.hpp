@@ -27,8 +27,9 @@ namespace gulc {
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Enum; }
 
         EnumDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                 Type* baseType, std::vector<EnumConstantDecl*> enumConstants)
-                : Decl(Kind::Enum, std::move(name), std::move(sourceFile), startPosition, endPosition),
+                 Visibility visibility, Type* baseType, std::vector<EnumConstantDecl*> enumConstants)
+                : Decl(Kind::Enum, std::move(name), std::move(sourceFile), startPosition, endPosition,
+                       visibility),
                   baseType(baseType), _enumConstants(std::move(enumConstants)) {}
 
         Type* baseType;
@@ -48,6 +49,7 @@ namespace gulc {
 
             auto result = new EnumDecl(name(), sourceFile(),
                                        startPosition(), endPosition(),
+                                       visibility(),
                                        baseType->deepCopy(), std::move(copiedConstants));
             result->parentNamespace = parentNamespace;
             result->parentStruct = parentStruct;

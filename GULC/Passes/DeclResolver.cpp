@@ -33,6 +33,7 @@
 #include <AST/Types/StructType.hpp>
 #include <AST/Exprs/RefStructMemberVariableExpr.hpp>
 #include <AST/Exprs/RefStructMemberFunctionExpr.hpp>
+#include <AST/VisibilityChecker.hpp>
 #include "DeclResolver.hpp"
 #include "TypeResolver.hpp"
 
@@ -158,7 +159,7 @@ bool DeclResolver::processStmt(Stmt *&stmt) {
 void DeclResolver::processExpr(Expr *&expr) {
     switch (expr->getExprKind()) {
         case Expr::Kind::BinaryOperator:
-            processBinaryOperatorExpr(expr);
+            processBinaryOperatorExpr(expr, false);
             break;
         case Expr::Kind::CharacterLiteral:
             processCharacterLiteralExpr(llvm::dyn_cast<CharacterLiteralExpr>(expr));
@@ -185,7 +186,7 @@ void DeclResolver::processExpr(Expr *&expr) {
             processIntegerLiteralExpr(llvm::dyn_cast<IntegerLiteralExpr>(expr));
             break;
         case Expr::Kind::LocalVariableDecl:
-            processLocalVariableDeclExpr(llvm::dyn_cast<LocalVariableDeclExpr>(expr));
+            processLocalVariableDeclExpr(llvm::dyn_cast<LocalVariableDeclExpr>(expr), false);
             break;
         case Expr::Kind::LocalVariableDeclOrPrefixOperatorCallExpr:
             // Casting isn't required for this function. It will handle the casting for us since this is a type we will be completely removing from the AST in this function
@@ -719,11 +720,27 @@ bool DeclResolver::processWhileStmt(WhileStmt *whileStmt) {
 }
 
 // Exprs
-void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
+void DeclResolver::processBinaryOperatorExpr(Expr*& expr, bool isNestedBinaryOperator) {
     auto binaryOperatorExpr = llvm::dyn_cast<BinaryOperatorExpr>(expr);
 
     // TODO: Support operator overloading type resolution
-    processExpr(binaryOperatorExpr->leftValue);
+    if (llvm::isa<BinaryOperatorExpr>(binaryOperatorExpr->leftValue)) {
+        processBinaryOperatorExpr(binaryOperatorExpr->leftValue, isNestedBinaryOperator);
+
+        // If the left value after processing isn't a local variable declaration then we continue like normal
+        // else we send the local variable decl into the `processLocalVariableDecl` since it wasn't performed in
+        // `processBinaryOperatorExpr` since we told it not to
+        if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
+            processExpr(binaryOperatorExpr->rightValue);
+
+            processLocalVariableDeclExpr(llvm::dyn_cast<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue), true);
+
+            // We don't do further processing
+            return;
+        }
+    } else {
+        processExpr(binaryOperatorExpr->leftValue);
+    }
 
     if (llvm::isa<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue)) {
         // TODO: Support the other type suffixes
@@ -757,7 +774,13 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
                                                               binaryOperatorExpr->endPosition(), localVarTypeRef,
                                                               varName);
 
-            processLocalVariableDeclExpr(localVarDeclExpr);
+            // TODO: Process the local variable in a nested
+            // We only process the local variable here if it is not a part of a nested binary operator
+            // This is so we can support handling initial value handling within the `processLocalVariableDeclExpr`
+            // function.
+            if (!isNestedBinaryOperator) {
+                processLocalVariableDeclExpr(localVarDeclExpr, false);
+            }
 
             // Delete the binary operator expression (this will delete the left and right expressions)
             delete binaryOperatorExpr;
@@ -794,7 +817,13 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
                                                               binaryOperatorExpr->endPosition(), localVarTypeRef,
                                                               varName);
 
-            processLocalVariableDeclExpr(localVarDeclExpr);
+            // TODO: Process the local variable in a nested
+            // We only process the local variable here if it is not a part of a nested binary operator
+            // This is so we can support handling initial value handling within the `processLocalVariableDeclExpr`
+            // function.
+            if (!isNestedBinaryOperator) {
+                processLocalVariableDeclExpr(localVarDeclExpr, false);
+            }
 
             // Delete the binary operator expression (this will delete the left and right expressions)
             delete binaryOperatorExpr;
@@ -832,7 +861,13 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr) {
                                                               binaryOperatorExpr->endPosition(), localVarTypeRef,
                                                               varName);
 
-            processLocalVariableDeclExpr(localVarDeclExpr);
+            // TODO: Process the local variable in a nested
+            // We only process the local variable here if it is not a part of a nested binary operator
+            // This is so we can support handling initial value handling within the `processLocalVariableDeclExpr`
+            // function.
+            if (!isNestedBinaryOperator) {
+                processLocalVariableDeclExpr(localVarDeclExpr, false);
+            }
 
             // Delete the binary operator expression (this will delete the left and right expressions)
             delete binaryOperatorExpr;
@@ -1728,7 +1763,7 @@ void DeclResolver::processIntegerLiteralExpr(IntegerLiteralExpr *integerLiteralE
     integerLiteralExpr->resultType = (new BuiltInType({}, {}, "int"));
 }
 
-void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVariableDeclExpr) {
+void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVariableDeclExpr, bool hasInitialValue) {
     // We process the type as an Expr so that we can resolve any potentially unresolved types...
     processExpr(localVariableDeclExpr->type);
 
@@ -1746,29 +1781,30 @@ void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVari
 
         localVariableDeclExpr->resultType = resolvedTypeRefExpr->resolvedType->deepCopy();
 
+        for (Expr*& initializerArg : localVariableDeclExpr->initializerArgs) {
+            processExpr(initializerArg);
+        }
+
         // Find the correct constructor or verify a correct constructor exists...
-        // NOTE: We only check the constructor here if they provide initializer arguments
-        //  if no initializer is provided we will handle verification in `CodeVerifier` as there might be an initial
-        //  value we can't see here
-        if (localVariableDeclExpr->hasInitializer()) {
-            for (Expr*& initializerArg : localVariableDeclExpr->initializerArgs) {
-                processExpr(initializerArg);
-            }
-
-            if (localVariableDeclExpr->initializerArgs.size() > 1) {
-                if (!llvm::isa<StructType>(resolvedTypeRefExpr->resolvedType)) {
-                    printError("non-struct variables can only have 1 initializer argument! (found " + std::to_string(localVariableDeclExpr->initializerArgs.size()) + ")",
-                               localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
-                }
-
+        // NOTE: We only check the constructor here if they provide initializer arguments or there isn't an initial
+        // value
+        // TODO: Once we support move and copy constructors we should us `hasInitialValue` to handle move and copy
+        if (llvm::isa<StructType>(resolvedTypeRefExpr->resolvedType)) {
+            if (localVariableDeclExpr->hasInitializer() || !hasInitialValue) {
                 auto structType = llvm::dyn_cast<StructType>(resolvedTypeRefExpr->resolvedType);
 
-                ConstructorDecl* foundConstructor = nullptr;
+                ConstructorDecl *foundConstructor = nullptr;
                 // `isExactMatch` is used to check for ambiguity
                 bool isExactMatch = false;
                 bool isAmbiguous = false;
 
-                for (ConstructorDecl* constructorDecl : structType->decl()->constructors) {
+                for (ConstructorDecl *constructorDecl : structType->decl()->constructors) {
+                    // Skip any constructors not visible to us
+                    if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
+                                                                  constructorDecl)) {
+                        continue;
+                    }
+
                     if (!checkConstructorOrFunctionMatchesCall(foundConstructor, constructorDecl,
                                                                &localVariableDeclExpr->initializerArgs,
                                                                &isExactMatch, &isAmbiguous)) {
@@ -1778,7 +1814,7 @@ void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVari
                 }
 
                 if (!foundConstructor) {
-                    printError("no valid constructor found for the provided initializer arguments!",
+                    printError("no valid public constructor found for the provided initializer arguments!",
                                localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
                 }
 
@@ -1802,9 +1838,10 @@ void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVari
                         convertLValueToRValue(localVariableDeclExpr->initializerArgs[i]);
                     }
                 }
-            } else {
-                // If there is only one initializer argument then we will treat it as an assignment...
-                // TODO: We need to see if an implicit cast is required...
+            } else if (localVariableDeclExpr->initializerArgs.size() > 1) {
+                printError("non-struct variables can only have 1 initializer argument! (" +
+                           std::to_string(localVariableDeclExpr->initializerArgs.size()) + ")",
+                           localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
             }
         }
 
@@ -1928,6 +1965,12 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
 
                 for (Decl* checkDecl : structType->decl()->members) {
                     if (checkDecl->name() == memberAccessCallExpr->member->name()) {
+                        // Skip anything we cannot access
+                        if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
+                                                                      checkDecl)) {
+                            continue;
+                        }
+
                         // TODO: Needs to be changed to `MemberVariableDecl`
                         if (llvm::isa<GlobalVariableDecl>(checkDecl)) {
                             auto memberVariable = llvm::dyn_cast<GlobalVariableDecl>(checkDecl);
@@ -2004,6 +2047,9 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
 
                     return;
                 }
+
+                printError("member '" + memberAccessCallExpr->member->name() + "' was not found in type '" + structType->getString() + "' or is not public!",
+                           memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
             } else {
                 printError("type '" + memberAccessCallExpr->objectRef->resultType->getString() + "' not supported in member access call!",
                            memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());

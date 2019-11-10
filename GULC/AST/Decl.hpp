@@ -26,6 +26,15 @@ namespace gulc {
 
     class Decl {
     public:
+        enum class Visibility {
+            Unspecified,
+            Public,
+            Private,
+            Internal,
+            Protected,
+            ProtectedInternal
+        };
+
         enum class Kind {
             TemplateFunction,
             Function,
@@ -67,10 +76,15 @@ namespace gulc {
         NamespaceDecl* parentNamespace;
         StructDecl* parentStruct;
 
+        Visibility visibility() const { return _visibility; }
+        void setVisibility(Visibility visibility) { _visibility = visibility; }
+
     protected:
-        Decl(Kind kind, std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition)
-                : _kind(kind), _name(std::move(name)),
-                  _sourceFile(std::move(sourceFile)), _startPosition(startPosition), _endPosition(endPosition) {}
+        Decl(Kind kind, std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
+             Visibility visibility)
+                : parentNamespace(nullptr), parentStruct(nullptr), _kind(kind), _name(std::move(name)),
+                  _sourceFile(std::move(sourceFile)), _startPosition(startPosition), _endPosition(endPosition),
+                  _mangledName(), _visibility(visibility) {}
 
     private:
         const Kind _kind;
@@ -79,6 +93,7 @@ namespace gulc {
         const TextPosition _startPosition;
         const TextPosition _endPosition;
         std::string _mangledName;
+        Visibility _visibility;
 
     };
 }

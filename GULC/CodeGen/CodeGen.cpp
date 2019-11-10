@@ -1134,39 +1134,37 @@ llvm::Value *gulc::CodeGen::generateLocalVariableDeclExpr(const gulc::LocalVaria
     llvm::AllocaInst* result = addLocalVariable(localVariableDeclExpr->name(),
                                                 generateLlvmType(localVariableDeclExpr->resultType));
 
-    if (localVariableDeclExpr->hasInitializer()) {
-        // If we have a constructor call...
-        if (localVariableDeclExpr->foundConstructor) {
-            llvm::Function* constructorFunc = module->getFunction(localVariableDeclExpr->foundConstructor->mangledName());
+    // If we have a constructor call...
+    if (localVariableDeclExpr->foundConstructor) {
+        llvm::Function* constructorFunc = module->getFunction(localVariableDeclExpr->foundConstructor->mangledName());
 
-            std::vector<llvm::Value*> llvmArgs{};
-            llvmArgs.reserve(localVariableDeclExpr->initializerArgs.size() + 1);
-            // We pass a reference to the local variable as the first argument of the constructor
-            // the constructor doesn't return anything. It modifies the `this` variable that we pass here
-            llvmArgs.push_back(result);
+        std::vector<llvm::Value*> llvmArgs{};
+        llvmArgs.reserve(localVariableDeclExpr->initializerArgs.size() + 1);
+        // We pass a reference to the local variable as the first argument of the constructor
+        // the constructor doesn't return anything. It modifies the `this` variable that we pass here
+        llvmArgs.push_back(result);
 
-            // Now add the rest of the initializer args (if there are any...)
-            for (Expr* initializerArg : localVariableDeclExpr->initializerArgs) {
-                llvmArgs.push_back(generateExpr(initializerArg));
-            }
-
-            // Call the constructor...
-            // We don't bother giving the result a name since constructors return void
-            irBuilder->CreateCall(constructorFunc, llvmArgs);
-
-            // Return the local variable reference normally...
-        } else {
-            // If we didn't find a constructor and there isn't exactly 1 argument then something is wrong...
-            if (localVariableDeclExpr->initializerArgs.size() != 1) {
-                printError("[INTERNAL] local variable has missing constructor reference!",
-                           localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
-            }
-
-            llvm::Value* initialValue = generateExpr(localVariableDeclExpr->initializerArgs[0]);
-
-            // Return the assignment...
-            return irBuilder->CreateStore(initialValue, result, false);
+        // Now add the rest of the initializer args (if there are any...)
+        for (Expr* initializerArg : localVariableDeclExpr->initializerArgs) {
+            llvmArgs.push_back(generateExpr(initializerArg));
         }
+
+        // Call the constructor...
+        // We don't bother giving the result a name since constructors return void
+        irBuilder->CreateCall(constructorFunc, llvmArgs);
+
+        // Return the local variable reference normally...
+    } else if (localVariableDeclExpr->hasInitializer()) {
+        // If we didn't find a constructor and there is more than 1 argument then something is wrong...
+        if (localVariableDeclExpr->initializerArgs.size() > 1) {
+            printError("[INTERNAL] local variable has missing constructor reference!",
+                       localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
+        }
+
+        llvm::Value* initialValue = generateExpr(localVariableDeclExpr->initializerArgs[0]);
+
+        // Return the assignment...
+        return irBuilder->CreateStore(initialValue, result, false);
     }
 
     return result;

@@ -192,15 +192,122 @@ Decl *Parser::parseTopLevelDecl() {
 		OUT, // 'out'
 		REF, // 'ref'
      */
+    Decl::Visibility visibility = Decl::Visibility::Unspecified;
 
     while (peekedToken.metaType == TokenMetaType::MODIFIER) {
         switch (peekedToken.tokenType) {
             case TokenType::PUBLIC:
+                switch (visibility) {
+                    case Decl::Visibility::Unspecified:
+                        visibility = Decl::Visibility::Public;
+                        break;
+                    case Decl::Visibility::Public:
+                        printWarning("duplicate `public` specifier!",
+                                     peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::Private:
+                        printError("cannot specify both `private` and `public` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::Protected:
+                        printError("cannot specify both `protected` and `public` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::Internal:
+                        printError("cannot specify both `internal` and `public` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::ProtectedInternal:
+                        printError("cannot specify both `protected internal` and `public` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                }
+                _lexer.consumeType(TokenType::PUBLIC);
+                break;
             case TokenType::PRIVATE:
+                switch (visibility) {
+                    case Decl::Visibility::Unspecified:
+                        visibility = Decl::Visibility::Private;
+                        break;
+                    case Decl::Visibility::Public:
+                        printError("cannot specify both `public` and `private` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::Private:
+                        printWarning("duplicate `private` specifier!",
+                                     peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::Protected:
+                        printError("cannot specify both `protected` and `private` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::Internal:
+                        printError("cannot specify both `internal` and `private` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::ProtectedInternal:
+                        printError("cannot specify both `protected internal` and `private` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                }
+                _lexer.consumeType(TokenType::PRIVATE);
+                break;
             case TokenType::PROTECTED:
+                switch (visibility) {
+                    case Decl::Visibility::Unspecified:
+                        visibility = Decl::Visibility::Protected;
+                        break;
+                    case Decl::Visibility::Public:
+                        printError("cannot specify both `public` and `protected` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::Private:
+                        printError("cannot specify both `private` and `protected` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::Protected:
+                        printWarning("duplicate `protected` specifier!",
+                                     peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::Internal:
+                        printWarning("`internal protected` is out of order, replace with `protected internal`!",
+                                     peekedToken.startPosition, peekedToken.endPosition);
+                        visibility = Decl::Visibility::ProtectedInternal;
+                        break;
+                    case Decl::Visibility::ProtectedInternal:
+                        printError("cannot specify both `protected internal` and `protected` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                }
+                _lexer.consumeType(TokenType::PROTECTED);
+                break;
             case TokenType::INTERNAL:
-                printError("'public', 'private', 'protected', and 'internal' cannot be applied to top-level declarations!", peekedToken.startPosition, peekedToken.endPosition);
-                return nullptr;
+                switch (visibility) {
+                    case Decl::Visibility::Unspecified:
+                        visibility = Decl::Visibility::Internal;
+                        break;
+                    case Decl::Visibility::Public:
+                        printError("cannot specify both `public` and `internal` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::Private:
+                        printError("cannot specify both `private` and `internal` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::Protected:
+                        visibility = Decl::Visibility::ProtectedInternal;
+                        break;
+                    case Decl::Visibility::Internal:
+                        printWarning("duplicate `internal` specifier!",
+                                     peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                    case Decl::Visibility::ProtectedInternal:
+                        printError("cannot specify both `protected internal` and `internal` at the same time!",
+                                   peekedToken.startPosition, peekedToken.endPosition);
+                        break;
+                }
+                _lexer.consumeType(TokenType::INTERNAL);
+                break;
             case TokenType::STATIC:
                 printError("'static' cannot be applied to top-level declarations!", peekedToken.startPosition, peekedToken.endPosition);
                 return nullptr;
@@ -254,6 +361,11 @@ qualifierFound:
     switch (peekedToken.tokenType) {
         case TokenType::NAMESPACE: {
             _lexer.consumeType(TokenType::NAMESPACE);
+
+            if (visibility != Decl::Visibility::Unspecified) {
+                printError("namespaces cannot have a visibility modifier!",
+                           startPosition, _lexer.peekToken().endPosition);
+            }
 
             std::string name = _lexer.peekToken().currentSymbol;
 
@@ -363,7 +475,7 @@ qualifierFound:
                 return nullptr;
             }
 
-            return new StructDecl(name, _filePath, startPosition, endPosition,
+            return new StructDecl(name, _filePath, startPosition, endPosition, visibility,
                                   std::move(constructors), std::move(members), destructor);
         }
         case TokenType::UNION:
@@ -432,11 +544,16 @@ qualifierFound:
                 return nullptr;
             }
 
-            return new EnumDecl(name, _filePath, startPosition, endPosition, baseType, constants);
+            return new EnumDecl(name, _filePath, startPosition, endPosition, visibility, baseType, constants);
         }
         case TokenType::TILDE: {
             // Parse destructor
             _lexer.consumeType(TokenType::TILDE);
+
+            if (visibility != Decl::Visibility::Unspecified) {
+                printError("destructors cannot have a visibility modifier!",
+                           startPosition, _lexer.peekToken().endPosition);
+            }
 
             std::string verifyName = _lexer.peekToken().currentSymbol;
 
@@ -519,7 +636,7 @@ qualifierFound:
                     // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
                     CompoundStmt* compoundStmt = parseCompoundStmt();
 
-                    return new TemplateFunctionDecl(name, _filePath, startPosition, endPosition, resultType, templateParameters, parameters, compoundStmt);
+                    return new TemplateFunctionDecl(name, _filePath, startPosition, endPosition, visibility, resultType, templateParameters, parameters, compoundStmt);
                 }
                 case TokenType::LPAREN: { // Function
                     std::vector<ParameterDecl*> parameters = parseParameterDecls(startPosition);
@@ -527,9 +644,9 @@ qualifierFound:
                     CompoundStmt* compoundStmt = parseCompoundStmt();
 
                     if (parseConstructor) {
-                        return new ConstructorDecl(name, _filePath, startPosition, endPosition, parameters, compoundStmt);
+                        return new ConstructorDecl(name, _filePath, startPosition, endPosition, visibility, parameters, compoundStmt);
                     } else {
-                        return new FunctionDecl(name, _filePath, startPosition, endPosition, resultType, parameters, compoundStmt);
+                        return new FunctionDecl(name, _filePath, startPosition, endPosition, visibility, resultType, parameters, compoundStmt);
                     }
                 }
                 case TokenType::EQUALS: {
@@ -549,7 +666,7 @@ qualifierFound:
                         return nullptr;
                     }
 
-                    return new GlobalVariableDecl(name, _filePath, startPosition, endPosition, resultType, initialValue);
+                    return new GlobalVariableDecl(name, _filePath, startPosition, endPosition, visibility, resultType, initialValue);
                 }
                 case TokenType::SEMICOLON:
                     if (parseConstructor) {
@@ -565,7 +682,7 @@ qualifierFound:
                         return nullptr;
                     }
 
-                    return new GlobalVariableDecl(name, _filePath, startPosition, endPosition, resultType, nullptr);
+                    return new GlobalVariableDecl(name, _filePath, startPosition, endPosition, visibility, resultType, nullptr);
                 default:
                     printError("unexpected token in top-level declaration! (found '" + _lexer.peekToken().currentSymbol + "')", startPosition, endPosition);
                     return nullptr;

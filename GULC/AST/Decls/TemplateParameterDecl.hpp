@@ -27,7 +27,8 @@ namespace gulc {
 
         TemplateParameterDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
                               Type* type, Expr* defaultArgument = nullptr)
-                : Decl(Kind::TemplateParameter, std::move(name), std::move(sourceFile), startPosition, endPosition),
+                : Decl(Kind::TemplateParameter, std::move(name), std::move(sourceFile), startPosition, endPosition,
+                       Visibility::Unspecified),
                   type(type), _defaultArgument(defaultArgument) {}
 
         Type* type;

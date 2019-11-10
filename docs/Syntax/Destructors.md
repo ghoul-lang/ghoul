@@ -1,7 +1,7 @@
 ## Destructor Handling
 Destructors work mostly the same way as C++ (I say mostly since I haven't read the actual C++ standard, I'm only basing this on how I've seen C++ work)
 
-## Early Returning
+### Early Returning
 In the case that a `return` is placed early in a destructor, the destructor STILL calls the base destructor and destructs the member variables.
 The best way to think of it is that a destructor calls the base destructor and destructs the member variables at all logical return points.
 I.e.:

@@ -27,7 +27,8 @@ namespace gulc {
 
         ParameterDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
                       Type* type, Expr* defaultArgument = nullptr)
-                : Decl(Kind::Parameter, std::move(name), std::move(sourceFile), startPosition, endPosition),
+                : Decl(Kind::Parameter, std::move(name), std::move(sourceFile), startPosition, endPosition,
+                       Visibility::Unspecified),
                   type(type), typeTemplateParamNumber(0), _defaultArgument(defaultArgument) {}
 
         // TODO: Support 'Modifiers' and default modifiers like 'in' and 'out'

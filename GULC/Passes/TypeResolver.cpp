@@ -40,7 +40,8 @@ void TypeResolver::processFile(std::vector<FileAST*>& files) {
 
         // TODO: We need to do two passes. One for assigning types to all declarations and then one for assigning them to expressions
         for (Decl* decl : fileAst->topLevelDecls()) {
-            processDecl(decl);
+            // We set to internal since technically all file decls are internal
+            processDecl(decl, Decl::Visibility::Internal);
         }
     }
 }
@@ -307,25 +308,50 @@ NamespaceDecl* TypeResolver::validateImportPath(NamespaceDecl *checkNamespace, c
     return nullptr;
 }
 
-void TypeResolver::processDecl(Decl *decl) {
+void TypeResolver::processDecl(Decl *decl, Decl::Visibility visibilityIfUnspecified) {
     switch (decl->getDeclKind()) {
         case Decl::Kind::Function:
             processFunctionDecl(llvm::dyn_cast<FunctionDecl>(decl));
+
+            if (decl->visibility() == Decl::Visibility::Unspecified) {
+                decl->setVisibility(visibilityIfUnspecified);
+            }
+
             break;
         case Decl::Kind::GlobalVariable:
             processGlobalVariableDecl(llvm::dyn_cast<GlobalVariableDecl>(decl));
+
+            if (decl->visibility() == Decl::Visibility::Unspecified) {
+                decl->setVisibility(visibilityIfUnspecified);
+            }
+
             break;
         case Decl::Kind::Enum:
             processEnumDecl(llvm::dyn_cast<EnumDecl>(decl));
+
+            if (decl->visibility() == Decl::Visibility::Unspecified) {
+                decl->setVisibility(visibilityIfUnspecified);
+            }
+
             break;
         case Decl::Kind::Namespace:
             processNamespaceDecl(llvm::dyn_cast<NamespaceDecl>(decl));
             break;
         case Decl::Kind::Struct:
             processStructDecl(llvm::dyn_cast<StructDecl>(decl));
+
+            if (decl->visibility() == Decl::Visibility::Unspecified) {
+                decl->setVisibility(visibilityIfUnspecified);
+            }
+
             break;
         case Decl::Kind::TemplateFunction:
             processTemplateFunctionDecl(llvm::dyn_cast<TemplateFunctionDecl>(decl));
+
+            if (decl->visibility() == Decl::Visibility::Unspecified) {
+                decl->setVisibility(visibilityIfUnspecified);
+            }
+
             break;
         case Decl::Kind::Parameter:
         case Decl::Kind::TemplateParameter:
@@ -545,7 +571,7 @@ void TypeResolver::processNamespaceDecl(NamespaceDecl *namespaceDecl) {
 
     for (Decl* decl : namespaceDecl->nestedDecls()) {
         decl->parentNamespace = namespaceDecl;
-        processDecl(decl);
+        processDecl(decl, Decl::Visibility::Public);
     }
 
     currentNamespace = oldNamespace;
@@ -559,6 +585,11 @@ void TypeResolver::processStructDecl(StructDecl *structDecl) {
     for (ConstructorDecl* constructor : structDecl->constructors) {
         constructor->parentStruct = structDecl;
         processConstructorDecl(constructor);
+
+        if (constructor->visibility() == Decl::Visibility::Unspecified) {
+            constructor->setVisibility(Decl::Visibility::Public);
+        }
+
     }
 
     // TODO: Process base type
@@ -570,7 +601,7 @@ void TypeResolver::processStructDecl(StructDecl *structDecl) {
             structDecl->dataMembers.push_back(llvm::dyn_cast<GlobalVariableDecl>(decl));
         }
 
-        processDecl(decl);
+        processDecl(decl, Decl::Visibility::Public);
     }
 
     // TODO: Process base type
