@@ -6,7 +6,8 @@
 #include <AST/Types/MutType.hpp>
 #include <AST/Types/ImmutType.hpp>
 #include <AST/Types/ReferenceType.hpp>
-#include <AST/VisibilityChecker.hpp>
+#include <ASTHelpers/VisibilityChecker.hpp>
+#include <AST/Exprs/BaseDestructorCallExpr.hpp>
 #include "Lifetimes.hpp"
 
 using namespace gulc;
@@ -414,6 +415,12 @@ void Lifetimes::processReturnStmt(ReturnStmt *returnStmt) {
 
                 returnStmt->preReturnExprs.push_back(destructMemberVariable);
             }
+        }
+
+        // The last thing a destructor needs to do is call the base destructor if it exists
+        if (currentStruct->destructor->baseDestructor != nullptr) {
+            returnStmt->preReturnExprs.push_back(new BaseDestructorCallExpr({}, {},
+                                                                            currentStruct->destructor->baseDestructor));
         }
     }
 }

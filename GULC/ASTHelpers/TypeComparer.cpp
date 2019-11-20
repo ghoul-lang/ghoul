@@ -24,6 +24,7 @@
 #include <AST/Types/FunctionPointerType.hpp>
 #include <iostream>
 #include <AST/Types/StructType.hpp>
+#include <AST/Types/FunctionTemplateTypenameRefType.hpp>
 #include "TypeComparer.hpp"
 
 using namespace gulc;
@@ -69,10 +70,11 @@ bool TypeComparer::getTypesAreSame(const Type* type1, const Type* type2, bool ig
                 return structType1->decl() == structType2->decl();
             }
             case Type::Kind::FunctionTemplateTypenameRef: {
-                auto pointerType1 = llvm::dyn_cast<PointerType>(type1);
-                auto pointerType2 = llvm::dyn_cast<PointerType>(type2);
+                auto functionTemplateTypenameRef1 = llvm::dyn_cast<FunctionTemplateTypenameRefType>(type1);
+                auto functionTemplateTypenameRef2 = llvm::dyn_cast<FunctionTemplateTypenameRefType>(type2);
 
-                return getTypesAreSame(pointerType1->pointToType, pointerType2->pointToType, ignoreQualifiers);
+                return functionTemplateTypenameRef1->templateParameterIndex() ==
+                       functionTemplateTypenameRef2->templateParameterIndex();
             }
             case Type::Kind::Pointer: {
                 auto pointerType1 = llvm::dyn_cast<PointerType>(type1);

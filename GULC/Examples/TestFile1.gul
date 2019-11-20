@@ -1,59 +1,52 @@
 import std;
 
-struct TestStruct
+struct BaseStruct
 {
-    int hm2;
-    float hm;
+    public int i;
+    public int j;
 
-    public TestStruct()
+    public BaseStruct()
     {
-        this.hm2 = 90;
-        this.hm = 0;
+        i = 44;
     }
 
-    public TestStruct(int hm2, float hm)
+    public BaseStruct(int i, int j)
     {
-        this.hm2 = hm2;
-        this.hm = hm;
+        this.i = i;
+        this.j = j;
     }
 
-    public int memberFunctionTest(int param1)
+    public void setI()
     {
-        return param1 + 20;
-    }
-
-    ~TestStruct()
-    {
-        hm2 = 0;
-        hm = 0;
+        i = 4;
     }
 }
 
-int getMemberFunctionTest(TestStruct& ts)
+struct ChildStruct : BaseStruct
 {
-    return ts.hm2;
+    public int k;
+
+    public ChildStruct()
+        : this(69, 420, 12) {}
+
+    public ChildStruct(int i, int j, int k)
+        : base(i, j)
+    {
+        this.k = k;
+    }
+
+    public void setI()
+    {
+        base.setI();
+    }
 }
 
 int main()
 {
-    int i = 40;
-    TestStruct tsp;
+    BaseStruct bs;
+    ChildStruct cs(44, 12, 69);
 
-    for (TestStruct t(i, 0); i < 54; ++i)
-    {
-        TestStruct hmm(69, 1);
+    cs.setI();
 
-        if (i == 52)
-        {
-            i = 12;
-            break;
-        }
-    }
-
-    testLabel:
-    int j;
-
-    j = 12;
-
-    return j;
+    return cs.i;
 }

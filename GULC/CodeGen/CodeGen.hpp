@@ -55,6 +55,8 @@
 #include <AST/Exprs/DestructLocalVariableExpr.hpp>
 #include <AST/Exprs/DestructParameterExpr.hpp>
 #include <AST/Exprs/DestructMemberVariableExpr.hpp>
+#include <AST/Exprs/BaseDestructorCallExpr.hpp>
+#include <AST/Exprs/RefBaseExpr.hpp>
 #include "Module.hpp"
 
 namespace gulc {
@@ -135,6 +137,10 @@ namespace gulc {
         llvm::Value* generateDestructLocalVariableExpr(const DestructLocalVariableExpr* destructLocalVariableExpr);
         llvm::Value* generateDestructParameterExpr(const DestructParameterExpr* destructParameterExpr);
         llvm::Value* generateDestructMemberVariableExpr(const DestructMemberVariableExpr* destructMemberVariableExpr);
+        llvm::Value* generateRefBaseExpr(const RefBaseExpr* refBaseExpr);
+
+        void generateBaseConstructorCallExpr(const BaseConstructorCallExpr* baseConstructorCallExpr);
+        void generateBaseDestructorCallExpr(const BaseDestructorCallExpr* baseDestructorCallExpr);
 
         llvm::Function* generateRefFunctionExpr(const Expr* expr, std::string* nameOut);
 
@@ -215,6 +221,8 @@ namespace gulc {
 
         llvm::AllocaInst* getLocalVariableOrNull(const std::string& varName) {
             for (std::size_t i = 0; i < currentFunctionLocalVariablesCount; ++i) {
+                std::string test = currentFunctionLocalVariables[i]->getName();
+
                 if (currentFunctionLocalVariables[i]->getName() == varName) {
                     return currentFunctionLocalVariables[i];
                 }
@@ -268,6 +276,10 @@ namespace gulc {
                 return llvmStructTypes[structDecl];
             } else {
                 std::vector<llvm::Type*> elements;
+
+                if (structDecl->baseStruct != nullptr) {
+                    elements.push_back(getLlvmStructType(structDecl->baseStruct));
+                }
 
                 for (GlobalVariableDecl* dataMember : structDecl->dataMembers) {
                     elements.push_back(generateLlvmType(dataMember->type));

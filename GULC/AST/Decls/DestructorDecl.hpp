@@ -28,9 +28,13 @@ namespace gulc {
                        CompoundStmt *body)
                 : Decl(Kind::Destructor, std::move(name), std::move(sourceFile), startPosition, endPosition,
                        Visibility::Unspecified),
-                  _body(body) {}
+                  baseDestructor(nullptr), _body(body) {}
 
         CompoundStmt *body() const { return _body; }
+
+        // This is used for calling a base struct's destructor
+        // We don't own this so we don't free it
+        DestructorDecl* baseDestructor;
 
         Decl *deepCopy() const override {
             auto result = new DestructorDecl(name(), sourceFile(),
@@ -38,6 +42,7 @@ namespace gulc {
                                               static_cast<CompoundStmt*>(_body->deepCopy()));
             result->parentNamespace = parentNamespace;
             result->parentStruct = parentStruct;
+            result->baseDestructor = baseDestructor;
             return result;
         }
 

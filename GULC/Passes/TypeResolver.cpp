@@ -165,12 +165,14 @@ bool TypeResolver::resolveType(Type *&type) {
             // We check the function templates first...
             // Function template params can't be templated themselves?
             if (!unresolvedType->hasTemplateArguments() && functionTemplateParams) {
-                for (TemplateParameterDecl *templateParameterDecl : *functionTemplateParams) {
+                for (std::size_t i = 0; i < functionTemplateParams->size(); ++i) {
+                    TemplateParameterDecl *templateParameterDecl = (*functionTemplateParams)[i];
+
                     if (templateParameterDecl->type->getTypeKind() == Type::Kind::TemplateTypename) {
                         if (templateParameterDecl->name() == unresolvedType->name()) {
                             Type *oldType = type;
                             type = new FunctionTemplateTypenameRefType(oldType->startPosition(), oldType->endPosition(),
-                                                                       templateParameterDecl->name());
+                                                                       i);
                             delete oldType;
                             return true;
                         }
@@ -496,6 +498,12 @@ void TypeResolver::processConstructorDecl(ConstructorDecl *constructorDecl) {
         }
     }
 
+    if (constructorDecl->baseConstructorCall != nullptr && constructorDecl->baseConstructorCall->hasArguments()) {
+        for (Expr*& argument : constructorDecl->baseConstructorCall->arguments) {
+            processExpr(argument);
+        }
+    }
+
     processCompoundStmt(constructorDecl->body());
 }
 
@@ -581,18 +589,54 @@ void TypeResolver::processStructDecl(StructDecl *structDecl) {
     StructDecl* oldStruct = currentStruct;
     currentStruct = structDecl;
 
-    // TODO: Process base type
+    for (Type*& baseType : structDecl->baseTypes) {
+        if (!resolveType(baseType)) {
+            printError("type '" + baseType->getString() + "' was not found!",
+                       baseType->startPosition(), baseType->endPosition());
+        }
+
+
+        if (llvm::isa<StructType>(baseType)) {
+            auto structType = llvm::dyn_cast<StructType>(baseType);
+
+            if (structDecl->baseStruct != nullptr) {
+                printError("struct '" + structDecl->name() + "' cannot extend both '" +
+                           structDecl->baseStruct->name() + "' and '" + structType->decl()->name() +
+                           "' at the same time! (both types are structs)",
+                           structDecl->startPosition(), structDecl->endPosition());
+            } else {
+                structDecl->baseStruct = structType->decl();
+            }
+        }
+    }
+
+    bool hasDefaultConstructor = false;
+
     for (ConstructorDecl* constructor : structDecl->constructors) {
         constructor->parentStruct = structDecl;
         processConstructorDecl(constructor);
 
+        if (!constructor->hasParameters()) {
+            hasDefaultConstructor = true;
+        }
+
         if (constructor->visibility() == Decl::Visibility::Unspecified) {
             constructor->setVisibility(Decl::Visibility::Public);
         }
-
     }
 
-    // TODO: Process base type
+    // If the struct doesn't declare any default constructor then we define a default, empty constructor
+    // We will handle checking if the base struct's default constructor is callable in `DeclResolver`
+    if (!hasDefaultConstructor) {
+        ConstructorDecl* defaultConstructor = new ConstructorDecl(structDecl->name(), structDecl->sourceFile(),
+                                                                  structDecl->startPosition(), structDecl->endPosition(),
+                                                                  Decl::Visibility::Public, {},
+                                                                  nullptr,
+                                                                  new CompoundStmt({}, {}, {}));
+        defaultConstructor->parentStruct = structDecl;
+        structDecl->constructors.push_back(defaultConstructor);
+    }
+
     for (Decl* decl : structDecl->members) {
         decl->parentStruct = structDecl;
 
@@ -604,11 +648,21 @@ void TypeResolver::processStructDecl(StructDecl *structDecl) {
         processDecl(decl, Decl::Visibility::Public);
     }
 
-    // TODO: Process base type
-    if (structDecl->destructor != nullptr) {
-        structDecl->destructor->parentStruct = structDecl;
-        processDestructorDecl(structDecl->destructor);
+
+    if (structDecl->destructor == nullptr) {
+        // If there isn't a provided destructor then we provide one here that is empty, it will be filled with member
+        // variable destructor calls in `Lifetimes`
+        CompoundStmt* defaultDestructorBody = new CompoundStmt({}, {}, {});
+        // We add a single `return` to the default destructor body. This will allow `Lifetimes` to add the member
+        // destructors to the default destructor
+        defaultDestructorBody->statements().push_back(new ReturnStmt({}, {}, nullptr));
+
+        structDecl->destructor = new DestructorDecl(structDecl->name(), structDecl->sourceFile(), {}, {},
+                                                    defaultDestructorBody);
     }
+
+    structDecl->destructor->parentStruct = structDecl;
+    processDestructorDecl(structDecl->destructor);
 
     currentStruct = oldStruct;
 }

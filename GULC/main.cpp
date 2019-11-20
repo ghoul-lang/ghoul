@@ -24,6 +24,7 @@
 #include <NameMangling/ItaniumMangler.hpp>
 #include <Passes/NamespacePrototyper.hpp>
 #include <Passes/Lifetimes.hpp>
+#include <Passes/Inheriter.hpp>
 
 using namespace gulc;
 
@@ -48,6 +49,10 @@ int main() {
     // Resolve types
     TypeResolver typeResolver(prototypes);
     typeResolver.processFile(parsedFiles);
+
+    // Resolve inherited members
+    Inheriter inheriter;
+    inheriter.processFile(parsedFiles);
 
     // Resolve declarations
     DeclResolver declResolver;

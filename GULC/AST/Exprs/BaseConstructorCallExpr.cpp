@@ -13,17 +13,4 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_TYPECOMPARER_HPP
-#define GULC_TYPECOMPARER_HPP
-
-#include "Type.hpp"
-
-namespace gulc {
-    class TypeComparer {
-    public:
-        static bool getTypesAreSame(const Type* type1, const Type* type2, bool ignoreQualifiers = false);
-
-    };
-}
-
-#endif //GULC_TYPECOMPARER_HPP
+#include "BaseConstructorCallExpr.hpp"

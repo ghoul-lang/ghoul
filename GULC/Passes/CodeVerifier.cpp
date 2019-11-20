@@ -21,11 +21,11 @@
 #include <AST/Types/ImmutType.hpp>
 #include <AST/Types/MutType.hpp>
 #include <AST/Types/RValueReferenceType.hpp>
-#include <AST/TypeComparer.hpp>
+#include <ASTHelpers/TypeComparer.hpp>
 #include <AST/Types/UnresolvedType.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
 #include <AST/Types/StructType.hpp>
-#include <AST/VisibilityChecker.hpp>
+#include <ASTHelpers/VisibilityChecker.hpp>
 #include "CodeVerifier.hpp"
 #include "DeclResolver.hpp"
 
@@ -718,14 +718,7 @@ void CodeVerifier::verifyLocalVariableDeclExpr(LocalVariableDeclExpr *localVaria
         if (llvm::isa<StructType>(resolvedTypeRef->resolvedType)) {
             auto structType = llvm::dyn_cast<StructType>(resolvedTypeRef->resolvedType);
 
-            // If the struct doesn't have an empty constructor and the local variable decl doesn't have an initializer
-            // then we print an error telling the user to call a valid constructor to initialize the type
-            if (!(structType->decl()->hasEmptyConstructor() || localVariableDeclExpr->hasInitializer())) {
-                printError("struct `" + resolvedTypeRef->resolvedType->getString() + "` "
-                           "does not have an empty constructor, please call a constructor to initialize type!",
-                           localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
-            }
-
+            // We do allow struct variables to be declared without a constructor call
             if (localVariableDeclExpr->foundConstructor != nullptr) {
                 if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
                                                               localVariableDeclExpr->foundConstructor)) {
@@ -733,6 +726,12 @@ void CodeVerifier::verifyLocalVariableDeclExpr(LocalVariableDeclExpr *localVaria
                                "' does not have a publicly visible constructor with the specified arguments!",
                                localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
                 }
+            } else if (localVariableDeclExpr->hasInitializer()) {
+                // We should never make it to this point since `DeclResolver` should handle this but just in case
+                // we print an error here if the local variable decl has an initializer but there wasn't a resolved
+                // constructor for it
+                printError("no valid public constructor found for the provided initializer arguments!",
+                           localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
             }
         }
     }

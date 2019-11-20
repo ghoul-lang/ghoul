@@ -13,23 +13,28 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_FUNCTIONCALLEXPR_HPP
-#define GULC_FUNCTIONCALLEXPR_HPP
+#ifndef GULC_BASECONSTRUCTORCALLEXPR_HPP
+#define GULC_BASECONSTRUCTORCALLEXPR_HPP
 
 #include <AST/Expr.hpp>
 #include <vector>
 
 namespace gulc {
-    class FunctionCallExpr : public Expr {
+    class ConstructorDecl;
+
+    class BaseConstructorCallExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::FunctionCall; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::BaseConstructorCall; }
 
-        FunctionCallExpr(TextPosition startPosition, TextPosition endPosition,
-                         Expr* functionReference, std::vector<Expr*> arguments)
-                : Expr(Kind::FunctionCall, startPosition, endPosition),
-                  functionReference(functionReference), arguments(std::move(arguments)) {}
+        BaseConstructorCallExpr(TextPosition startPosition, TextPosition endPosition,
+                                bool isThisCall, ConstructorDecl* baseConstructor, std::vector<Expr*> arguments)
+                : Expr(Kind::BaseConstructorCall, startPosition, endPosition),
+                  _isThisCall(isThisCall), baseConstructor(baseConstructor), arguments(std::move(arguments)) {}
 
-        Expr* functionReference;
+        /// Specifies if the call was a `: this(...)` call instead of a `: base(...)` call
+        bool isThisCall() const { return _isThisCall; }
+        // We don't own this so we don't free it
+        ConstructorDecl* baseConstructor;
         std::vector<Expr*> arguments;
         bool hasArguments() const { return !arguments.empty(); }
 
@@ -40,25 +45,25 @@ namespace gulc {
                 copiedArguments.push_back(arg->deepCopy());
             }
 
-            auto result = new FunctionCallExpr(startPosition(), endPosition(),
-                                               functionReference->deepCopy(),
-                                               std::move(copiedArguments));
+            auto result = new BaseConstructorCallExpr(startPosition(), endPosition(),
+                                                      _isThisCall,
+                                                      baseConstructor, std::move(copiedArguments));
             if (resultType) {
                 result->resultType = resultType->deepCopy();
             }
-            result->isUnreachable = isUnreachable;
             return result;
         }
 
-        ~FunctionCallExpr() override {
-            delete functionReference;
-
+        ~BaseConstructorCallExpr() override {
             for (Expr* argument : arguments) {
                 delete argument;
             }
         }
 
+    private:
+        bool _isThisCall;
+
     };
 }
 
-#endif //GULC_FUNCTIONCALLEXPR_HPP
+#endif //GULC_BASECONSTRUCTORCALLEXPR_HPP

@@ -25,7 +25,7 @@
 #include <AST/Types/BuiltInType.hpp>
 #include <AST/Exprs/IntegerLiteralExpr.hpp>
 #include <AST/Exprs/FloatLiteralExpr.hpp>
-#include <AST/TypeComparer.hpp>
+#include <ASTHelpers/TypeComparer.hpp>
 #include "TemplateParameterDecl.hpp"
 #include "ParameterDecl.hpp"
 #include "FunctionDecl.hpp"

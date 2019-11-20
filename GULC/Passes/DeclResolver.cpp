@@ -27,13 +27,15 @@
 #include <AST/Exprs/RefFunctionExpr.hpp>
 #include <AST/Types/EnumType.hpp>
 #include <AST/Exprs/TempNamespaceRefExpr.hpp>
-#include <AST/TypeComparer.hpp>
+#include <ASTHelpers/TypeComparer.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
 #include <AST/Types/FunctionTemplateTypenameRefType.hpp>
 #include <AST/Types/StructType.hpp>
 #include <AST/Exprs/RefStructMemberVariableExpr.hpp>
 #include <AST/Exprs/RefStructMemberFunctionExpr.hpp>
-#include <AST/VisibilityChecker.hpp>
+#include <ASTHelpers/VisibilityChecker.hpp>
+#include <ASTHelpers/FunctionComparer.hpp>
+#include <AST/Exprs/RefBaseExpr.hpp>
 #include "DeclResolver.hpp"
 #include "TypeResolver.hpp"
 
@@ -242,6 +244,104 @@ void DeclResolver::processConstructorDecl(ConstructorDecl* constructorDecl) {
     // We reset to zero just in case.
     functionLocalVariablesCount = 0;
 
+    if (constructorDecl->baseConstructorCall != nullptr) {
+        // If the call isn't null here it means it was specified in code, we will have to search for a valid base
+        // constructor
+
+        // If the arguments are empty and it isn't a `this` call we can just use the default base constructor we
+        // already have
+        if (!constructorDecl->baseConstructorCall->isThisCall() &&
+            !constructorDecl->baseConstructorCall->hasArguments()) {
+            // Delete the old base constructor call
+            delete constructorDecl->baseConstructorCall;
+
+            // NOTE: We don't set the `this` argument here. That will be handled by the code generator
+            constructorDecl->baseConstructorCall = new BaseConstructorCallExpr({}, {},
+                                                                               false,
+                                                                               constructorDecl->baseConstructor, {});
+        } else {
+            // First we have to process the arguments to make sure they're valid...
+            for (Expr *&argument : constructorDecl->baseConstructorCall->arguments) {
+                processExpr(argument);
+            }
+
+//            auto structType =
+
+            StructType* structType = nullptr;
+
+            if (constructorDecl->baseConstructorCall->isThisCall()) {
+                structType = new StructType({}, {},
+                                            constructorDecl->parentStruct->name(), constructorDecl->parentStruct);
+            } else {
+                structType = new StructType({}, {},
+                                            constructorDecl->parentStruct->baseStruct->name(),
+                                            constructorDecl->parentStruct->baseStruct);
+            }
+
+            ConstructorDecl *foundConstructor = nullptr;
+            // `isExactMatch` is used to check for ambiguity
+            bool isExactMatch = false;
+            bool isAmbiguous = false;
+
+            for (ConstructorDecl *checkConstructorDecl : structType->decl()->constructors) {
+                // Skip any constructors not visible to us
+                if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
+                                                              checkConstructorDecl)) {
+                    continue;
+                }
+
+                if (!checkConstructorOrFunctionMatchesCall(foundConstructor, checkConstructorDecl,
+                                                           &constructorDecl->baseConstructorCall->arguments,
+                                                           &isExactMatch, &isAmbiguous)) {
+                    printError("base constructor call is ambiguous!",
+                               constructorDecl->baseConstructorCall->startPosition(),
+                               constructorDecl->baseConstructorCall->endPosition());
+                }
+            }
+
+            // Delete the temporary struct type;
+            delete structType;
+
+            if (foundConstructor) {
+                if (isAmbiguous) {
+                    printError("base constructor call is ambiguous!",
+                               constructorDecl->baseConstructorCall->startPosition(),
+                               constructorDecl->baseConstructorCall->endPosition());
+                }
+
+                if (!isExactMatch) {
+                    // TODO: Implicitly cast and extract default values from the constructor parameter list
+                }
+
+                currentFileAst->addImportExtern(foundConstructor);
+                constructorDecl->baseConstructor = foundConstructor;
+                constructorDecl->baseConstructorCall->baseConstructor = foundConstructor;
+
+                // Since we found a found a constructor we have to convert any lvalues to rvalues and
+                // dereference references where it makes sense...
+                for (std::size_t i = 0; i < foundConstructor->parameters.size(); ++i) {
+                    if (!getTypeIsReference(foundConstructor->parameters[i]->type)) {
+                        dereferenceReferences(constructorDecl->baseConstructorCall->arguments[i]);
+                        convertLValueToRValue(constructorDecl->baseConstructorCall->arguments[i]);
+                    }
+                }
+            } else {
+                printError("base struct type '" + constructorDecl->parentStruct->baseStruct->name() +
+                           "' does not have a visible constructor matching the specified base constructor call!",
+                           constructorDecl->baseConstructorCall->startPosition(),
+                           constructorDecl->baseConstructorCall->endPosition());
+            }
+        }
+    } else if (constructorDecl->baseConstructor != nullptr) {
+        // If it reaches this point it means there was no base constructor specified in the source code, so we
+        // implicitly call the base's default constructor
+
+        // NOTE: We don't set the `this` argument here. That will be handled by the code generator
+        constructorDecl->baseConstructorCall = new BaseConstructorCallExpr({}, {},
+                                                                           false,
+                                                                           constructorDecl->baseConstructor, {});
+    }
+
     processCompoundStmt(constructorDecl->body(), true);
 
     labelNames = std::move(oldLabelNames);
@@ -391,7 +491,44 @@ void DeclResolver::processStructDecl(StructDecl *structDecl) {
     StructDecl* oldStruct = currentStruct;
     currentStruct = structDecl;
 
+    bool processBaseStruct = structDecl->baseStruct != nullptr;
+    bool baseHasVisibleDefaultConstructor = false;
+    ConstructorDecl* foundBaseDefaultConstructor = nullptr;
+
+    if (processBaseStruct) {
+        for (ConstructorDecl* constructor : structDecl->baseStruct->constructors) {
+            Decl::Visibility constructorVisibility = constructor->visibility();
+
+            // TODO: Once we support accessing external libraries we will have to support checking if we can access
+            //  the constructor differently
+            if (constructor->parameters.empty() &&
+                (constructorVisibility != Decl::Visibility::Private)) {
+                baseHasVisibleDefaultConstructor = true;
+                foundBaseDefaultConstructor = constructor;
+                break;
+            }
+        }
+
+        if (!baseHasVisibleDefaultConstructor) {
+            printError("base struct default constructor '" + structDecl->baseStruct->name() + "." +
+                       structDecl->baseStruct->name() + "()' is inaccessible due to its protection level!",
+                       structDecl->startPosition(), structDecl->endPosition());
+        }
+
+        // Make sure we can actually call the base constructor by making a prototype for it in the output
+        currentFileAst->addImportExtern(foundBaseDefaultConstructor);
+    }
+
+    // TODO: Process base constructor calls
     for (ConstructorDecl* constructor : structDecl->constructors) {
+        // We HAVE to add the base constructor call BEFORE processing the constructor so that `processConstructorDecl`
+        // can handle creating a proper call to the base constructor (i.e. creating implicit casts, etc.)
+        if (processBaseStruct) {
+            // NOTE: Here we are only setting the default base constructor. If `constructor->baseConstructorCall`
+            //       isn't null here then this will be replaced within `processConstructorDecl`
+            constructor->baseConstructor = foundBaseDefaultConstructor;
+        }
+
         processConstructorDecl(constructor);
     }
 
@@ -399,19 +536,16 @@ void DeclResolver::processStructDecl(StructDecl *structDecl) {
         processDecl(decl);
     }
 
-    if (structDecl->destructor != nullptr) {
-        processDestructorDecl(structDecl->destructor);
-    } else {
-        // If there isn't a provided destructor then we provide one here that is empty, it will be filled with member
-        // variable destructor calls in `Lifetimes`
-        CompoundStmt* defaultDestructorBody = new CompoundStmt({}, {}, {});
-        // We add a single `return` to the default destructor body. This will allow `Lifetimes` to add the member
-        // destructors to the default destructor
-        defaultDestructorBody->statements().push_back(new ReturnStmt({}, {}, nullptr));
+    // At this point the destructor is set so if there is a base type we have to set it to call the base destructor
+    if (processBaseStruct) {
+        // Make sure we can actually call the base struct's destructor by making a prototype for it
+        currentFileAst->addImportExtern(structDecl->baseStruct->destructor);
 
-        structDecl->destructor = new DestructorDecl(structDecl->name(), structDecl->sourceFile(), {}, {},
-                                                    defaultDestructorBody);
+        structDecl->destructor->baseDestructor = structDecl->baseStruct->destructor;
     }
+
+    // Finally, process the destructor...
+    processDestructorDecl(structDecl->destructor);
 
     currentStruct = oldStruct;
 }
@@ -1201,32 +1335,28 @@ bool DeclResolver::argsMatchParams(const std::vector<ParameterDecl*> &params, co
         if (llvm::isa<FunctionTemplateTypenameRefType>(paramType)) {
             auto funcTemplateTypenameRef = llvm::dyn_cast<FunctionTemplateTypenameRefType>(paramType);
 
-            for (std::size_t paramIndex = 0; paramIndex < functionCallTemplateParams.size(); ++paramIndex) {
-                if (functionCallTemplateParams[paramIndex]->name() == funcTemplateTypenameRef->name()) {
-                    const Expr* typeRef = nullptr;
+            std::size_t paramIndex = funcTemplateTypenameRef->templateParameterIndex();
+            const Expr* typeRef = nullptr;
 
-                    if (paramIndex >= functionCallTemplateArgs.size()) {
-                        if (functionCallTemplateParams[paramIndex]->hasDefaultArgument()) {
-                            printDebugWarning("template function call has missing default argument type!");
-                            continue;
-                        }
-
-                        typeRef = functionCallTemplateParams[paramIndex]->defaultArgument();
-                    } else {
-                        typeRef = functionCallTemplateArgs[paramIndex];
-                    }
-
-                    if (!llvm::isa<ResolvedTypeRefExpr>(typeRef)) {
-                        printDebugWarning("template function call has unresolved type ref!");
-                        continue;
-                    }
-
-                    auto resolvedTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(typeRef);
-
-                    paramType = resolvedTypeRef->resolvedType;
-                    break;
+            if (funcTemplateTypenameRef->templateParameterIndex() >= functionCallTemplateArgs.size()) {
+                if (!functionCallTemplateParams[paramIndex]->hasDefaultArgument()) {
+                    printDebugWarning("template function call has missing default argument type!");
+                    continue;
                 }
+
+                typeRef = functionCallTemplateParams[paramIndex]->defaultArgument();
+            } else {
+                typeRef = functionCallTemplateArgs[paramIndex];
             }
+
+            if (!llvm::isa<ResolvedTypeRefExpr>(typeRef)) {
+                printDebugWarning("template function call has unresolved type ref!");
+                continue;
+            }
+
+            auto resolvedTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(typeRef);
+
+            paramType = resolvedTypeRef->resolvedType;
         }
 
         // We remove the top level qualifiers for parameters/arguments.
@@ -1396,44 +1526,33 @@ bool DeclResolver::checkTemplateFunctionMatchesCall(FunctionDecl *&currentFoundF
     return true;
 }
 
-void DeclResolver::processIdentifierExprForDecl(Decl *checkDecl, IdentifierExpr* identifierExpr, bool hasTemplateArgs,
-                                                RefGlobalVariableExpr*& foundGlobalVariable,
+bool DeclResolver::processIdentifierExprForDecl(Decl *checkDecl, IdentifierExpr* identifierExpr, bool hasTemplateArgs,
                                                 FunctionDecl*& foundFunction, bool& isExactMatch, bool& isAmbiguous) {
     if (llvm::isa<GlobalVariableDecl>(checkDecl)) {
         // If there are template args then we have to find a template decl
-        if (hasTemplateArgs) return;
+        if (hasTemplateArgs) return false;
 
-        if (foundGlobalVariable != nullptr || foundFunction != nullptr) {
-            printError("identifier '" + identifierExpr->name() + "' is ambiguous!",
-                       identifierExpr->startPosition(), identifierExpr->endPosition());
-            return;
-        }
-
-        auto variableDecl = llvm::dyn_cast<GlobalVariableDecl>(checkDecl);
-        auto globalVariableRef = new RefGlobalVariableExpr(identifierExpr->startPosition(),
-                                                           identifierExpr->endPosition(),
-                                                           variableDecl);
-
-        globalVariableRef->resultType = variableDecl->type->deepCopy();
-        // A global variable reference is an lvalue.
-        globalVariableRef->resultType->setIsLValue(true);
-        // NOTE: Global variables cannot be references currently
-        //dereferenceReferences(globalVariableRef);
-//                delete identifierExpr;
-//                expr = globalVariableRef;
-//                return;
-        foundGlobalVariable = globalVariableRef;
+        // TODO: Instead of doing what we do below, we need to know if the current identifier is being used for a
+        //       function call or now. If it isn't, then we should only look for global variables
+        //       If it is used in a function call we should ignore any global variables that aren't function pointers
+        // TODO: Reimplement this
+//        if (foundGlobalVariable != nullptr || foundFunction != nullptr) {
+//            printError("identifier '" + identifierExpr->name() + "' is ambiguous!",
+//                       identifierExpr->startPosition(), identifierExpr->endPosition());
+//            return;
+//        }
+        return true;
     } else if (llvm::isa<FunctionDecl>(checkDecl)) {
         // If there are template args then we have to find a template decl
-        if (hasTemplateArgs) return;
+        if (hasTemplateArgs) return false;
 
         auto functionDecl = llvm::dyn_cast<FunctionDecl>(checkDecl);
 
-        if (foundGlobalVariable != nullptr) {
-            printError("identifier '" + identifierExpr->name() + "' is ambiguous!",
-                       identifierExpr->startPosition(), identifierExpr->endPosition());
-            return;
-        }
+//        if (foundGlobalVariable != nullptr) {
+//            printError("identifier '" + identifierExpr->name() + "' is ambiguous!",
+//                       identifierExpr->startPosition(), identifierExpr->endPosition());
+//            return;
+//        }
 
         if (!checkFunctionMatchesCall(foundFunction, functionDecl, &isExactMatch, &isAmbiguous)) {
             printError("function call is ambiguous!",
@@ -1441,21 +1560,23 @@ void DeclResolver::processIdentifierExprForDecl(Decl *checkDecl, IdentifierExpr*
         }
     } else if (llvm::isa<TemplateFunctionDecl>(checkDecl)) {
         // TODO: We should support implicit template typing (i.e. `int test<T>(T p);` calling `test(12);` == `test<int>(12);`
-        if (!hasTemplateArgs) return;
+        if (!hasTemplateArgs) return false;
 
         auto templateFunctionDecl = llvm::dyn_cast<TemplateFunctionDecl>(checkDecl);
 
-        if (foundGlobalVariable != nullptr) {
-            printError("identifier '" + identifierExpr->name() + "' is ambiguous!",
-                       identifierExpr->startPosition(), identifierExpr->endPosition());
-            return;
-        }
+//        if (foundGlobalVariable != nullptr) {
+//            printError("identifier '" + identifierExpr->name() + "' is ambiguous!",
+//                       identifierExpr->startPosition(), identifierExpr->endPosition());
+//            return;
+//        }
 
         if (!checkTemplateFunctionMatchesCall(foundFunction, templateFunctionDecl, &isExactMatch, &isAmbiguous, identifierExpr->templateArguments)) {
             printError("function call is ambiguous!",
                        identifierExpr->startPosition(), identifierExpr->endPosition());
         }
     }
+
+    return false;
 }
 
 /**
@@ -1486,23 +1607,39 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         return;
     }
 
-    // This is a special identifier (but I don't want to go through the trouble of making it a real keyword right now, it really doesn't need to be...)
-    if (identifierExpr->name() == "this") {
+    // This is a special identifier (but I don't want to go through the trouble of making it a real keyword right now,
+    // it really doesn't need to be...)
+    if (identifierExpr->name() == "this" || identifierExpr->name() == "base") {
+        bool isBaseCall = identifierExpr->name() == "base";
+
         if (!currentStruct) {
-            printError("use of keyword `this` outside of struct/class members is illegal!",
-                       identifierExpr->startPosition(), identifierExpr->endPosition());
+            if (isBaseCall) {
+                printError("use of keyword `base` outside of struct/class members is illegal!",
+                           identifierExpr->startPosition(), identifierExpr->endPosition());
+            } else {
+                printError("use of keyword `this` outside of struct/class members is illegal!",
+                           identifierExpr->startPosition(), identifierExpr->endPosition());
+            }
         }
 
         if (identifierExpr->hasTemplateArguments()) {
-            printError("keyword `this` does not support template arguments!",
-                       identifierExpr->startPosition(), identifierExpr->endPosition());
+            if (isBaseCall) {
+                printError("keyword `base` does not support template arguments!",
+                           identifierExpr->startPosition(), identifierExpr->endPosition());
+            } else {
+                printError("keyword `this` does not support template arguments!",
+                           identifierExpr->startPosition(), identifierExpr->endPosition());
+            }
         }
 
-        // `this` is ALWAYS defined as parameter index `0` (when a function is a member of a struct/class, obviously `0` isn't `this` to namespace or file functions)
+        // `this` is ALWAYS defined as parameter index `0` (when a function is a member of a struct/class, obviously
+        // `0` isn't `this` to namespace or file functions)
         Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
                                               identifierExpr->endPosition(),
                                               0);
-        refParam->resultType = new ReferenceType({}, {}, new StructType({}, {}, currentStruct->name(), currentStruct));
+        refParam->resultType = new ReferenceType({}, {}, new StructType({}, {},
+                                                                        currentStruct->name(),
+                                                                        currentStruct));
         // A parameter reference is an lvalue.
         refParam->resultType->setIsLValue(true);
         // NOTE: We still make it a `ReferenceType` above then immediately dereference it here so we create the correct
@@ -1511,7 +1648,22 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
 
         delete identifierExpr;
 
-        expr = refParam;
+        if (isBaseCall) {
+            if (currentStruct->baseStruct == nullptr) {
+                printError("struct '" + currentStruct->name() + "' does not implement a base type, cannot use `base` keyword!",
+                           refParam->startPosition(), refParam->endPosition());
+            }
+
+            expr = new RefBaseExpr(refParam->startPosition(), refParam->endPosition(), refParam);
+            // TODO: Function calls on `RefBaseExpr` should ONLY be non-virtual, if a `virtual` function is called
+            //       then we DO NOT use the vtable to look it up. We put in a direct call
+            expr->resultType = new StructType({}, {},
+                                              currentStruct->baseStruct->name(),
+                                              currentStruct->baseStruct);
+        } else {
+            // TODO: We should implement a `RefThisExpr` to make error checking easier
+            expr = refParam;
+        }
         return;
     }
 
@@ -1605,8 +1757,109 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         }
     }
 
+//    RefGlobalVariableExpr* foundGlobalVariable = nullptr;
+    FunctionDecl* foundFunction = nullptr;
+    // `isExactMatch` is used to check for ambiguity
+    bool isExactMatch = false;
+    bool isAmbiguous = false;
+    // TODO: We need to also support function qualifier overloading (`const`, `mut`, `immut` like `int test() const {}`)
+
+    bool hasTemplateArgs = identifierExpr->hasTemplateArguments();
+
     // then class/struct members
     if (currentStruct) {
+        // First declared check members
+        for (Decl* member : currentStruct->members) {
+            if (member->name() == identifierExpr->name()) {
+                if (processIdentifierExprForDecl(member, identifierExpr, hasTemplateArgs,
+                                                 foundFunction, isExactMatch, isAmbiguous)) {
+                    if (identifierExpr->hasTemplateArguments()) {
+                        printError("member variable references cannot have template arguments!",
+                                   identifierExpr->startPosition(), identifierExpr->endPosition());
+                    }
+
+                    auto foundGlobalVariable = llvm::dyn_cast<GlobalVariableDecl>(member);
+
+                    // Ownership of this will be given to `RefStructMemberVariableExpr`. `RefParameterExpr` gets a copy.
+                    StructType* structType = new StructType({}, {}, currentStruct->name(), currentStruct);
+
+                    // `this` is ALWAYS defined as parameter index `0` (when a function is a member of a struct/class, obviously `0` isn't `this` to namespace or file functions)
+                    Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
+                                                          identifierExpr->endPosition(),
+                                                          0);
+                    refParam->resultType = new ReferenceType({}, {}, structType->deepCopy());
+                    // A parameter reference is an lvalue.
+                    refParam->resultType->setIsLValue(true);
+                    // NOTE: We still make it a `ReferenceType` above then immediately dereference it here so we create the correct
+                    //  expressions for dereferencing the `this` parameter in our `CodeGen`
+                    dereferenceReferences(refParam);
+
+                    // Ref the variable using the new `this` variable
+                    auto refStructVariable = new RefStructMemberVariableExpr(identifierExpr->startPosition(),
+                                                                             identifierExpr->endPosition(),
+                                                                             refParam,
+                                                                             structType, foundGlobalVariable);
+                    refStructVariable->resultType = foundGlobalVariable->type->deepCopy();
+                    // A global variable reference is an lvalue.
+                    refStructVariable->resultType->setIsLValue(true);
+
+                    delete identifierExpr;
+
+                    expr = refStructVariable;
+
+                    return;
+                }
+            }
+        }
+
+        // Then inherited members
+        for (Decl* member : currentStruct->inheritedMembers) {
+            if (member->name() == identifierExpr->name()) {
+                if (processIdentifierExprForDecl(member, identifierExpr, hasTemplateArgs,
+                                                 foundFunction, isExactMatch, isAmbiguous)) {
+                    if (identifierExpr->hasTemplateArguments()) {
+                        printError("member variable references cannot have template arguments!",
+                                   identifierExpr->startPosition(), identifierExpr->endPosition());
+                    }
+
+                    auto foundGlobalVariable = llvm::dyn_cast<GlobalVariableDecl>(member);
+
+                    // `this` is ALWAYS defined as parameter index `0` (when a function is a member of a struct/class, obviously `0` isn't `this` to namespace or file functions)
+                    Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
+                                                          identifierExpr->endPosition(),
+                                                          0);
+                    refParam->resultType = new ReferenceType({}, {},
+                                                             new StructType({}, {},
+                                                                            currentStruct->name(),
+                                                                            currentStruct));
+                    // A parameter reference is an lvalue.
+                    refParam->resultType->setIsLValue(true);
+                    // NOTE: We still make it a `ReferenceType` above then immediately dereference it here so we create the correct
+                    //  expressions for dereferencing the `this` parameter in our `CodeGen`
+                    dereferenceReferences(refParam);
+
+                    // Ref the variable using the new `this` variable
+                    auto refStructVariable = new RefStructMemberVariableExpr(identifierExpr->startPosition(),
+                                                                             identifierExpr->endPosition(),
+                                                                             refParam,
+                                                                             new StructType({}, {},
+                                                                                            foundGlobalVariable->parentStruct->name(),
+                                                                                            foundGlobalVariable->parentStruct),
+                                                                             foundGlobalVariable);
+                    refStructVariable->resultType = foundGlobalVariable->type->deepCopy();
+                    // A global variable reference is an lvalue.
+                    refStructVariable->resultType->setIsLValue(true);
+
+                    delete identifierExpr;
+
+                    expr = refStructVariable;
+
+                    return;
+                }
+            }
+        }
+
+        // TODO: This needs removed
         for (GlobalVariableDecl* memberVariable : currentStruct->dataMembers) {
             if (memberVariable->name() == identifierExpr->name()) {
                 if (identifierExpr->hasTemplateArguments()) {
@@ -1649,19 +1902,32 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
     // TODO: then class/struct template params
 
     // then current file
-    RefGlobalVariableExpr* foundGlobalVariable = nullptr;
-    FunctionDecl* foundFunction = nullptr;
-    // `isExactMatch` is used to check for ambiguity
-    bool isExactMatch = false;
-    bool isAmbiguous = false;
-    // TODO: We need to also support function qualifier overloading (`const`, `mut`, `immut` like `int test() const {}`)
-
-    bool hasTemplateArgs = identifierExpr->hasTemplateArguments();
-
     for (Decl* decl : currentFileAst->topLevelDecls()) {
         if (decl->name() == identifierExpr->name()) {
-            processIdentifierExprForDecl(decl, identifierExpr, hasTemplateArgs, foundGlobalVariable,
-                                         foundFunction, isExactMatch, isAmbiguous);
+            if (processIdentifierExprForDecl(decl, identifierExpr, hasTemplateArgs,
+                                             foundFunction, isExactMatch, isAmbiguous)) {
+                auto variableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
+                auto globalVariableRef = new RefGlobalVariableExpr(identifierExpr->startPosition(),
+                                                                   identifierExpr->endPosition(),
+                                                                   variableDecl);
+
+                globalVariableRef->resultType = variableDecl->type->deepCopy();
+                // A global variable reference is an lvalue.
+                globalVariableRef->resultType->setIsLValue(true);
+                // NOTE: Global variables cannot be references currently
+                //dereferenceReferences(globalVariableRef);
+//                delete identifierExpr;
+//                expr = globalVariableRef;
+//                return;
+                delete expr;
+                expr = globalVariableRef;
+
+                if (globalVariableRef->globalVariable()->parentNamespace != nullptr) {
+                    currentFileAst->addImportExtern(globalVariableRef->globalVariable());
+                }
+
+                return;
+            }
         }
     }
 
@@ -1669,8 +1935,30 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
     if (currentNamespace) {
         for (Decl* decl : currentNamespace->nestedDecls()) {
             if (decl->name() == identifierExpr->name()) {
-                processIdentifierExprForDecl(decl, identifierExpr, hasTemplateArgs, foundGlobalVariable,
-                                             foundFunction, isExactMatch, isAmbiguous);
+                if (processIdentifierExprForDecl(decl, identifierExpr, hasTemplateArgs,
+                                                 foundFunction, isExactMatch, isAmbiguous)) {
+                    auto variableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
+                    auto globalVariableRef = new RefGlobalVariableExpr(identifierExpr->startPosition(),
+                                                                       identifierExpr->endPosition(),
+                                                                       variableDecl);
+
+                    globalVariableRef->resultType = variableDecl->type->deepCopy();
+                    // A global variable reference is an lvalue.
+                    globalVariableRef->resultType->setIsLValue(true);
+                    // NOTE: Global variables cannot be references currently
+                    //dereferenceReferences(globalVariableRef);
+//                delete identifierExpr;
+//                expr = globalVariableRef;
+//                return;
+                    delete expr;
+                    expr = globalVariableRef;
+
+                    if (globalVariableRef->globalVariable()->parentNamespace != nullptr) {
+                        currentFileAst->addImportExtern(globalVariableRef->globalVariable());
+                    }
+
+                    return;
+                }
             }
         }
     }
@@ -1681,23 +1969,33 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         for (Import* anImport : *currentImports) {
             for (Decl* decl : anImport->pointToNamespace->nestedDecls()) {
                 if (decl->name() == identifierExpr->name()) {
-                    processIdentifierExprForDecl(decl, identifierExpr, hasTemplateArgs, foundGlobalVariable,
-                                                 foundFunction, isExactMatch, isAmbiguous);
+                    if (processIdentifierExprForDecl(decl, identifierExpr, hasTemplateArgs,
+                                                     foundFunction, isExactMatch, isAmbiguous)) {
+                        auto variableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
+                        auto globalVariableRef = new RefGlobalVariableExpr(identifierExpr->startPosition(),
+                                                                           identifierExpr->endPosition(),
+                                                                           variableDecl);
+
+                        globalVariableRef->resultType = variableDecl->type->deepCopy();
+                        // A global variable reference is an lvalue.
+                        globalVariableRef->resultType->setIsLValue(true);
+                        // NOTE: Global variables cannot be references currently
+                        //dereferenceReferences(globalVariableRef);
+//                delete identifierExpr;
+//                expr = globalVariableRef;
+//                return;
+                        delete expr;
+                        expr = globalVariableRef;
+
+                        if (globalVariableRef->globalVariable()->parentNamespace != nullptr) {
+                            currentFileAst->addImportExtern(globalVariableRef->globalVariable());
+                        }
+
+                        return;
+                    }
                 }
             }
         }
-    }
-
-    // If we reach this point and `foundGlobalVariable` isn't null then it means we found the global variable, replace `expr` with the reference to it...
-    if (foundGlobalVariable) {
-        delete expr;
-        expr = foundGlobalVariable;
-
-        if (foundGlobalVariable->globalVariable()->parentNamespace != nullptr) {
-            currentFileAst->addImportExtern(foundGlobalVariable->globalVariable());
-        }
-
-        return;
     }
 
     if (foundFunction) {
@@ -1788,7 +2086,7 @@ void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVari
         // Find the correct constructor or verify a correct constructor exists...
         // NOTE: We only check the constructor here if they provide initializer arguments or there isn't an initial
         // value
-        // TODO: Once we support move and copy constructors we should us `hasInitialValue` to handle move and copy
+        // TODO: Once we support move and copy constructors we should use `hasInitialValue` to handle move and copy
         if (llvm::isa<StructType>(resolvedTypeRefExpr->resolvedType)) {
             if (localVariableDeclExpr->hasInitializer() || !hasInitialValue) {
                 auto structType = llvm::dyn_cast<StructType>(resolvedTypeRefExpr->resolvedType);
@@ -1813,30 +2111,34 @@ void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVari
                     }
                 }
 
-                if (!foundConstructor) {
+                if (foundConstructor) {
+                    if (isAmbiguous) {
+                        printError("initializer constructor call is ambiguous!",
+                                   localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
+                    }
+
+                    if (!isExactMatch) {
+                        // TODO: Implicitly cast and extract default values from the constructor parameter list
+                    }
+
+                    currentFileAst->addImportExtern(foundConstructor);
+                    localVariableDeclExpr->foundConstructor = foundConstructor;
+
+                    // Since we found a found a constructor we have to convert any lvalues to rvalues and
+                    // dereference references where it makes sense...
+                    for (std::size_t i = 0; i < foundConstructor->parameters.size(); ++i) {
+                        if (!getTypeIsReference(foundConstructor->parameters[i]->type)) {
+                            dereferenceReferences(localVariableDeclExpr->initializerArgs[i]);
+                            convertLValueToRValue(localVariableDeclExpr->initializerArgs[i]);
+                        }
+                    }
+                // If a constructor wasn't found but there was a provided initializer then we error saying a
+                // constructor wasn't found
+                // I.e. `ExampleStruct es;` is legal regardless of if there is an empty constructor or not
+                // while `ExampleStruct es(1, 1.0);` MUST have a constructor that can match the provided arguments
+                } else if (localVariableDeclExpr->hasInitializer()) {
                     printError("no valid public constructor found for the provided initializer arguments!",
                                localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
-                }
-
-                if (isAmbiguous) {
-                    printError("initializer constructor call is ambiguous!",
-                               localVariableDeclExpr->startPosition(), localVariableDeclExpr->endPosition());
-                }
-
-                if (!isExactMatch) {
-                    // TODO: Implicitly cast and extract default values from the constructor parameter list
-                }
-
-                currentFileAst->addImportExtern(foundConstructor);
-                localVariableDeclExpr->foundConstructor = foundConstructor;
-
-                // Since we found a found a constructor we have to convert any lvalues to rvalues and
-                // dereference references where it makes sense...
-                for (std::size_t i = 0; i < foundConstructor->parameters.size(); ++i) {
-                    if (!getTypeIsReference(foundConstructor->parameters[i]->type)) {
-                        dereferenceReferences(localVariableDeclExpr->initializerArgs[i]);
-                        convertLValueToRValue(localVariableDeclExpr->initializerArgs[i]);
-                    }
                 }
             } else if (localVariableDeclExpr->initializerArgs.size() > 1) {
                 printError("non-struct variables can only have 1 initializer argument! (" +
@@ -1852,6 +2154,63 @@ void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVari
 void DeclResolver::processLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr) {
     printError("[INTERNAL] LocalVariableDeclOrPrefixOperatorCallExpr found in declaration resolver!",
                expr->startPosition(), expr->endPosition());
+}
+
+bool DeclResolver::attemptAccessStructMember(MemberAccessCallExpr* memberAccessCallExpr, Expr*& outExpr,
+                                             bool hasTemplateArgs, StructType* originalStructType, Decl* checkMember,
+                                             FunctionDecl*& foundFunction, bool& isExactMatch, bool& isAmbiguous) {
+    // Skip anything we cannot access
+    if (!VisibilityChecker::canAccessStructMember(originalStructType, currentStruct,
+                                                  checkMember)) {
+        return false;
+    }
+
+    // TODO: Needs to be changed to `MemberVariableDecl`
+    if (llvm::isa<GlobalVariableDecl>(checkMember)) {
+        auto memberVariable = llvm::dyn_cast<GlobalVariableDecl>(checkMember);
+        auto accessAsStructType = new StructType({}, {}, checkMember->parentStruct->name(), checkMember->parentStruct);
+
+        auto refStructVariable = new RefStructMemberVariableExpr(memberAccessCallExpr->startPosition(),
+                                                                 memberAccessCallExpr->endPosition(),
+                                                                 memberAccessCallExpr->objectRef,
+                                                                 accessAsStructType,
+                                                                 memberVariable);
+        refStructVariable->resultType = memberVariable->type->deepCopy();
+        // A global variable reference is an lvalue.
+        refStructVariable->resultType->setIsLValue(true);
+
+        // We steal the object reference
+        memberAccessCallExpr->objectRef = nullptr;
+        delete memberAccessCallExpr;
+
+        outExpr = refStructVariable;
+
+        return true;
+    } else if (llvm::isa<FunctionDecl>(checkMember)) {
+        auto function = llvm::dyn_cast<FunctionDecl>(checkMember);
+
+        if (!checkFunctionMatchesCall(foundFunction, function, &isExactMatch, &isAmbiguous)) {
+            printError("struct function call is ambiguous!",
+                       memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+        }
+    } else if (llvm::isa<TemplateFunctionDecl>(checkMember)) {
+        // TODO: We should support implicit template typing (i.e. `int test<T>(T p);` calling `test(12);` == `test<int>(12);`
+        if (!hasTemplateArgs) return false;
+
+        auto templateFunctionDecl = llvm::dyn_cast<TemplateFunctionDecl>(checkMember);
+
+        if (templateFunctionDecl->name() == memberAccessCallExpr->member->name()) {
+            if (!checkTemplateFunctionMatchesCall(foundFunction, templateFunctionDecl, &isExactMatch, &isAmbiguous, memberAccessCallExpr->member->templateArguments)) {
+                printError("struct function call is ambiguous!",
+                           memberAccessCallExpr->member->startPosition(), memberAccessCallExpr->member->endPosition());
+            }
+        }
+    } else {
+        printError("unknown struct member access call!",
+                   memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+    }
+
+    return false;
 }
 
 void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
@@ -1965,53 +2324,24 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
 
                 for (Decl* checkDecl : structType->decl()->members) {
                     if (checkDecl->name() == memberAccessCallExpr->member->name()) {
-                        // Skip anything we cannot access
-                        if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
-                                                                      checkDecl)) {
-                            continue;
-                        }
-
-                        // TODO: Needs to be changed to `MemberVariableDecl`
-                        if (llvm::isa<GlobalVariableDecl>(checkDecl)) {
-                            auto memberVariable = llvm::dyn_cast<GlobalVariableDecl>(checkDecl);
-
-                            auto refStructVariable = new RefStructMemberVariableExpr(memberAccessCallExpr->startPosition(),
-                                                                                     memberAccessCallExpr->endPosition(),
-                                                                                     memberAccessCallExpr->objectRef,
-                                                                                     structType, memberVariable);
-                            refStructVariable->resultType = memberVariable->type->deepCopy();
-                            // A global variable reference is an lvalue.
-                            refStructVariable->resultType->setIsLValue(true);
-
-                            // We steal the object reference
-                            memberAccessCallExpr->objectRef = nullptr;
-                            delete memberAccessCallExpr;
-
-                            expr = refStructVariable;
-
+                        if (attemptAccessStructMember(memberAccessCallExpr, expr,
+                                                      hasTemplateArgs, structType, checkDecl,
+                                                      foundFunction, isExactMatch, isAmbiguous)) {
+                            // If it returns true then we only have to return. The above function handles everything
+                            // We had to do
                             return;
-                        } else if (llvm::isa<FunctionDecl>(checkDecl)) {
-                            auto function = llvm::dyn_cast<FunctionDecl>(checkDecl);
+                        }
+                    }
+                }
 
-                            if (!checkFunctionMatchesCall(foundFunction, function, &isExactMatch, &isAmbiguous)) {
-                                printError("struct function call is ambiguous!",
-                                           memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
-                            }
-                        } else if (llvm::isa<TemplateFunctionDecl>(checkDecl)) {
-                            // TODO: We should support implicit template typing (i.e. `int test<T>(T p);` calling `test(12);` == `test<int>(12);`
-                            if (!hasTemplateArgs) continue;
-
-                            auto templateFunctionDecl = llvm::dyn_cast<TemplateFunctionDecl>(checkDecl);
-
-                            if (templateFunctionDecl->name() == memberAccessCallExpr->member->name()) {
-                                if (!checkTemplateFunctionMatchesCall(foundFunction, templateFunctionDecl, &isExactMatch, &isAmbiguous, memberAccessCallExpr->member->templateArguments)) {
-                                    printError("struct function call is ambiguous!",
-                                               memberAccessCallExpr->member->startPosition(), memberAccessCallExpr->member->endPosition());
-                                }
-                            }
-                        } else {
-                            printError("unknown struct member access call!",
-                                       memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+                // We also have to loop through inherited members...
+                for (Decl* checkDecl : structType->decl()->inheritedMembers) {
+                    if (checkDecl->name() == memberAccessCallExpr->member->name()) {
+                        if (attemptAccessStructMember(memberAccessCallExpr, expr,
+                                                      hasTemplateArgs, structType, checkDecl,
+                                                      foundFunction, isExactMatch, isAmbiguous)) {
+                            // If it returns true then we only have to return. The above function handles everything
+                            // We had to do
                             return;
                         }
                     }
@@ -2023,6 +2353,9 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
                                    memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
                     }
 
+                    auto accessAsStructType = new StructType({}, {},
+                                                             foundFunction->parentStruct->name(),
+                                                             foundFunction->parentStruct);
                     Type* resultTypeCopy = foundFunction->resultType->deepCopy();
                     std::vector<Type*> paramTypeCopy{};
 
@@ -2034,7 +2367,7 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
                     auto refStructFunction = new RefStructMemberFunctionExpr(memberAccessCallExpr->startPosition(),
                                                                              memberAccessCallExpr->endPosition(),
                                                                              memberAccessCallExpr->objectRef,
-                                                                             structType,
+                                                                             accessAsStructType,
                                                                              foundFunction);
                     // TODO: We should probably replace this with a `MemberFunctionPointerType` or something so the `this` parameter is apart of the type...
                     refStructFunction->resultType = new FunctionPointerType({}, {}, resultTypeCopy, paramTypeCopy);
@@ -2201,40 +2534,37 @@ unsigned int DeclResolver::applyTemplateTypeArguments(Type*& type) {
     if (llvm::isa<FunctionTemplateTypenameRefType>(type)) {
         auto templateTypenameRef = llvm::dyn_cast<FunctionTemplateTypenameRefType>(type);
 
-        for (std::size_t i = 0; i < functionTemplateParams->size(); ++i) {
-            TemplateParameterDecl* checkParam = (*functionTemplateParams)[i];
+        std::size_t paramIndex = templateTypenameRef->templateParameterIndex();
+        TemplateParameterDecl* checkParam = (*functionTemplateParams)[paramIndex];
 
-            if (templateTypenameRef->name() == checkParam->name()) {
-                if (llvm::isa<TemplateTypenameType>(checkParam->type)) {
-                    const Expr* hopefullyResolvedTypeRef = nullptr;
+        if (llvm::isa<TemplateTypenameType>(checkParam->type)) {
+            const Expr* hopefullyResolvedTypeRef = nullptr;
 
-                    if (i >= functionTemplateArgs->size()) {
-                        if (!checkParam->hasDefaultArgument()) {
-                            printDebugWarning("function template param doesn't have required default argument!");
-                            return 0;
-                        }
-
-                        hopefullyResolvedTypeRef = checkParam->defaultArgument();
-                    } else {
-                        hopefullyResolvedTypeRef = (*functionTemplateArgs)[i];
-                    }
-
-                    if (!llvm::isa<ResolvedTypeRefExpr>(hopefullyResolvedTypeRef)) {
-                        printDebugWarning("unresolved type ref in template arguments list!");
-                        return 0;
-                    }
-
-                    auto resolvedTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(hopefullyResolvedTypeRef);
-
-                    // Get the resolved type, delete old `type`, set `type` to the resolved type, and return.
-                    Type* resultType = resolvedTypeRef->resolvedType->deepCopy();
-                    delete type;
-                    type = resultType;
-                    // TODO: Once we support template classes we will have to offset the function reference index by the size of the template class parameter list
-                    // We add one so we can use `0` as a type of `null`
-                    return i + 1;
+            if (paramIndex >= functionTemplateArgs->size()) {
+                if (!checkParam->hasDefaultArgument()) {
+                    printDebugWarning("function template param doesn't have required default argument!");
+                    return 0;
                 }
+
+                hopefullyResolvedTypeRef = checkParam->defaultArgument();
+            } else {
+                hopefullyResolvedTypeRef = (*functionTemplateArgs)[paramIndex];
             }
+
+            if (!llvm::isa<ResolvedTypeRefExpr>(hopefullyResolvedTypeRef)) {
+                printDebugWarning("unresolved type ref in template arguments list!");
+                return 0;
+            }
+
+            auto resolvedTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(hopefullyResolvedTypeRef);
+
+            // Get the resolved type, delete old `type`, set `type` to the resolved type, and return.
+            Type* resultType = resolvedTypeRef->resolvedType->deepCopy();
+            delete type;
+            type = resultType;
+            // TODO: Once we support template classes we will have to offset the function reference index by the size of the template class parameter list
+            // We add one so we can use `0` as a type of `null`
+            return paramIndex + 1;
         }
     } else if (llvm::isa<ConstType>(type)) {
         return applyTemplateTypeArguments(llvm::dyn_cast<ConstType>(type)->pointToType);

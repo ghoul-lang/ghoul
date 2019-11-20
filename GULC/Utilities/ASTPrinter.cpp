@@ -172,7 +172,9 @@ std::string ASTPrinter::getTypeName(const Type *type) {
         case Type::Kind::TemplateTypename:
             return "typename";
         case Type::Kind::FunctionTemplateTypenameRef:
-            return llvm::dyn_cast<FunctionTemplateTypenameRefType>(type)->name();
+            return std::string("[function template arg #") +
+                    std::to_string(llvm::dyn_cast<FunctionTemplateTypenameRefType>(type)->templateParameterIndex()) +
+                    "]";
         case Type::Kind::BuiltIn:
             return llvm::dyn_cast<BuiltInType>(type)->name();
         default: {

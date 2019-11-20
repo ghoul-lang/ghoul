@@ -438,7 +438,19 @@ qualifierFound:
                 return nullptr;
             }
 
-            // TODO: Parse base type
+            std::vector<Type*> baseTypes;
+
+            // Parse base types
+            if (_lexer.consumeType(TokenType::COLON)) {
+                while (_lexer.peekType() != TokenType::LCURLY && _lexer.peekType() != TokenType::ENDOFFILE) {
+                    baseTypes.push_back(parseType(false));
+
+                    // Break if there isn't a comma after the base type we just parsed
+                    if (!_lexer.consumeType(TokenType::COMMA)) {
+                        break;
+                    }
+                }
+            }
 
             if (!_lexer.consumeType(TokenType::LCURLY)) {
                 printError("expected opening '{' for struct, found '" + _lexer.peekToken().currentSymbol + "'!",
@@ -476,7 +488,7 @@ qualifierFound:
             }
 
             return new StructDecl(name, _filePath, startPosition, endPosition, visibility,
-                                  std::move(constructors), std::move(members), destructor);
+                                  std::move(baseTypes), std::move(constructors), std::move(members), destructor);
         }
         case TokenType::UNION:
             printError("unions not yet supported!", startPosition, endPosition);
@@ -640,19 +652,77 @@ qualifierFound:
                 }
                 case TokenType::LPAREN: { // Function
                     std::vector<ParameterDecl*> parameters = parseParameterDecls(startPosition);
-                    // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
-                    CompoundStmt* compoundStmt = parseCompoundStmt();
 
                     if (parseConstructor) {
-                        return new ConstructorDecl(name, _filePath, startPosition, endPosition, visibility, parameters, compoundStmt);
+                        BaseConstructorCallExpr* baseConstructorCall = nullptr;
+
+                        if (_lexer.consumeType(TokenType::COLON)) {
+                            // If there is a colon after the parameters then we have an explicit base constructor call
+                            bool isThisCall = false;
+                            std::string const& checkSymbol = _lexer.peekToken().currentSymbol;
+
+                            if (checkSymbol == "this") {
+                                isThisCall = true;
+                            } else if (checkSymbol != "base") {
+                                printError("expected base constructor call, found '" + _lexer.peekToken().currentSymbol + "'!",
+                                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                            }
+
+                            TextPosition baseConstructorStartPosition = _lexer.peekToken().startPosition;
+
+                            // Consume the `base` or `this` token
+                            _lexer.consumeType(TokenType::SYMBOL);
+
+                            // Parse the base constructor's parameters
+                            std::vector<Expr*> baseConstructorArguments;
+
+                            if (!_lexer.consumeType(TokenType::LPAREN)) {
+                                printError("expected beginning '(' after 'base', found '" + _lexer.peekToken().currentSymbol + "'!",
+                                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                            }
+
+                            while (_lexer.peekType() != TokenType::RPAREN &&
+                                   _lexer.peekType() != TokenType::ENDOFFILE) {
+                                // TODO: Should `templateTypingAllowed` be true?
+                                baseConstructorArguments.push_back(parseExpr(false, false));
+
+                                // Break if the next token after the argument isn't a comma
+                                if (!_lexer.consumeType(TokenType::COMMA)) {
+                                    break;
+                                }
+                            }
+
+                            TextPosition baseConstructorEndPosition = _lexer.peekToken().endPosition;
+
+                            if (!_lexer.consumeType(TokenType::RPAREN)) {
+                                printError("expected ending '(' for 'base', found '" + _lexer.peekToken().currentSymbol + "'!",
+                                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                            }
+
+                            baseConstructorCall = new BaseConstructorCallExpr(baseConstructorStartPosition,
+                                                                              baseConstructorEndPosition,
+                                                                              isThisCall, nullptr,
+                                                                              baseConstructorArguments);
+                        }
+
+                        // TODO: Should we allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
+                        CompoundStmt* compoundStmt = parseCompoundStmt();
+
+                        return new ConstructorDecl(name, _filePath, startPosition, endPosition, visibility, parameters,
+                                                   baseConstructorCall, compoundStmt);
                     } else {
-                        return new FunctionDecl(name, _filePath, startPosition, endPosition, visibility, resultType, parameters, compoundStmt);
+                        // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
+                        CompoundStmt* compoundStmt = parseCompoundStmt();
+
+                        return new FunctionDecl(name, _filePath, startPosition, endPosition, visibility,
+                                                resultType, parameters, compoundStmt);
                     }
                 }
                 case TokenType::EQUALS: {
                     if (parseConstructor) {
                         printError("expected variable name, found '='!",
-                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                                   _lexer.peekToken().startPosition,
+                                   _lexer.peekToken().endPosition);
                     }
 
                     _lexer.consumeType(TokenType::EQUALS);

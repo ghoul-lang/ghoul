@@ -69,7 +69,12 @@ namespace gulc {
 
             DestructLocalVariable,
             DestructParameter,
-            DestructMemberVariable
+            DestructMemberVariable,
+
+            BaseConstructorCall,
+            BaseDestructorCall,
+
+            RefBase
         };
 
         Kind getExprKind() const { return _kind; }

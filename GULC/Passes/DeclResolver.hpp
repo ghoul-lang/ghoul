@@ -141,8 +141,8 @@ namespace gulc {
         void processFloatLiteralExpr(FloatLiteralExpr* floatLiteralExpr);
         void processFunctionCallExpr(FunctionCallExpr* functionCallExpr);
         void processIdentifierExpr(Expr*& identifierExpr);
-        void processIdentifierExprForDecl(Decl *checkDecl, IdentifierExpr* identifierExpr, bool hasTemplateArgs,
-                                          RefGlobalVariableExpr*& foundGlobalVariable,
+        // Returns true if the `checkDecl` is a `GlobalVariableDecl`
+        bool processIdentifierExprForDecl(Decl *checkDecl, IdentifierExpr* identifierExpr, bool hasTemplateArgs,
                                           FunctionDecl*& foundFunction, bool& isExactMatch, bool& isAmbiguous);
         void processImplicitCastExpr(ImplicitCastExpr* implicitCastExpr);
         void processIndexerCallExpr(IndexerCallExpr* indexerCallExpr);
@@ -165,6 +165,11 @@ namespace gulc {
         /// Changes the type to an absolute type if the type is a template type
         /// Returns template parameter number for the type
         unsigned int applyTemplateTypeArguments(Type*& potentialTemplateType);
+
+        // Returns true if the member was accessed and it is not a function, false if we should keep looking
+        bool attemptAccessStructMember(MemberAccessCallExpr* memberAccessCallExpr, Expr*& outExpr,
+                                       bool hasTemplateArgs, StructType* originalStructType, Decl* checkMember,
+                                       FunctionDecl*& foundFunction, bool& isExactMatch, bool& isAmbiguous);
 
         // Context management
         FileAST* currentFileAst;

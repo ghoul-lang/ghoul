@@ -24,20 +24,21 @@ namespace gulc {
     public:
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::FunctionTemplateTypenameRef; }
 
-        FunctionTemplateTypenameRefType(TextPosition startPosition, TextPosition endPosition, std::string name)
+        FunctionTemplateTypenameRefType(TextPosition startPosition, TextPosition endPosition,
+                                        std::size_t templateParameterIndex)
                 : Type(Kind::FunctionTemplateTypenameRef, startPosition, endPosition),
-                  _name(std::move(name)) {}
+                  _templateParameterIndex(templateParameterIndex) {}
 
-        std::string name() const { return _name; }
-        std::string getString() const override { return _name; }
+        std::size_t templateParameterIndex() const { return _templateParameterIndex; }
+        std::string getString() const override { return std::to_string(_templateParameterIndex); }
 
         Type* deepCopy() const override {
             return new FunctionTemplateTypenameRefType(startPosition(), endPosition(),
-                                                       _name);
+                                                       _templateParameterIndex);
         }
 
     private:
-        std::string _name;
+        std::size_t _templateParameterIndex;
 
     };
 }

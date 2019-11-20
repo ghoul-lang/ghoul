@@ -109,7 +109,9 @@ llvm::Type *gulc::CodeGen::generateLlvmType(const gulc::Type* type) {
 
             // Bool is special...
             if (builtInType->isBool()) {
-                return llvm::Type::getInt1Ty(*llvmContext);
+                // TODO: Should we support making booleans int1?
+//                return llvm::Type::getInt1Ty(*llvmContext);
+                return llvm::Type::getInt8Ty(*llvmContext);
             }
 
             // Floats...
@@ -357,6 +359,14 @@ llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
             return generateDestructParameterExpr(llvm::dyn_cast<gulc::DestructParameterExpr>(expr));
         case gulc::Expr::Kind::DestructMemberVariable:
             return generateDestructMemberVariableExpr(llvm::dyn_cast<gulc::DestructMemberVariableExpr>(expr));
+        case gulc::Expr::Kind::BaseDestructorCall:
+            // NOTE: This shouldn't be called by the user. This is only here because of how we handle calling the base
+            //       destructor. It is done the same way as the member destructors are called: an Expr list in
+            //       `ReturnStmt`
+            generateBaseDestructorCallExpr(llvm::dyn_cast<gulc::BaseDestructorCallExpr>(expr));
+            return nullptr;
+        case gulc::Expr::Kind::RefBase:
+            return generateRefBaseExpr(llvm::dyn_cast<RefBaseExpr>(expr));
         default:
             printError("unexpected expression type in code generator!",
                        expr->startPosition(), expr->endPosition());
@@ -376,7 +386,8 @@ void gulc::CodeGen::generateExternConstructorDecl(const gulc::ConstructorDecl *c
     // Constructors can ONLY return void, they only modify the `this` reference...
     llvm::Type* returnType = llvm::Type::getVoidTy(*llvmContext);
     llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
-    llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::ExternalLinkage, constructorDecl->mangledName(), module);
+    llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::ExternalLinkage,
+                                                      constructorDecl->mangledName(), module);
 }
 
 void gulc::CodeGen::generateExternDestructorDecl(const gulc::DestructorDecl *destructorDecl) {
@@ -425,7 +436,13 @@ void gulc::CodeGen::generateConstructorDecl(const gulc::ConstructorDecl *constru
 
     llvm::BasicBlock* funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", function);
     irBuilder->SetInsertPoint(funcBody);
+
     setCurrentFunction(function);
+
+    // If there is a base constructor we HAVE to call it as the first line of the constructor
+    if (constructorDecl->baseConstructor != nullptr) {
+        generateBaseConstructorCallExpr(constructorDecl->baseConstructorCall);
+    }
 
     // Generate the function body
     currentFunctionLocalVariablesCount = 0;
@@ -461,6 +478,7 @@ void gulc::CodeGen::generateDestructorDecl(const gulc::DestructorDecl *destructo
 
     llvm::BasicBlock* funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", function);
     irBuilder->SetInsertPoint(funcBody);
+
     setCurrentFunction(function);
 
     // Generate the function body
@@ -503,6 +521,7 @@ void gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *functionDecl,
 
     verifyFunction(*function);
     funcPass->run(*function);
+
 
     // Reset the insertion point (this probably isn't needed but oh well)
     irBuilder->ClearInsertionPoint();
@@ -1195,8 +1214,17 @@ llvm::Value *gulc::CodeGen::generateFunctionCallExpr(const gulc::FunctionCallExp
     std::vector<llvm::Value*> llvmArgs{};
 
     if (llvm::isa<RefStructMemberFunctionExpr>(functionCallExpr->functionReference)) {
-        auto refStructMemberVariable = llvm::dyn_cast<RefStructMemberFunctionExpr>(functionCallExpr->functionReference);
-        llvmArgs.push_back(generateExpr(refStructMemberVariable->objectRef));
+        auto refStructMemberFunction = llvm::dyn_cast<RefStructMemberFunctionExpr>(functionCallExpr->functionReference);
+        llvm::Value* hiddenThis = generateExpr(refStructMemberFunction->objectRef);
+
+        // If the types differ that means there is a compiler cast (one that can never be overridden)
+        if (!TypeComparer::getTypesAreSame(refStructMemberFunction->objectRef->resultType,
+                                           refStructMemberFunction->structType, true)) {
+            hiddenThis = irBuilder->CreateBitCast(hiddenThis,
+                                                 llvm::PointerType::getUnqual(generateLlvmType(refStructMemberFunction->structType)));
+        }
+
+        llvmArgs.push_back(hiddenThis);
     }
 
     if (functionCallExpr->hasArguments()) {
@@ -1370,6 +1398,13 @@ llvm::Value *gulc::CodeGen::generateRefGlobalVariableExpr(const gulc::RefGlobalV
 llvm::Value *gulc::CodeGen::generateRefStructMemberVariableExpr(const gulc::RefStructMemberVariableExpr *refStructMemberVariableExpr) {
     llvm::Value* objectRef = generateExpr(refStructMemberVariableExpr->objectRef);
 
+    // If the types differ that means there is a compiler cast (one that can never be overridden)
+    if (!TypeComparer::getTypesAreSame(refStructMemberVariableExpr->objectRef->resultType,
+                                       refStructMemberVariableExpr->structType, true)) {
+        objectRef = irBuilder->CreateBitCast(objectRef,
+                llvm::PointerType::getUnqual(generateLlvmType(refStructMemberVariableExpr->structType)));
+    }
+
     std::vector<GlobalVariableDecl*>& dataMembers = refStructMemberVariableExpr->structType->decl()->dataMembers;
     unsigned int index = 0;
     bool elementFound = false;
@@ -1388,11 +1423,15 @@ llvm::Value *gulc::CodeGen::generateRefStructMemberVariableExpr(const gulc::RefS
                    refStructMemberVariableExpr->startPosition(), refStructMemberVariableExpr->endPosition());
     }
 
+    // If the struct has a base type we increment it by one to account for the base class member
+    if (refStructMemberVariableExpr->structType->decl()->baseStruct != nullptr) {
+        index += 1;
+    }
 
     // NOTE: Not exactly sure whats wrong here but we'll just let LLVM handle getting the type...
 //    llvm::StructType* structType = getLlvmStructType(refStructMemberVariableExpr->structType->decl());
 //    llvm::PointerType* structPointerType = llvm::PointerType::getUnqual(structType);
-    return irBuilder->CreateStructGEP(nullptr, objectRef, index, refStructMemberVariableExpr->refVariable->name());
+    return irBuilder->CreateStructGEP(nullptr, objectRef, index);
 }
 
 llvm::Function *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr, std::string *nameOut) {
@@ -1471,6 +1510,56 @@ llvm::Value *gulc::CodeGen::generateDestructMemberVariableExpr(const gulc::Destr
     return memberVariableRef;
 }
 
+llvm::Value *gulc::CodeGen::generateRefBaseExpr(const gulc::RefBaseExpr *refBaseExpr) {
+    llvm::Value* refThis = generateExpr(refBaseExpr->refThis);
+    // We implicitly convert to a pointer here because technically in the IR `refThis` is a pointer even though
+    // in the AST it is not a pointer. There might be a bug here.
+    return irBuilder->CreateBitCast(refThis,
+                                    llvm::PointerType::getUnqual(generateLlvmType(refBaseExpr->resultType)));
+}
+
+void gulc::CodeGen::generateBaseConstructorCallExpr(const gulc::BaseConstructorCallExpr *baseConstructorCallExpr) {
+    llvm::Function* baseConstructorFunc = module->getFunction(baseConstructorCallExpr->baseConstructor->mangledName());
+
+    std::vector<llvm::Value*> llvmArgs{};
+    llvmArgs.reserve(baseConstructorCallExpr->arguments.size() + 1);
+
+    gulc::RefParameterExpr refThisExpr({}, {}, 0);
+    llvm::Value* refThis = generateRefParameterExpr(&refThisExpr);
+    llvm::Value* derefThis = irBuilder->CreateLoad(refThis, "deref");
+
+    // The `0` index is our base struct. This is the same as bitcasting to the base type (and an llvm pass will even
+    // convert the bitcast to the member access)
+    llvm::Value* thisCastedToBase = irBuilder->CreateStructGEP(nullptr, derefThis, 0);
+
+    llvmArgs.push_back(thisCastedToBase);
+
+    for (Expr* argument : baseConstructorCallExpr->arguments) {
+        llvmArgs.push_back(generateExpr(argument));
+    }
+
+    irBuilder->CreateCall(baseConstructorFunc, llvmArgs);
+}
+
+void gulc::CodeGen::generateBaseDestructorCallExpr(const gulc::BaseDestructorCallExpr *baseDestructorCallExpr) {
+    llvm::Function* baseDestructorFunc = module->getFunction(baseDestructorCallExpr->baseDestructor->mangledName());
+
+    std::vector<llvm::Value*> llvmArgs{};
+    llvmArgs.reserve(1);
+
+    gulc::RefParameterExpr refThisExpr({}, {}, 0);
+    llvm::Value* refThis = generateRefParameterExpr(&refThisExpr);
+    llvm::Value* derefThis = irBuilder->CreateLoad(refThis, "deref");
+
+    // The `0` index is our base struct. This is the same as bitcasting to the base type (and an llvm pass will even
+    // convert the bitcast to the member access)
+    llvm::Value* thisCastedToBase = irBuilder->CreateStructGEP(nullptr, derefThis, 0);
+
+    llvmArgs.push_back(thisCastedToBase);
+
+    irBuilder->CreateCall(baseDestructorFunc, llvmArgs);
+}
+
 void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& value) {
     // We ignore const, mut, and immut here since LLVM doesn't have any concept of these...
     if (llvm::isa<ConstType>(to)) {
@@ -1539,6 +1628,15 @@ void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& va
 
             value = irBuilder->CreateIntToPtr(value, generateLlvmType(to), "int2ptr");
             return;
+        }
+    } else if (llvm::isa<gulc::ReferenceType>(from)) {
+        // We assume if it reaches this point that the cast is valid
+        if (llvm::isa<gulc::ReferenceType>(to)) {
+            value = irBuilder->CreateBitCast(value, generateLlvmType(to));
+            return;
+        } else {
+            printError("[INTERNAL] reference '" + from->getString() + "' to non-reference '" + to->getString() + "' cast found in code gen!",
+                       to->startPosition(), to->endPosition());
         }
     }
 

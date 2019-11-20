@@ -28,35 +28,39 @@ namespace gulc {
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Struct; }
 
         StructDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                   Visibility visibility, std::vector<ConstructorDecl*> constructors, std::vector<Decl*> members,
-                   DestructorDecl* destructor)
+                   Visibility visibility, std::vector<Type*> baseTypes, std::vector<ConstructorDecl*> constructors,
+                   std::vector<Decl*> members, DestructorDecl* destructor)
                 : Decl(Kind::Struct, std::move(name), std::move(sourceFile), startPosition, endPosition,
                        visibility),
-                  constructors(std::move(constructors)), members(std::move(members)), destructor(destructor),
-                  _hasEmptyConstructor(false) {
-            // Search to see if any of the constructors are empty
-            for (ConstructorDecl* constructor : this->constructors) {
-                if (constructor->parameters.empty()) {
-                    _hasEmptyConstructor = true;
-                    break;
-                }
-            }
-        }
+                  baseTypes(std::move(baseTypes)), constructors(std::move(constructors)), members(std::move(members)),
+                  destructor(destructor) {}
 
         // These are just sorted references to already existing members within the `members` list, we do NOT free these as that would cause a double free issue.
         std::vector<GlobalVariableDecl*> dataMembers;
 
+        std::vector<Type*> baseTypes;
+        // This stores our direct parent struct if there are any parent structs in the `baseTypes` list
+        // We don't own this so we don't free it
+        StructDecl* baseStruct;
         std::vector<ConstructorDecl*> constructors;
         std::vector<Decl*> members;
         // There can only be one destructor
         DestructorDecl* destructor;
 
-        bool hasEmptyConstructor() const { return _hasEmptyConstructor; }
+        // This is a list of members inherited from the base struct and all bases of base structs
+        // This will also remove any overridden functions, shadowed members, and unaccessible members
+        // We do not own this so we don't free it
+        std::vector<Decl*> inheritedMembers;
 
         Decl* deepCopy() const override {
+            std::vector<Type*> copiedBaseTypes{};
             std::vector<ConstructorDecl*> copiedConstructors{};
             std::vector<Decl*> copiedMembers{};
             DestructorDecl* copiedDestructor = nullptr;
+
+            for (Type* baseType : baseTypes) {
+                copiedBaseTypes.push_back(baseType->deepCopy());
+            }
 
             for (ConstructorDecl* constructor : constructors) {
                 copiedConstructors.push_back(llvm::dyn_cast<ConstructorDecl>(constructor->deepCopy()));
@@ -72,16 +76,22 @@ namespace gulc {
 
             auto result = new StructDecl(name(), sourceFile(),
                                          startPosition(), endPosition(),
-                                         visibility(),
+                                         visibility(), std::move(copiedBaseTypes),
                                          std::move(copiedConstructors), std::move(copiedMembers), copiedDestructor);
             result->parentNamespace = parentNamespace;
             result->parentStruct = parentStruct;
+            result->baseStruct = baseStruct;
+            result->inheritedMembers = std::vector<Decl*>(inheritedMembers);
 
             return result;
         }
 
         ~StructDecl() override {
             delete destructor;
+
+            for (Type* baseType : baseTypes) {
+                delete baseType;
+            }
 
             for (ConstructorDecl* constructor : constructors) {
                 delete constructor;
@@ -91,10 +101,6 @@ namespace gulc {
                 delete decl;
             }
         }
-
-    private:
-        // This is needed to be able to declare local variable structs without constructor arguments (i.e. `TestStruct v;` instead of `TestStruct v(arg1, arg2, etc);`
-        bool _hasEmptyConstructor;
 
     };
 }
