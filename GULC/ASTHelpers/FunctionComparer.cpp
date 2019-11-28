@@ -1,6 +1,3 @@
-#include <AST/Types/ConstType.hpp>
-#include <AST/Types/MutType.hpp>
-#include <AST/Types/ImmutType.hpp>
 #include <AST/Types/ReferenceType.hpp>
 #include "FunctionComparer.hpp"
 
@@ -45,25 +42,9 @@ FunctionComparer::CompareResult FunctionComparer::compare(const FunctionDecl *or
             // differentiable
             return CompareResult::SimilarDifferentiable;
         } else {
+            bool ignoreFirstQualifier = false;
             Type* originalParam = original->parameters[i]->type;
             Type* compareToParam = compareTo->parameters[i]->type;
-
-            // Remove const, mut, and immut qualifiers as they don't matter to the function list
-            if (llvm::isa<ConstType>(originalParam)) {
-                originalParam = llvm::dyn_cast<ConstType>(originalParam)->pointToType;
-            } else if (llvm::isa<MutType>(originalParam)) {
-                originalParam = llvm::dyn_cast<MutType>(originalParam)->pointToType;
-            } else if (llvm::isa<ImmutType>(originalParam)) {
-                originalParam = llvm::dyn_cast<ImmutType>(originalParam)->pointToType;
-            }
-
-            if (llvm::isa<ConstType>(compareToParam)) {
-                compareToParam = llvm::dyn_cast<ConstType>(compareToParam)->pointToType;
-            } else if (llvm::isa<MutType>(compareToParam)) {
-                compareToParam = llvm::dyn_cast<MutType>(compareToParam)->pointToType;
-            } else if (llvm::isa<ImmutType>(compareToParam)) {
-                compareToParam = llvm::dyn_cast<ImmutType>(compareToParam)->pointToType;
-            }
 
             bool originalParamIsRef = false;
 
@@ -80,13 +61,7 @@ FunctionComparer::CompareResult FunctionComparer::compare(const FunctionDecl *or
 
                 // If compare to param isn't a reference but we are we have to ignore any qualifiers
                 if (!llvm::isa<ReferenceType>(compareToParam)) {
-                    if (llvm::isa<ConstType>(originalParam)) {
-                        originalParam = llvm::dyn_cast<ConstType>(originalParam)->pointToType;
-                    } else if (llvm::isa<MutType>(originalParam)) {
-                        originalParam = llvm::dyn_cast<MutType>(originalParam)->pointToType;
-                    } else if (llvm::isa<ImmutType>(originalParam)) {
-                        originalParam = llvm::dyn_cast<ImmutType>(originalParam)->pointToType;
-                    }
+                    ignoreFirstQualifier = true;
                 }
             }
 
@@ -95,18 +70,12 @@ FunctionComparer::CompareResult FunctionComparer::compare(const FunctionDecl *or
 
                 // If original param isn't a reference but we are we have to ignore any qualifiers
                 if (!originalParamIsRef) {
-                    if (llvm::isa<ConstType>(compareToParam)) {
-                        compareToParam = llvm::dyn_cast<ConstType>(compareToParam)->pointToType;
-                    } else if (llvm::isa<MutType>(compareToParam)) {
-                        compareToParam = llvm::dyn_cast<MutType>(compareToParam)->pointToType;
-                    } else if (llvm::isa<ImmutType>(compareToParam)) {
-                        compareToParam = llvm::dyn_cast<ImmutType>(compareToParam)->pointToType;
-                    }
+                    ignoreFirstQualifier = true;
                 }
             }
 
             // If the params aren't the same type then the functions aren't the same
-            if (!TypeComparer::getTypesAreSame(originalParam, compareToParam)) {
+            if (!TypeComparer::getTypesAreSame(originalParam, compareToParam, ignoreFirstQualifier)) {
                 return CompareResult::Different;
             }
         }
@@ -155,6 +124,7 @@ FunctionComparer::CompareResult FunctionComparer::compare(const TemplateFunction
             // differentiable
             return CompareResult::SimilarDifferentiable;
         } else {
+            bool ignoreFirstQualifier = false;
             Type* originalParam = original->templateParameters[i]->type;
             Type* compareToParam = compareTo->templateParameters[i]->type;
 
@@ -163,23 +133,6 @@ FunctionComparer::CompareResult FunctionComparer::compare(const TemplateFunction
                 // If one is a `typename` and the other isn't then we can differentiate between the two
                 // functions
                 return CompareResult::Different;
-            }
-
-            // Remove const, mut, and immut qualifiers as they don't matter to the function list
-            if (llvm::isa<ConstType>(originalParam)) {
-                originalParam = llvm::dyn_cast<ConstType>(originalParam)->pointToType;
-            } else if (llvm::isa<MutType>(originalParam)) {
-                originalParam = llvm::dyn_cast<MutType>(originalParam)->pointToType;
-            } else if (llvm::isa<ImmutType>(originalParam)) {
-                originalParam = llvm::dyn_cast<ImmutType>(originalParam)->pointToType;
-            }
-
-            if (llvm::isa<ConstType>(compareToParam)) {
-                compareToParam = llvm::dyn_cast<ConstType>(compareToParam)->pointToType;
-            } else if (llvm::isa<MutType>(compareToParam)) {
-                compareToParam = llvm::dyn_cast<MutType>(compareToParam)->pointToType;
-            } else if (llvm::isa<ImmutType>(compareToParam)) {
-                compareToParam = llvm::dyn_cast<ImmutType>(compareToParam)->pointToType;
             }
 
             bool structParamIsRef = false;
@@ -197,13 +150,7 @@ FunctionComparer::CompareResult FunctionComparer::compare(const TemplateFunction
 
                 // If compare template to param isn't a reference but we are we have to ignore any qualifiers
                 if (!llvm::isa<ReferenceType>(compareToParam)) {
-                    if (llvm::isa<ConstType>(originalParam)) {
-                        originalParam = llvm::dyn_cast<ConstType>(originalParam)->pointToType;
-                    } else if (llvm::isa<MutType>(originalParam)) {
-                        originalParam = llvm::dyn_cast<MutType>(originalParam)->pointToType;
-                    } else if (llvm::isa<ImmutType>(originalParam)) {
-                        originalParam = llvm::dyn_cast<ImmutType>(originalParam)->pointToType;
-                    }
+                    ignoreFirstQualifier = true;
                 }
             }
 
@@ -212,18 +159,12 @@ FunctionComparer::CompareResult FunctionComparer::compare(const TemplateFunction
 
                 // If original template param isn't a reference but we are we have to ignore any qualifiers
                 if (!structParamIsRef) {
-                    if (llvm::isa<ConstType>(compareToParam)) {
-                        compareToParam = llvm::dyn_cast<ConstType>(compareToParam)->pointToType;
-                    } else if (llvm::isa<MutType>(compareToParam)) {
-                        compareToParam = llvm::dyn_cast<MutType>(compareToParam)->pointToType;
-                    } else if (llvm::isa<ImmutType>(compareToParam)) {
-                        compareToParam = llvm::dyn_cast<ImmutType>(compareToParam)->pointToType;
-                    }
+                    ignoreFirstQualifier = true;
                 }
             }
 
             // If the params aren't the same type then the functions aren't the same
-            if (!TypeComparer::getTypesAreSame(originalParam, compareToParam)) {
+            if (!TypeComparer::getTypesAreSame(originalParam, compareToParam, ignoreFirstQualifier)) {
                 return CompareResult::Different;
             }
         }
@@ -261,25 +202,9 @@ FunctionComparer::CompareResult FunctionComparer::compare(const TemplateFunction
             // differentiable
             return CompareResult::SimilarDifferentiable;
         } else {
+            bool ignoreFirstQualifier = false;
             Type* originalParam = original->parameters[i]->type;
             Type* compareToParam = compareTo->parameters[i]->type;
-
-            // Remove const, mut, and immut qualifiers as they don't matter to the function list
-            if (llvm::isa<ConstType>(originalParam)) {
-                originalParam = llvm::dyn_cast<ConstType>(originalParam)->pointToType;
-            } else if (llvm::isa<MutType>(originalParam)) {
-                originalParam = llvm::dyn_cast<MutType>(originalParam)->pointToType;
-            } else if (llvm::isa<ImmutType>(originalParam)) {
-                originalParam = llvm::dyn_cast<ImmutType>(originalParam)->pointToType;
-            }
-
-            if (llvm::isa<ConstType>(compareToParam)) {
-                compareToParam = llvm::dyn_cast<ConstType>(compareToParam)->pointToType;
-            } else if (llvm::isa<MutType>(compareToParam)) {
-                compareToParam = llvm::dyn_cast<MutType>(compareToParam)->pointToType;
-            } else if (llvm::isa<ImmutType>(compareToParam)) {
-                compareToParam = llvm::dyn_cast<ImmutType>(compareToParam)->pointToType;
-            }
 
             bool originalParamIsRef = false;
 
@@ -296,13 +221,7 @@ FunctionComparer::CompareResult FunctionComparer::compare(const TemplateFunction
 
                 // If compare to param isn't a reference but we are we have to ignore any qualifiers
                 if (!llvm::isa<ReferenceType>(compareToParam)) {
-                    if (llvm::isa<ConstType>(originalParam)) {
-                        originalParam = llvm::dyn_cast<ConstType>(originalParam)->pointToType;
-                    } else if (llvm::isa<MutType>(originalParam)) {
-                        originalParam = llvm::dyn_cast<MutType>(originalParam)->pointToType;
-                    } else if (llvm::isa<ImmutType>(originalParam)) {
-                        originalParam = llvm::dyn_cast<ImmutType>(originalParam)->pointToType;
-                    }
+                    ignoreFirstQualifier = true;
                 }
             }
 
@@ -311,18 +230,12 @@ FunctionComparer::CompareResult FunctionComparer::compare(const TemplateFunction
 
                 // If original param isn't a reference but we are we have to ignore any qualifiers
                 if (!originalParamIsRef) {
-                    if (llvm::isa<ConstType>(compareToParam)) {
-                        compareToParam = llvm::dyn_cast<ConstType>(compareToParam)->pointToType;
-                    } else if (llvm::isa<MutType>(compareToParam)) {
-                        compareToParam = llvm::dyn_cast<MutType>(compareToParam)->pointToType;
-                    } else if (llvm::isa<ImmutType>(compareToParam)) {
-                        compareToParam = llvm::dyn_cast<ImmutType>(compareToParam)->pointToType;
-                    }
+                    ignoreFirstQualifier = true;
                 }
             }
 
             // If the params aren't the same type then the functions aren't the same
-            if (!TypeComparer::getTypesAreSame(originalParam, compareToParam)) {
+            if (!TypeComparer::getTypesAreSame(originalParam, compareToParam, ignoreFirstQualifier)) {
                 return CompareResult::Different;
             }
         }

@@ -19,6 +19,7 @@
 #include <AST/Decl.hpp>
 #include <vector>
 #include <AST/FileAST.hpp>
+#include <Targets/Target.hpp>
 
 namespace gulc {
     /**
@@ -31,7 +32,12 @@ namespace gulc {
      */
     // TODO: Maybe this should be renamed to `InheritanceResolver` or something similar?
     class Inheriter {
+    private:
+        Target* _target;
+
     public:
+        explicit Inheriter(Target* target) : _target(target) {}
+
         void processFile(std::vector<FileAST*>& files);
 
     private:

@@ -15,10 +15,6 @@
 
 #include <AST/Types/PointerType.hpp>
 #include <AST/Types/ReferenceType.hpp>
-#include <AST/Types/RValueReferenceType.hpp>
-#include <AST/Types/ConstType.hpp>
-#include <AST/Types/MutType.hpp>
-#include <AST/Types/ImmutType.hpp>
 #include <AST/Types/BuiltInType.hpp>
 #include <iostream>
 #include <AST/Types/EnumType.hpp>
@@ -224,15 +220,7 @@ std::string ItaniumMangler::bareFunctionType(std::vector<ParameterDecl*> &params
 
         Type* genType = param->type;
 
-        // TODO: Should we ignore `mut` and `immut` here?
-        if (llvm::isa<ConstType>(genType)) {
-            genType = llvm::dyn_cast<ConstType>(genType)->pointToType;
-        } else if (llvm::isa<ImmutType>(genType)) {
-            genType = llvm::dyn_cast<ImmutType>(genType)->pointToType;
-        } else if (llvm::isa<MutType>(genType)) {
-            genType = llvm::dyn_cast<MutType>(genType)->pointToType;
-        }
-
+        // TODO: Should we ignore `mut` here?
         result += typeName(genType);
     }
 
@@ -240,37 +228,37 @@ std::string ItaniumMangler::bareFunctionType(std::vector<ParameterDecl*> &params
 }
 
 std::string ItaniumMangler::typeName(gulc::Type *type) {
+    std::string prefix;
+
+    if (type->qualifier() == TypeQualifier::Const) {
+        prefix = "K";
+    } else if (type->qualifier() == TypeQualifier::Mut) {
+        prefix = "Umut";
+    }
+
     if (llvm::isa<BuiltInType>(type)) {
         auto builtInType = llvm::dyn_cast<BuiltInType>(type);
         const std::string checkName = builtInType->name();
 
         if (checkName == "void") {
-            return "v";
+            return prefix + "v";
         } else if (checkName == "bool") {
-            return "b";
+            return prefix + "b";
         } else {
-            return sourceName(checkName);
+            return prefix + sourceName(checkName);
         }
     } else if (llvm::isa<EnumType>(type)) {
         auto enumType = llvm::dyn_cast<EnumType>(type);
         // TODO: When do we add 'Te' in front of this?? Neither clang nor gcc seem to do it in my tests
-        return /*"Te" + */enumType->decl()->mangledName();
+        return prefix + /*"Te" + */enumType->decl()->mangledName();
     } else if (llvm::isa<StructType>(type)) {
         auto structType = llvm::dyn_cast<StructType>(type);
         // TODO: When do we add 'Ts' in front of this?? Neither clang nor gcc seem to do it in my tests
-        return /*"Ts" + */structType->decl()->mangledName();
+        return prefix + /*"Ts" + */structType->decl()->mangledName();
     } else if (llvm::isa<PointerType>(type)) {
-        return "P" + typeName(llvm::dyn_cast<PointerType>(type)->pointToType);
+        return prefix + "P" + typeName(llvm::dyn_cast<PointerType>(type)->pointToType);
     } else if (llvm::isa<ReferenceType>(type)) {
-        return "R" + typeName(llvm::dyn_cast<ReferenceType>(type)->referenceToType);
-    } else if (llvm::isa<RValueReferenceType>(type)) {
-        return "O" + typeName(llvm::dyn_cast<RValueReferenceType>(type)->referenceToType);
-    } else if (llvm::isa<ConstType>(type)) {
-        return "K" + typeName(llvm::dyn_cast<ConstType>(type)->pointToType);
-    } else if (llvm::isa<MutType>(type)) {
-        return "Umut" + typeName(llvm::dyn_cast<MutType>(type)->pointToType);
-    } else if (llvm::isa<ImmutType>(type)) {
-        return "Uimmut" + typeName(llvm::dyn_cast<ImmutType>(type)->pointToType);
+        return prefix + "R" + typeName(llvm::dyn_cast<ReferenceType>(type)->referenceToType);
     } else {
         std::cerr << "[INTERNAL NAME MANGLING ERROR] type `" << type->getString() << "` not supported!" << std::endl;
         std::exit(1);

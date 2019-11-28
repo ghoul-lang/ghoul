@@ -16,9 +16,6 @@
 #include <AST/Types/BuiltInType.hpp>
 #include <AST/Types/FunctionTemplateTypenameRefType.hpp>
 #include <AST/Types/ReferenceType.hpp>
-#include <AST/Types/ConstType.hpp>
-#include <AST/Types/MutType.hpp>
-#include <AST/Types/ImmutType.hpp>
 #include <AST/Types/PointerType.hpp>
 #include <AST/Types/EnumType.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
@@ -80,10 +77,12 @@ bool TypeResolver::declResolvesToType(Decl *decl, UnresolvedType* unresolvedType
             baseType = enumDecl->baseType->deepCopy();
         } else {
             // Default type for enum is uint32
-            baseType = new BuiltInType(unresolvedType->startPosition(), unresolvedType->endPosition(), "uint32");
+            baseType = new BuiltInType(unresolvedType->startPosition(), unresolvedType->endPosition(),
+                                       unresolvedType->qualifier(), "uint32");
         }
 
-        *resolvedType = new EnumType(unresolvedType->startPosition(), unresolvedType->endPosition(), enumDecl->name(),
+        *resolvedType = new EnumType(unresolvedType->startPosition(), unresolvedType->endPosition(),
+                                     unresolvedType->qualifier(), enumDecl->name(),
                                      baseType, enumDecl, decl->parentNamespace);
 
         return true;
@@ -92,7 +91,7 @@ bool TypeResolver::declResolvesToType(Decl *decl, UnresolvedType* unresolvedType
         // TODO: Support base type
 
         *resolvedType = new StructType(unresolvedType->startPosition(), unresolvedType->endPosition(),
-                                       structDecl->name(), structDecl);
+                                       unresolvedType->qualifier(), structDecl->name(), structDecl);
 
         return true;
     }
@@ -157,7 +156,8 @@ bool TypeResolver::resolveType(Type *&type) {
                 }
 
                 Type *oldType = type;
-                type = new BuiltInType(oldType->startPosition(), oldType->endPosition(), unresolvedType->name());
+                type = new BuiltInType(oldType->startPosition(), oldType->endPosition(), oldType->qualifier(),
+                                       unresolvedType->name());
                 delete oldType;
                 return true;
             }
@@ -172,7 +172,7 @@ bool TypeResolver::resolveType(Type *&type) {
                         if (templateParameterDecl->name() == unresolvedType->name()) {
                             Type *oldType = type;
                             type = new FunctionTemplateTypenameRefType(oldType->startPosition(), oldType->endPosition(),
-                                                                       i);
+                                                                       oldType->qualifier(), i);
                             delete oldType;
                             return true;
                         }
@@ -193,57 +193,6 @@ bool TypeResolver::resolveType(Type *&type) {
                 }
             }
         }
-    } else if (type->getTypeKind() == Type::Kind::Const) {
-        auto constType = llvm::dyn_cast<ConstType>(type);
-
-        if (llvm::isa<ConstType>(constType->pointToType)) {
-            printWarning("duplicate `const` qualifier not needed!",
-                         constType->startPosition(), constType->endPosition());
-        } else if (llvm::isa<MutType>(constType->pointToType)) {
-            printError("`const` and `mut` qualifiers are not mixable!",
-                       constType->startPosition(), constType->endPosition());
-            return false;
-        } else if (llvm::isa<ImmutType>(constType->pointToType)) {
-            printError("`const` and `immut` qualifiers are not mixable!",
-                       constType->startPosition(), constType->endPosition());
-            return false;
-        }
-
-        return resolveType(constType->pointToType);
-    } else if (type->getTypeKind() == Type::Kind::Mut) {
-        auto mutType = llvm::dyn_cast<MutType>(type);
-
-        if (llvm::isa<ConstType>(mutType->pointToType)) {
-            printError("`mut` and `const` qualifiers are not mixable!",
-                       mutType->startPosition(), mutType->endPosition());
-            return false;
-        } else if (llvm::isa<MutType>(mutType->pointToType)) {
-            printWarning("duplicate `mut` qualifier not needed!",
-                         mutType->startPosition(), mutType->endPosition());
-        } else if (llvm::isa<ImmutType>(mutType->pointToType)) {
-            printError("`mut` and `immut` qualifiers are not mixable!",
-                       mutType->startPosition(), mutType->endPosition());
-            return false;
-        }
-
-        return resolveType(mutType->pointToType);
-    } else if (type->getTypeKind() == Type::Kind::Immut) {
-        auto immutType = llvm::dyn_cast<ImmutType>(type);
-
-        if (llvm::isa<ConstType>(immutType->pointToType)) {
-            printError("`immut` and `const` qualifiers are not mixable!",
-                       immutType->startPosition(), immutType->endPosition());
-            return false;
-        } else if (llvm::isa<MutType>(immutType->pointToType)) {
-            printError("`immut` and `mut` qualifiers are not mixable!",
-                       immutType->startPosition(), immutType->endPosition());
-            return false;
-        } else if (llvm::isa<ImmutType>(immutType->pointToType)) {
-            printWarning("duplicate `immut` qualifier not needed!",
-                         immutType->startPosition(), immutType->endPosition());
-        }
-
-        return resolveType(immutType->pointToType);
     } else if (type->getTypeKind() == Type::Kind::Pointer) {
         auto pointerType = llvm::dyn_cast<PointerType>(type);
         return resolveType(pointerType->pointToType);
@@ -514,7 +463,8 @@ void TypeResolver::processDestructorDecl(DestructorDecl *destructorDecl) {
 void TypeResolver::processEnumDecl(EnumDecl *enumDecl) {
     if (!enumDecl->hasBaseType()) {
         // If the enum doesn't have a base type we default to an unsigned 32-bit integer
-        enumDecl->baseType = new BuiltInType(enumDecl->startPosition(), enumDecl->endPosition(), "uint32");
+        enumDecl->baseType = new BuiltInType(enumDecl->startPosition(), enumDecl->endPosition(),
+                                             TypeQualifier::None, "uint32");
     } else if (!resolveType(enumDecl->baseType)) {
         printError("could not resolve enum `" + enumDecl->name() + "`s base type `" + enumDecl->baseType->getString() + "`!",
                    enumDecl->baseType->startPosition(), enumDecl->baseType->endPosition());
@@ -642,7 +592,9 @@ void TypeResolver::processStructDecl(StructDecl *structDecl) {
 
         // The variable pointers are stored into their own vector so we know the offsets of each variable within the struct
         if (llvm::isa<GlobalVariableDecl>(decl)) {
-            structDecl->dataMembers.push_back(llvm::dyn_cast<GlobalVariableDecl>(decl));
+            auto variableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
+
+            structDecl->dataMembers.push_back(variableDecl);
         }
 
         processDecl(decl, Decl::Visibility::Public);
@@ -856,7 +808,8 @@ Expr* TypeResolver::processIdentifierExprForDecl(Decl* decl, Expr*& expr) {
                            identifierExpr->startPosition(), identifierExpr->endPosition());
             }
 
-            Type *resolvedType = new EnumType(expr->startPosition(), expr->endPosition(), identifierExpr->name(),
+            Type *resolvedType = new EnumType(expr->startPosition(), expr->endPosition(), TypeQualifier::None,
+                                              identifierExpr->name(),
                                               enumDecl->baseType->deepCopy(), enumDecl);
 
             auto result = new ResolvedTypeRefExpr(expr->startPosition(), expr->endPosition(), resolvedType);
@@ -871,8 +824,8 @@ Expr* TypeResolver::processIdentifierExprForDecl(Decl* decl, Expr*& expr) {
                            identifierExpr->startPosition(), identifierExpr->endPosition());
             }
 
-            Type* resolvedType = new StructType(expr->startPosition(), expr->endPosition(), identifierExpr->name(),
-                                                structDecl);
+            Type* resolvedType = new StructType(expr->startPosition(), expr->endPosition(), TypeQualifier::None,
+                                                identifierExpr->name(), structDecl);
 
             auto result = new ResolvedTypeRefExpr(expr->startPosition(), expr->endPosition(), resolvedType);
             result->resultType = resolvedType->deepCopy();
@@ -895,7 +848,8 @@ void TypeResolver::processIdentifierExpr(Expr*& expr) {
                        identifierExpr->startPosition(), identifierExpr->endPosition());
         }
 
-        Type *resolvedType = new BuiltInType(expr->startPosition(), expr->endPosition(), identifierExpr->name());
+        Type *resolvedType = new BuiltInType(expr->startPosition(), expr->endPosition(), TypeQualifier::None,
+                                             identifierExpr->name());
 
         delete identifierExpr;
 
@@ -1140,6 +1094,7 @@ void TypeResolver::processMemberAccessCallExpr(Expr*& expr) {
                     auto enumDecl = llvm::dyn_cast<EnumDecl>(checkDecl);
                     auto enumType = new EnumType(memberAccessCallExpr->objectRef->startPosition(),
                                                  memberAccessCallExpr->objectRef->endPosition(),
+                                                 TypeQualifier::None,
                                                  enumDecl->name(), enumDecl->baseType->deepCopy(),
                                                  enumDecl, tempNamespaceRef->namespaceDecl());
                     auto resolvedTypeRef = new ResolvedTypeRefExpr(enumType->startPosition(), enumDecl->endPosition(),

@@ -2,9 +2,6 @@
 #include <AST/Decls/StructDecl.hpp>
 #include <AST/Types/StructType.hpp>
 #include <AST/Exprs/RefLocalVariableExpr.hpp>
-#include <AST/Types/ConstType.hpp>
-#include <AST/Types/MutType.hpp>
-#include <AST/Types/ImmutType.hpp>
 #include <AST/Types/ReferenceType.hpp>
 #include <ASTHelpers/VisibilityChecker.hpp>
 #include <AST/Exprs/BaseDestructorCallExpr.hpp>
@@ -374,14 +371,6 @@ void Lifetimes::processReturnStmt(ReturnStmt *returnStmt) {
 
             Type* checkType = memberVariable->type;
 
-            if (llvm::isa<ConstType>(checkType)) {
-                checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
-            } else if (llvm::isa<MutType>(checkType)) {
-                checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
-            } else if (llvm::isa<ImmutType>(checkType)) {
-                checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
-            }
-
             if (llvm::isa<StructType>(checkType)) {
                 auto structType = llvm::dyn_cast<StructType>(checkType);
 
@@ -391,10 +380,10 @@ void Lifetimes::processReturnStmt(ReturnStmt *returnStmt) {
                 }
 
                 // TODO: Clean this up. A lot of this code already exists in `DeclResolver`...
-                StructType *thisType = new StructType({}, {}, currentStruct->name(), currentStruct);
+                StructType *thisType = new StructType({}, {}, TypeQualifier::None, currentStruct->name(), currentStruct);
 
                 RefParameterExpr *refThisParam = new RefParameterExpr({}, {}, 0);
-                refThisParam->resultType = new ReferenceType({}, {}, thisType->deepCopy());
+                refThisParam->resultType = new ReferenceType({}, {}, TypeQualifier::None, thisType->deepCopy());
                 // A parameter reference is an lvalue.
                 refThisParam->resultType->setIsLValue(true);
 
@@ -609,14 +598,6 @@ DestructLocalVariableExpr *Lifetimes::destructLocalVariable(LocalVariableDeclExp
 
     Type* checkType = resolvedTypeRef->resolvedType;
 
-    if (llvm::isa<ConstType>(checkType)) {
-        checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
-    } else if (llvm::isa<MutType>(checkType)) {
-        checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
-    } else if (llvm::isa<ImmutType>(checkType)) {
-        checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
-    }
-
     if (llvm::isa<StructType>(checkType)) {
         auto structType = llvm::dyn_cast<StructType>(checkType);
         auto foundDestructor = structType->decl()->destructor;
@@ -643,14 +624,6 @@ DestructLocalVariableExpr *Lifetimes::destructLocalVariable(LocalVariableDeclExp
 
 DestructParameterExpr *Lifetimes::destructParameter(int64_t paramIndex, ParameterDecl* parameter) {
     Type* checkType = parameter->type;
-
-    if (llvm::isa<ConstType>(checkType)) {
-        checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
-    } else if (llvm::isa<MutType>(checkType)) {
-        checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
-    } else if (llvm::isa<ImmutType>(checkType)) {
-        checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
-    }
 
     if (llvm::isa<StructType>(checkType)) {
         auto structType = llvm::dyn_cast<StructType>(checkType);

@@ -23,15 +23,16 @@ namespace gulc {
     public:
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::Pointer; }
 
-        PointerType(TextPosition startPosition, TextPosition endPosition, Type* pointToType)
-                : Type(Kind::Pointer, startPosition, endPosition),
+        PointerType(TextPosition startPosition, TextPosition endPosition, TypeQualifier qualifier,
+                    Type* pointToType)
+                : Type(Kind::Pointer, startPosition, endPosition, qualifier),
                   pointToType(pointToType) {}
 
         Type* pointToType;
         std::string getString() const override { return pointToType->getString() + "*"; }
 
         Type* deepCopy() const override {
-            return new PointerType(startPosition(), endPosition(),
+            return new PointerType(startPosition(), endPosition(), qualifier(),
                                    pointToType->deepCopy());
         }
 

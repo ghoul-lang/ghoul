@@ -17,11 +17,7 @@
 #include <AST/Types/PointerType.hpp>
 #include <AST/Types/FunctionPointerType.hpp>
 #include <AST/Exprs/LValueToRValueExpr.hpp>
-#include <AST/Types/ConstType.hpp>
-#include <AST/Types/MutType.hpp>
-#include <AST/Types/ImmutType.hpp>
 #include <AST/Types/ReferenceType.hpp>
-#include <AST/Types/RValueReferenceType.hpp>
 #include <AST/Exprs/RefLocalVariableExpr.hpp>
 #include <AST/Exprs/RefParameterExpr.hpp>
 #include <AST/Exprs/RefFunctionExpr.hpp>
@@ -53,15 +49,7 @@ void DeclResolver::processFile(std::vector<FileAST*>& files) {
 }
 
 bool DeclResolver::getTypeIsReference(const Type* check) {
-    if (llvm::isa<MutType>(check)) {
-        check = llvm::dyn_cast<MutType>(check)->pointToType;
-    } else if (llvm::isa<ConstType>(check)) {
-        check = llvm::dyn_cast<ConstType>(check)->pointToType;
-    } else if (llvm::isa<ImmutType>(check)) {
-        check = llvm::dyn_cast<ImmutType>(check)->pointToType;
-    }
-
-    return llvm::isa<ReferenceType>(check) || llvm::isa<RValueReferenceType>(check);
+    return llvm::isa<ReferenceType>(check);
 }
 
 void DeclResolver::printError(const std::string &message, TextPosition startPosition, TextPosition endPosition) {
@@ -270,10 +258,10 @@ void DeclResolver::processConstructorDecl(ConstructorDecl* constructorDecl) {
             StructType* structType = nullptr;
 
             if (constructorDecl->baseConstructorCall->isThisCall()) {
-                structType = new StructType({}, {},
+                structType = new StructType({}, {}, TypeQualifier::None,
                                             constructorDecl->parentStruct->name(), constructorDecl->parentStruct);
             } else {
-                structType = new StructType({}, {},
+                structType = new StructType({}, {}, TypeQualifier::None,
                                             constructorDecl->parentStruct->baseStruct->name(),
                                             constructorDecl->parentStruct->baseStruct);
             }
@@ -395,18 +383,12 @@ void DeclResolver::processFunctionDecl(FunctionDecl *functionDecl) {
         parameter->typeTemplateParamNumber = applyTemplateTypeArguments(parameter->type);
     }
 
-    if (llvm::isa<ConstType>(functionDecl->resultType)) {
+    if (functionDecl->resultType->qualifier() == TypeQualifier::Const) {
         printWarning("`const` qualifier unneeded on function result type, function return types are already `const` qualified!",
                      functionDecl->startPosition(), functionDecl->endPosition());
-    } else if (llvm::isa<MutType>(functionDecl->resultType)) {
+    } else if (functionDecl->resultType->qualifier() == TypeQualifier::Mut) {
         printWarning("`mut` does not apply to function return types, `mut` qualifier is ignored...",
                      functionDecl->startPosition(), functionDecl->endPosition());
-
-        // We remove the `mut` qualifier to try to reduce any confusion...
-        auto mutType = llvm::dyn_cast<MutType>(functionDecl->resultType);
-        functionDecl->resultType = mutType->pointToType;
-        mutType->pointToType = nullptr;
-        delete mutType;
     }
     // The result type CAN be `immut` since `immut` has a requirement of NEVER being modified -
     //  unlike `const` which can be modified in situations where the underlying type has a `mut` member variable...
@@ -619,18 +601,8 @@ bool DeclResolver::processCompoundStmt(CompoundStmt *compoundStmt, bool isFuncti
             // Add in a default return at the end of the body
             compoundStmt->statements().push_back(new ReturnStmt({}, {}, nullptr));
         } else {
-            Type *checkType = returnType;
-
-            if (llvm::isa<ConstType>(checkType)) {
-                checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
-            } else if (llvm::isa<MutType>(checkType)) {
-                checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
-            } else if (llvm::isa<ImmutType>(checkType)) {
-                checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
-            }
-
-            if (llvm::isa<BuiltInType>(checkType)) {
-                auto builtInType = llvm::dyn_cast<BuiltInType>(checkType);
+            if (llvm::isa<BuiltInType>(returnType)) {
+                auto builtInType = llvm::dyn_cast<BuiltInType>(returnType);
 
                 if (builtInType->size() == 0) {
                     // Add in a default return at the end of the body
@@ -757,9 +729,6 @@ bool DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
             if (llvm::isa<ReferenceType>(returnType)) {
                 auto referenceType = llvm::dyn_cast<ReferenceType>(returnType);
                 typesAreSame = TypeComparer::getTypesAreSame(returnStmt->returnValue->resultType, referenceType->referenceToType, true);
-            } else if (llvm::isa<RValueReferenceType>(returnType)) {
-                auto referenceType = llvm::dyn_cast<RValueReferenceType>(returnType);
-                typesAreSame = TypeComparer::getTypesAreSame(returnStmt->returnValue->resultType, referenceType->referenceToType, true);
             } else {
                 typesAreSame = TypeComparer::getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
             }
@@ -767,9 +736,6 @@ bool DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
         } else if (!getTypeIsReference(returnType)) {
             if (llvm::isa<ReferenceType>(returnStmt->returnValue->resultType)) {
                 auto referenceType = llvm::dyn_cast<ReferenceType>(returnStmt->returnValue->resultType);
-                typesAreSame = TypeComparer::getTypesAreSame(returnType, referenceType->referenceToType, true);
-            } else if (llvm::isa<RValueReferenceType>(returnStmt->returnValue->resultType)) {
-                auto referenceType = llvm::dyn_cast<RValueReferenceType>(returnStmt->returnValue->resultType);
                 typesAreSame = TypeComparer::getTypesAreSame(returnType, referenceType->referenceToType, true);
             } else {
                 typesAreSame = TypeComparer::getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
@@ -902,6 +868,7 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr, bool isNestedBinaryOpe
 
             localVarTypeRef->resolvedType = new PointerType(localVarTypeRef->startPosition(),
                                                             localVarTypeRef->endPosition(),
+                                                            TypeQualifier::None,
                                                             localVarTypeRef->resolvedType);
 
             auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(),
@@ -945,51 +912,8 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr, bool isNestedBinaryOpe
 
             localVarTypeRef->resolvedType = new ReferenceType(localVarTypeRef->startPosition(),
                                                             localVarTypeRef->endPosition(),
+                                                            TypeQualifier::None,
                                                             localVarTypeRef->resolvedType);
-
-            auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(),
-                                                              binaryOperatorExpr->endPosition(), localVarTypeRef,
-                                                              varName);
-
-            // TODO: Process the local variable in a nested
-            // We only process the local variable here if it is not a part of a nested binary operator
-            // This is so we can support handling initial value handling within the `processLocalVariableDeclExpr`
-            // function.
-            if (!isNestedBinaryOperator) {
-                processLocalVariableDeclExpr(localVarDeclExpr, false);
-            }
-
-            // Delete the binary operator expression (this will delete the left and right expressions)
-            delete binaryOperatorExpr;
-
-            expr = localVarDeclExpr;
-
-            return;
-        } else if (binaryOperatorExpr->operatorName() == "&&") {
-            if (!llvm::isa<IdentifierExpr>(binaryOperatorExpr->rightValue)) {
-                printError("expected local variable name after rvalue reference type!",
-                           binaryOperatorExpr->rightValue->startPosition(),
-                           binaryOperatorExpr->rightValue->endPosition());
-                return;
-            }
-
-            auto localVarTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue);
-            auto varNameExpr = llvm::dyn_cast<IdentifierExpr>(binaryOperatorExpr->rightValue);
-
-            if (varNameExpr->hasTemplateArguments()) {
-                printError("local variable name cannot have template arguments!",
-                           varNameExpr->startPosition(),
-                           varNameExpr->endPosition());
-                return;
-            }
-
-            binaryOperatorExpr->leftValue = nullptr;
-
-            std::string varName = varNameExpr->name();
-
-            localVarTypeRef->resolvedType = new RValueReferenceType(localVarTypeRef->startPosition(),
-                                                              localVarTypeRef->endPosition(),
-                                                              localVarTypeRef->resolvedType);
 
             auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(),
                                                               binaryOperatorExpr->endPosition(), localVarTypeRef,
@@ -1205,7 +1129,7 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr, bool isNestedBinaryOpe
 
 void DeclResolver::processCharacterLiteralExpr(CharacterLiteralExpr *characterLiteralExpr) {
     // TODO: Type suffix support
-    characterLiteralExpr->resultType = new BuiltInType({}, {}, "char");
+    characterLiteralExpr->resultType = new BuiltInType({}, {}, TypeQualifier::None, "char");
 }
 
 void DeclResolver::processExplicitCastExpr(ExplicitCastExpr *explicitCastExpr) {
@@ -1217,7 +1141,7 @@ void DeclResolver::processExplicitCastExpr(ExplicitCastExpr *explicitCastExpr) {
 
 void DeclResolver::processFloatLiteralExpr(FloatLiteralExpr *floatLiteralExpr) {
     // TODO: Type suffix support
-    floatLiteralExpr->resultType = new BuiltInType({}, {}, "float");
+    floatLiteralExpr->resultType = new BuiltInType({}, {}, TypeQualifier::None, "float");
 }
 
 void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
@@ -1241,7 +1165,7 @@ void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
     if (llvm::isa<TempNamespaceRefExpr>(functionCallExpr->functionReference) ||
         functionCallExpr->functionReference->resultType == nullptr) {
         // This will trigger an error in `CodeVerifier`, this most likely means the function that was called is named the same as a namespace
-        functionCallExpr->resultType = new BuiltInType({}, {}, "int32");
+        functionCallExpr->resultType = new BuiltInType({}, {}, TypeQualifier::None, "int32");
         functionCallArgs = nullptr;
         return;
     }
@@ -1259,9 +1183,7 @@ void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
             Type* checkArgType = functionCallExpr->arguments[i]->resultType;
 
             if (llvm::isa<ReferenceType>(checkParamType)) checkParamType = llvm::dyn_cast<ReferenceType>(checkParamType)->referenceToType;
-            if (llvm::isa<RValueReferenceType>(checkParamType)) checkParamType = llvm::dyn_cast<RValueReferenceType>(checkParamType)->referenceToType;
             if (llvm::isa<ReferenceType>(checkArgType)) checkArgType = llvm::dyn_cast<ReferenceType>(checkArgType)->referenceToType;
-            if (llvm::isa<RValueReferenceType>(checkArgType)) checkArgType = llvm::dyn_cast<RValueReferenceType>(checkArgType)->referenceToType;
 
             if (!TypeComparer::getTypesAreSame(checkParamType, checkArgType)) {
                 // We will handle this in the verifier.
@@ -1359,21 +1281,10 @@ bool DeclResolver::argsMatchParams(const std::vector<ParameterDecl*> &params, co
             paramType = resolvedTypeRef->resolvedType;
         }
 
-        // We remove the top level qualifiers for parameters/arguments.
-        // `const`, `immut`, and `mut` don't do anything at the top level for parameters
-        if (llvm::isa<ConstType>(argType)) argType = llvm::dyn_cast<ConstType>(argType)->pointToType;
-        else if (llvm::isa<MutType>(argType)) argType = llvm::dyn_cast<MutType>(argType)->pointToType;
-        else if (llvm::isa<ImmutType>(argType)) argType = llvm::dyn_cast<ImmutType>(argType)->pointToType;
-        if (llvm::isa<ConstType>(paramType)) paramType = llvm::dyn_cast<ConstType>(paramType)->pointToType;
-        else if (llvm::isa<MutType>(paramType)) paramType = llvm::dyn_cast<MutType>(paramType)->pointToType;
-        else if (llvm::isa<ImmutType>(paramType)) paramType = llvm::dyn_cast<ImmutType>(paramType)->pointToType;
-
         // We ignore reference types since references are passed to functions the same as non-references in how they're called
         // We DO NOT ignore the qualifiers on what the reference type is referencing, `int const&` != `int mut&`
         if (llvm::isa<ReferenceType>(argType)) argType = llvm::dyn_cast<ReferenceType>(argType)->referenceToType;
-        if (llvm::isa<RValueReferenceType>(argType)) argType = llvm::dyn_cast<RValueReferenceType>(argType)->referenceToType;
         if (llvm::isa<ReferenceType>(paramType)) paramType = llvm::dyn_cast<ReferenceType>(paramType)->referenceToType;
-        if (llvm::isa<RValueReferenceType>(paramType)) paramType = llvm::dyn_cast<RValueReferenceType>(paramType)->referenceToType;
 
         if (!TypeComparer::getTypesAreSame(argType, paramType, false)) {
             if (canImplicitCast(paramType, argType)) {
@@ -1598,7 +1509,8 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                        identifierExpr->startPosition(), identifierExpr->endPosition());
         }
 
-        Type *resolvedType = new BuiltInType(expr->startPosition(), expr->endPosition(), identifierExpr->name());
+        Type *resolvedType = new BuiltInType(expr->startPosition(), expr->endPosition(), TypeQualifier::None,
+                                             identifierExpr->name());
 
         delete identifierExpr;
 
@@ -1637,9 +1549,10 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
                                               identifierExpr->endPosition(),
                                               0);
-        refParam->resultType = new ReferenceType({}, {}, new StructType({}, {},
-                                                                        currentStruct->name(),
-                                                                        currentStruct));
+        refParam->resultType = new ReferenceType({}, {}, TypeQualifier::None, new StructType({}, {},
+                                                                                             TypeQualifier::None,
+                                                                                             currentStruct->name(),
+                                                                                             currentStruct));
         // A parameter reference is an lvalue.
         refParam->resultType->setIsLValue(true);
         // NOTE: We still make it a `ReferenceType` above then immediately dereference it here so we create the correct
@@ -1657,7 +1570,7 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
             expr = new RefBaseExpr(refParam->startPosition(), refParam->endPosition(), refParam);
             // TODO: Function calls on `RefBaseExpr` should ONLY be non-virtual, if a `virtual` function is called
             //       then we DO NOT use the vtable to look it up. We put in a direct call
-            expr->resultType = new StructType({}, {},
+            expr->resultType = new StructType({}, {}, TypeQualifier::None,
                                               currentStruct->baseStruct->name(),
                                               currentStruct->baseStruct);
         } else {
@@ -1781,13 +1694,14 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                     auto foundGlobalVariable = llvm::dyn_cast<GlobalVariableDecl>(member);
 
                     // Ownership of this will be given to `RefStructMemberVariableExpr`. `RefParameterExpr` gets a copy.
-                    StructType* structType = new StructType({}, {}, currentStruct->name(), currentStruct);
+                    StructType* structType = new StructType({}, {}, TypeQualifier::None,
+                                                            currentStruct->name(), currentStruct);
 
                     // `this` is ALWAYS defined as parameter index `0` (when a function is a member of a struct/class, obviously `0` isn't `this` to namespace or file functions)
                     Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
                                                           identifierExpr->endPosition(),
                                                           0);
-                    refParam->resultType = new ReferenceType({}, {}, structType->deepCopy());
+                    refParam->resultType = new ReferenceType({}, {}, TypeQualifier::None, structType->deepCopy());
                     // A parameter reference is an lvalue.
                     refParam->resultType->setIsLValue(true);
                     // NOTE: We still make it a `ReferenceType` above then immediately dereference it here so we create the correct
@@ -1828,8 +1742,8 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                     Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
                                                           identifierExpr->endPosition(),
                                                           0);
-                    refParam->resultType = new ReferenceType({}, {},
-                                                             new StructType({}, {},
+                    refParam->resultType = new ReferenceType({}, {}, TypeQualifier::None,
+                                                             new StructType({}, {}, TypeQualifier::None,
                                                                             currentStruct->name(),
                                                                             currentStruct));
                     // A parameter reference is an lvalue.
@@ -1842,7 +1756,7 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                     auto refStructVariable = new RefStructMemberVariableExpr(identifierExpr->startPosition(),
                                                                              identifierExpr->endPosition(),
                                                                              refParam,
-                                                                             new StructType({}, {},
+                                                                             new StructType({}, {}, TypeQualifier::None,
                                                                                             foundGlobalVariable->parentStruct->name(),
                                                                                             foundGlobalVariable->parentStruct),
                                                                              foundGlobalVariable);
@@ -1868,13 +1782,13 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
                 }
 
                 // Ownership of this will be given to `RefStructMemberVariableExpr`. `RefParameterExpr` gets a copy.
-                StructType* structType = new StructType({}, {}, currentStruct->name(), currentStruct);
+                StructType* structType = new StructType({}, {}, TypeQualifier::None, currentStruct->name(), currentStruct);
 
                 // `this` is ALWAYS defined as parameter index `0` (when a function is a member of a struct/class, obviously `0` isn't `this` to namespace or file functions)
                 Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
                                                       identifierExpr->endPosition(),
                                                       0);
-                refParam->resultType = new ReferenceType({}, {}, structType->deepCopy());
+                refParam->resultType = new ReferenceType({}, {}, TypeQualifier::None, structType->deepCopy());
                 // A parameter reference is an lvalue.
                 refParam->resultType->setIsLValue(true);
                 // NOTE: We still make it a `ReferenceType` above then immediately dereference it here so we create the correct
@@ -2015,7 +1929,7 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         // TODO: the tempalte arguments need to be processed
         Expr* refFileFunc = new RefFunctionExpr(identifierExpr->startPosition(), identifierExpr->endPosition(),
                                                 foundFunction);
-        refFileFunc->resultType = new FunctionPointerType({}, {}, resultTypeCopy, paramTypeCopy);
+        refFileFunc->resultType = new FunctionPointerType({}, {}, TypeQualifier::None, resultTypeCopy, paramTypeCopy);
 
         delete identifierExpr;
 
@@ -2058,7 +1972,7 @@ void DeclResolver::processIndexerCallExpr(IndexerCallExpr *indexerCallExpr) {
 
 void DeclResolver::processIntegerLiteralExpr(IntegerLiteralExpr *integerLiteralExpr) {
     // TODO: Type suffix support
-    integerLiteralExpr->resultType = (new BuiltInType({}, {}, "int"));
+    integerLiteralExpr->resultType = (new BuiltInType({}, {}, TypeQualifier::None, "int"));
 }
 
 void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVariableDeclExpr, bool hasInitialValue) {
@@ -2168,7 +2082,7 @@ bool DeclResolver::attemptAccessStructMember(MemberAccessCallExpr* memberAccessC
     // TODO: Needs to be changed to `MemberVariableDecl`
     if (llvm::isa<GlobalVariableDecl>(checkMember)) {
         auto memberVariable = llvm::dyn_cast<GlobalVariableDecl>(checkMember);
-        auto accessAsStructType = new StructType({}, {}, checkMember->parentStruct->name(), checkMember->parentStruct);
+        auto accessAsStructType = new StructType({}, {}, TypeQualifier::None, checkMember->parentStruct->name(), checkMember->parentStruct);
 
         auto refStructVariable = new RefStructMemberVariableExpr(memberAccessCallExpr->startPosition(),
                                                                  memberAccessCallExpr->endPosition(),
@@ -2302,7 +2216,7 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
             auto refNamespaceFunction = new RefFunctionExpr(memberAccessCallExpr->startPosition(),
                                                             memberAccessCallExpr->endPosition(),
                                                             foundFunction);
-            refNamespaceFunction->resultType = new FunctionPointerType({}, {}, resultTypeCopy, paramTypeCopy);
+            refNamespaceFunction->resultType = new FunctionPointerType({}, {}, TypeQualifier::None, resultTypeCopy, paramTypeCopy);
 
             delete expr;
 
@@ -2353,7 +2267,7 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
                                    memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
                     }
 
-                    auto accessAsStructType = new StructType({}, {},
+                    auto accessAsStructType = new StructType({}, {}, TypeQualifier::None,
                                                              foundFunction->parentStruct->name(),
                                                              foundFunction->parentStruct);
                     Type* resultTypeCopy = foundFunction->resultType->deepCopy();
@@ -2370,7 +2284,7 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
                                                                              accessAsStructType,
                                                                              foundFunction);
                     // TODO: We should probably replace this with a `MemberFunctionPointerType` or something so the `this` parameter is apart of the type...
-                    refStructFunction->resultType = new FunctionPointerType({}, {}, resultTypeCopy, paramTypeCopy);
+                    refStructFunction->resultType = new FunctionPointerType({}, {}, TypeQualifier::None, resultTypeCopy, paramTypeCopy);
 
                     // We steal the object reference
                     memberAccessCallExpr->objectRef = nullptr;
@@ -2420,18 +2334,10 @@ void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorE
 
     gulc::Type* checkType = prefixOperatorExpr->expr->resultType;
 
-    if (llvm::isa<MutType>(checkType)) {
-        checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
-    } else if (llvm::isa<ConstType>(checkType)) {
-        checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
-    } else if (llvm::isa<ImmutType>(checkType)) {
-        checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
-    }
-
     // TODO: Support operator overloading type resolution
     // TODO: Support `sizeof`, `alignof`, `offsetof`, and `nameof`
     if (prefixOperatorExpr->operatorName() == "&") { // Address
-        prefixOperatorExpr->resultType = new PointerType({}, {}, prefixOperatorExpr->expr->resultType->deepCopy());
+        prefixOperatorExpr->resultType = new PointerType({}, {}, TypeQualifier::None, prefixOperatorExpr->expr->resultType->deepCopy());
     } else if (prefixOperatorExpr->operatorName() == "*") { // Dereference
         if (llvm::isa<PointerType>(checkType)) {
             auto pointerType = llvm::dyn_cast<PointerType>(checkType);
@@ -2451,7 +2357,7 @@ void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorE
             return;
         }
 
-        prefixOperatorExpr->resultType = new ReferenceType({}, {}, prefixOperatorExpr->expr->resultType->deepCopy());
+        prefixOperatorExpr->resultType = new ReferenceType({}, {}, TypeQualifier::None, prefixOperatorExpr->expr->resultType->deepCopy());
     } else if (prefixOperatorExpr->operatorName() == ".deref") {
         if (llvm::isa<ReferenceType>(checkType)) {
             auto referenceType = llvm::dyn_cast<ReferenceType>(checkType);
@@ -2473,7 +2379,7 @@ void DeclResolver::processResolvedTypeRefExpr(ResolvedTypeRefExpr *resolvedTypeR
 
 void DeclResolver::processStringLiteralExpr(StringLiteralExpr *stringLiteralExpr) {
     // TODO: Type suffix support
-    stringLiteralExpr->resultType = (new PointerType({}, {}, new BuiltInType({}, {}, "char")));
+    stringLiteralExpr->resultType = (new PointerType({}, {}, TypeQualifier::None, new BuiltInType({}, {}, TypeQualifier::None, "char")));
 }
 
 void DeclResolver::processTernaryExpr(TernaryExpr *ternaryExpr) {
@@ -2490,14 +2396,6 @@ void DeclResolver::processUnresolvedTypeRefExpr(Expr *&expr) {
 
 void DeclResolver::dereferenceReferences(Expr*& potentialReference) {
     Type* checkType = potentialReference->resultType;
-
-    if (llvm::isa<MutType>(checkType)) {
-        checkType = llvm::dyn_cast<MutType>(checkType)->pointToType;
-    } else if (llvm::isa<ConstType>(checkType)) {
-        checkType = llvm::dyn_cast<ConstType>(checkType)->pointToType;
-    } else if (llvm::isa<ImmutType>(checkType)) {
-        checkType = llvm::dyn_cast<ImmutType>(checkType)->pointToType;
-    }
 
     // For references we convert the reference using the prefix operator `.deref`
     if (llvm::isa<ReferenceType>(checkType)) {
@@ -2566,18 +2464,10 @@ unsigned int DeclResolver::applyTemplateTypeArguments(Type*& type) {
             // We add one so we can use `0` as a type of `null`
             return paramIndex + 1;
         }
-    } else if (llvm::isa<ConstType>(type)) {
-        return applyTemplateTypeArguments(llvm::dyn_cast<ConstType>(type)->pointToType);
-    } else if (llvm::isa<MutType>(type)) {
-        return applyTemplateTypeArguments(llvm::dyn_cast<MutType>(type)->pointToType);
-    } else if (llvm::isa<ImmutType>(type)) {
-        return applyTemplateTypeArguments(llvm::dyn_cast<ImmutType>(type)->pointToType);
     } else if (llvm::isa<PointerType>(type)) {
         return applyTemplateTypeArguments(llvm::dyn_cast<PointerType>(type)->pointToType);
     } else if (llvm::isa<ReferenceType>(type)) {
         return applyTemplateTypeArguments(llvm::dyn_cast<ReferenceType>(type)->referenceToType);
-    } else if (llvm::isa<RValueReferenceType>(type)) {
-        return applyTemplateTypeArguments(llvm::dyn_cast<RValueReferenceType>(type)->referenceToType);
     }
     // TODO: Whenever we support template types we need to also handle their argument types here...
     return 0;

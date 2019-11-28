@@ -13,32 +13,26 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_CONSTTYPE_HPP
-#define GULC_CONSTTYPE_HPP
+#ifndef GULC_SIZEOFHELPER_HPP
+#define GULC_SIZEOFHELPER_HPP
 
+#include <cstddef>
 #include <AST/Type.hpp>
+#include <Targets/Target.hpp>
 
 namespace gulc {
-    class ConstType : public Type {
+    struct SizeAndAlignment {
+        std::size_t size;
+        std::size_t align;
+
+        SizeAndAlignment(std::size_t size, std::size_t align) : size(size), align(align) {}
+    };
+
+    class SizeofHelper {
     public:
-        static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::Const; }
-
-        ConstType(TextPosition startPosition, TextPosition endPosition, Type* pointToType)
-                : Type(Kind::Const, startPosition, endPosition),
-                  pointToType(pointToType) {}
-
-        Type* pointToType;
-        std::string getString() const override { return pointToType->getString() + " const"; }
-
-        Type* deepCopy() const override {
-            return new ConstType(startPosition(), endPosition(), pointToType->deepCopy());
-        }
-
-        ~ConstType() override {
-            delete pointToType;
-        }
+        static SizeAndAlignment getSizeAndAlignmentOf(Target* target, Type* type);
 
     };
 }
 
-#endif //GULC_CONSTTYPE_HPP
+#endif //GULC_SIZEOFHELPER_HPP

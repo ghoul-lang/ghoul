@@ -14,9 +14,6 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <llvm/Support/Casting.h>
-#include <AST/Types/ConstType.hpp>
-#include <AST/Types/MutType.hpp>
-#include <AST/Types/ImmutType.hpp>
 #include <AST/Types/BuiltInType.hpp>
 #include <AST/Types/EnumType.hpp>
 #include <AST/Types/PointerType.hpp>
@@ -29,28 +26,18 @@
 
 using namespace gulc;
 
-// TODO: `ignoreQualifiers` should only ignore the first qualifiers...
-bool TypeComparer::getTypesAreSame(const Type* type1, const Type* type2, bool ignoreQualifiers) {
+bool TypeComparer::getTypesAreSame(const Type* type1, const Type* type2, bool ignoreFirstQualifier) {
+    if (!ignoreFirstQualifier) {
+        // This verifies that both are either const or both aren't const
+        // When we don't ignore the qualifiers we only care about const. In terms of checking if the types are the same,
+        // `None` == `Mut` but `None` != `Const` and `Mut` != `Const`
+        if ((type1->qualifier() == TypeQualifier::Const) != (type2->qualifier() == TypeQualifier::Const)) {
+            return false;
+        }
+    }
+
     if (type1->getTypeKind() == type2->getTypeKind()) {
         switch (type1->getTypeKind()) {
-            case Type::Kind::Const: {
-                auto constType1 = llvm::dyn_cast<ConstType>(type1);
-                auto constType2 = llvm::dyn_cast<ConstType>(type2);
-
-                return getTypesAreSame(constType1->pointToType, constType2->pointToType, ignoreQualifiers);
-            }
-            case Type::Kind::Mut: {
-                auto mutType1 = llvm::dyn_cast<MutType>(type1);
-                auto mutType2 = llvm::dyn_cast<MutType>(type2);
-
-                return getTypesAreSame(mutType1->pointToType, mutType2->pointToType, ignoreQualifiers);
-            }
-            case Type::Kind::Immut: {
-                auto immutType1 = llvm::dyn_cast<ImmutType>(type1);
-                auto immutType2 = llvm::dyn_cast<ImmutType>(type2);
-
-                return getTypesAreSame(immutType1->pointToType, immutType2->pointToType, ignoreQualifiers);
-            }
             case Type::Kind::BuiltIn: {
                 auto builtInType1 = llvm::dyn_cast<BuiltInType>(type1);
                 auto builtInType2 = llvm::dyn_cast<BuiltInType>(type2);
@@ -80,19 +67,19 @@ bool TypeComparer::getTypesAreSame(const Type* type1, const Type* type2, bool ig
                 auto pointerType1 = llvm::dyn_cast<PointerType>(type1);
                 auto pointerType2 = llvm::dyn_cast<PointerType>(type2);
 
-                return getTypesAreSame(pointerType1->pointToType, pointerType2->pointToType, ignoreQualifiers);
+                return getTypesAreSame(pointerType1->pointToType, pointerType2->pointToType, false);
             }
             case Type::Kind::Reference: {
                 auto refType1 = llvm::dyn_cast<ReferenceType>(type1);
                 auto refType2 = llvm::dyn_cast<ReferenceType>(type2);
 
-                return getTypesAreSame(refType1->referenceToType, refType2->referenceToType, ignoreQualifiers);
+                return getTypesAreSame(refType1->referenceToType, refType2->referenceToType, false);
             }
             case Type::Kind::FunctionPointer: {
                 auto funcPointerType1 = llvm::dyn_cast<FunctionPointerType>(type1);
                 auto funcPointerType2 = llvm::dyn_cast<FunctionPointerType>(type2);
 
-                if (!getTypesAreSame(funcPointerType1->resultType, funcPointerType2->resultType, ignoreQualifiers)) {
+                if (!getTypesAreSame(funcPointerType1->resultType, funcPointerType2->resultType, false)) {
                     return false;
                 }
 
@@ -102,7 +89,7 @@ bool TypeComparer::getTypesAreSame(const Type* type1, const Type* type2, bool ig
 
                 if (!funcPointerType1->paramTypes.empty()) {
                     for (std::size_t i = 0; i < funcPointerType1->paramTypes.size(); ++i) {
-                        if (!getTypesAreSame(funcPointerType1->paramTypes[i], funcPointerType2->paramTypes[i], ignoreQualifiers)) {
+                        if (!getTypesAreSame(funcPointerType1->paramTypes[i], funcPointerType2->paramTypes[i], false)) {
                             return false;
                         }
                     }
@@ -117,34 +104,6 @@ bool TypeComparer::getTypesAreSame(const Type* type1, const Type* type2, bool ig
                 std::cout << "gulc qualify type pass [DEBUG WARNING]: attempted to compare two 'UnresolvedType's, operation cannot be completed. Defaulting to false." << std::endl;
                 return false;
             }
-        }
-    } else if (ignoreQualifiers) { // Types are not the same...
-        bool typeChanged = false;
-
-        if (llvm::isa<MutType>(type1)) {
-            type1 = llvm::dyn_cast<MutType>(type1)->pointToType;
-            typeChanged = true;
-        } else if (llvm::isa<ConstType>(type1)) {
-            type1 = llvm::dyn_cast<ConstType>(type1)->pointToType;
-            typeChanged = true;
-        } else if (llvm::isa<ImmutType>(type1)) {
-            type1 = llvm::dyn_cast<ImmutType>(type1)->pointToType;
-            typeChanged = true;
-        }
-
-        if (llvm::isa<MutType>(type2)) {
-            type2 = llvm::dyn_cast<MutType>(type2)->pointToType;
-            typeChanged = true;
-        } else if (llvm::isa<ConstType>(type2)) {
-            type2 = llvm::dyn_cast<ConstType>(type2)->pointToType;
-            typeChanged = true;
-        } else if (llvm::isa<ImmutType>(type2)) {
-            type2 = llvm::dyn_cast<ImmutType>(type2)->pointToType;
-            typeChanged = true;
-        }
-
-        if (typeChanged) {
-            return getTypesAreSame(type1, type2, ignoreQualifiers);
         }
     }
 

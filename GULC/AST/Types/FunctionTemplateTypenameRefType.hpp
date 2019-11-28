@@ -24,9 +24,9 @@ namespace gulc {
     public:
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::FunctionTemplateTypenameRef; }
 
-        FunctionTemplateTypenameRefType(TextPosition startPosition, TextPosition endPosition,
+        FunctionTemplateTypenameRefType(TextPosition startPosition, TextPosition endPosition, TypeQualifier qualifier,
                                         std::size_t templateParameterIndex)
-                : Type(Kind::FunctionTemplateTypenameRef, startPosition, endPosition),
+                : Type(Kind::FunctionTemplateTypenameRef, startPosition, endPosition, qualifier),
                   _templateParameterIndex(templateParameterIndex) {}
 
         std::size_t templateParameterIndex() const { return _templateParameterIndex; }
@@ -34,6 +34,7 @@ namespace gulc {
 
         Type* deepCopy() const override {
             return new FunctionTemplateTypenameRefType(startPosition(), endPosition(),
+                                                       qualifier(),
                                                        _templateParameterIndex);
         }
 

@@ -71,7 +71,6 @@ namespace gulc {
 		STATIC, // 'static'
 		CONST, // 'const'
 		MUT, // `mut`
-		IMMUT, // `immut`
 		EXTERN, // 'extern'
 		VOLATILE, // 'volatile'
 		ABSTRACT, // 'abstract'

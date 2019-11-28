@@ -17,10 +17,6 @@
 #include <AST/Types/PointerType.hpp>
 #include <AST/Types/BuiltInType.hpp>
 #include <AST/Types/ReferenceType.hpp>
-#include <AST/Types/ConstType.hpp>
-#include <AST/Types/ImmutType.hpp>
-#include <AST/Types/MutType.hpp>
-#include <AST/Types/RValueReferenceType.hpp>
 #include <ASTHelpers/TypeComparer.hpp>
 #include <AST/Types/UnresolvedType.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
@@ -52,13 +48,6 @@ bool CodeVerifier::canCastType(Type* to, Type* from, bool isExplicit) {
 
             // We can only cast from a built in type to a pointer type if the built in type is NOT floating...
             return !fromBuiltIn->isFloating();
-        // NOTE: We allow casting from const and mut to unqualified but `immut` has to stay `immut` (TODO: Should we allow removing the immut qualifier?)
-        } else if (llvm::isa<ConstType>(from)) {
-            auto fromConst = llvm::dyn_cast<ConstType>(from);
-            return canCastType(to, fromConst->pointToType, isExplicit);
-        } else if (llvm::isa<MutType>(from)) {
-            auto fromMut = llvm::dyn_cast<MutType>(from);
-            return canCastType(to, fromMut->pointToType, isExplicit);
         } else {
             return false;
         }
@@ -113,13 +102,6 @@ bool CodeVerifier::canCastType(Type* to, Type* from, bool isExplicit) {
             // Cannot cast from pointer to floating or to signed (this is to prevent potential issues with how signed numbers are treated)
             // Though, nothing is stopping someone from casting like: `(double)(ulong)&ptr`
             return !(toBuiltIn->isFloating() || toBuiltIn->isSigned());
-        // NOTE: We allow casting from const and mut to unqualified but `immut` has to stay `immut` (TODO: Should we allow removing the immut qualifier?)
-        } else if (llvm::isa<ConstType>(from)) {
-            auto constFrom = llvm::dyn_cast<ConstType>(from);
-            return canCastType(to, constFrom->pointToType, isExplicit);
-        } else if (llvm::isa<MutType>(from)) {
-            auto mutFrom = llvm::dyn_cast<MutType>(from);
-            return canCastType(to, mutFrom->pointToType, isExplicit);
         }
     } else if (llvm::isa<ReferenceType>(to)) {
         if (llvm::isa<ReferenceType>(from)) {
@@ -130,48 +112,6 @@ bool CodeVerifier::canCastType(Type* to, Type* from, bool isExplicit) {
         } else {
             return false;
         }
-    } else if (llvm::isa<ConstType>(to)) {
-        auto toConst = llvm::dyn_cast<ConstType>(to);
-        Type* fromCheckType = from;
-
-        // We don't allow changing immut to const
-        if (llvm::isa<ConstType>(from)) {
-            auto fromConst = llvm::dyn_cast<ConstType>(from);
-            fromCheckType = fromConst->pointToType;
-        } else if (llvm::isa<MutType>(from)) {
-            auto fromMut = llvm::dyn_cast<MutType>(from);
-            fromCheckType = fromMut->pointToType;
-        }
-
-        return canCastType(toConst->pointToType, fromCheckType, isExplicit);
-    } else if (llvm::isa<MutType>(to)) {
-        auto toMut = llvm::dyn_cast<MutType>(to);
-        Type* fromCheckType = from;
-
-        // We don't allow changing const or immut to mut (TODO: We need to check if from is a reference, references are const by default and cannot be changed to mut)
-        if (llvm::isa<MutType>(from)) {
-            auto fromMut = llvm::dyn_cast<MutType>(from);
-            fromCheckType = fromMut->pointToType;
-        }
-
-        return canCastType(toMut->pointToType, fromCheckType, isExplicit);
-    } else if (llvm::isa<ImmutType>(to)) {
-        auto toImmut = llvm::dyn_cast<ImmutType>(to);
-        Type* fromCheckType = from;
-
-        // We allow anything to be converted to immut, NOTE: this is different than immut in D
-        if (llvm::isa<ImmutType>(from)) {
-            auto fromImmut = llvm::dyn_cast<ImmutType>(from);
-            fromCheckType = fromImmut->pointToType;
-        } else if (llvm::isa<ConstType>(from)) {
-            auto fromConst = llvm::dyn_cast<ConstType>(from);
-            fromCheckType = fromConst->pointToType;
-        } else if (llvm::isa<MutType>(from)) {
-            auto fromMut = llvm::dyn_cast<MutType>(from);
-            fromCheckType = fromMut->pointToType;
-        }
-
-        return canCastType(toImmut->pointToType, fromCheckType, isExplicit);
     }
 
     return false;
@@ -179,7 +119,7 @@ bool CodeVerifier::canCastType(Type* to, Type* from, bool isExplicit) {
 
 bool CodeVerifier::typeIsAssignable(Type* checkType) {
     // TODO: We should make something like `isLValue` or `isRValue` a member of `Type` so we can detect assignability with that as well...
-    return !(llvm::isa<ConstType>(checkType) || llvm::isa<ImmutType>(checkType));
+    return checkType->qualifier() != TypeQualifier::Const;
 }
 
 void CodeVerifier::printError(const std::string &message, TextPosition startPosition, TextPosition endPosition) {
@@ -623,15 +563,8 @@ void CodeVerifier::verifyBinaryOperatorExpr(Expr *&expr) {
         } else {
             // If the left value of the assignment isn't a local variable declaration then we check for assignability...
             if (!typeIsAssignable(binaryOperatorExpr->leftValue->resultType)) {
-                if (llvm::isa<ConstType>(binaryOperatorExpr->leftValue->resultType)) {
+                if (binaryOperatorExpr->leftValue->resultType->qualifier() == TypeQualifier::Const) {
                     printError("cannot assign to const-qualified left value!",
-                               binaryOperatorExpr->leftValue->startPosition(),
-                               binaryOperatorExpr->leftValue->endPosition());
-                    return;
-                }
-
-                if (llvm::isa<ImmutType>(binaryOperatorExpr->leftValue->resultType)) {
-                    printError("cannot assign to immut-qualified left value!",
                                binaryOperatorExpr->leftValue->startPosition(),
                                binaryOperatorExpr->leftValue->endPosition());
                     return;
@@ -938,14 +871,7 @@ bool CodeVerifier::checkParamsAreSame(std::vector<ParameterDecl *> &params1, std
             // A function that has a reference type is called exactly the same way as a function without a reference type
             //  because of this we treat reference parameters exactly the same as non-reference parameters
             if (llvm::isa<ReferenceType>(paramType1)) paramType1 = llvm::dyn_cast<ReferenceType>(paramType1)->referenceToType;
-            if (llvm::isa<RValueReferenceType>(paramType1)) paramType1 = llvm::dyn_cast<RValueReferenceType>(paramType1)->referenceToType;
             if (llvm::isa<ReferenceType>(paramType2)) paramType2 = llvm::dyn_cast<ReferenceType>(paramType2)->referenceToType;
-            if (llvm::isa<RValueReferenceType>(paramType2)) paramType2 = llvm::dyn_cast<RValueReferenceType>(paramType2)->referenceToType;
-
-
-            // All parameters are const by default, so we ignore the const qualifier...
-            if (llvm::isa<ConstType>(paramType1)) paramType1 = llvm::dyn_cast<ConstType>(paramType1)->pointToType;
-            if (llvm::isa<ConstType>(paramType2)) paramType2 = llvm::dyn_cast<ConstType>(paramType2)->pointToType;
 
             if (!TypeComparer::getTypesAreSame(paramType1, paramType2)) {
                 return false;

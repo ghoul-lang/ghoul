@@ -21,7 +21,7 @@
 namespace gulc {
     class TypeComparer {
     public:
-        static bool getTypesAreSame(const Type* type1, const Type* type2, bool ignoreQualifiers = false);
+        static bool getTypesAreSame(const Type* type1, const Type* type2, bool ignoreFirstQualifier = false);
 
     };
 }

@@ -25,10 +25,13 @@
 #include <Passes/NamespacePrototyper.hpp>
 #include <Passes/Lifetimes.hpp>
 #include <Passes/Inheriter.hpp>
+#include <Targets/Target.hpp>
 
 using namespace gulc;
 
 int main() {
+    Target target = Target::getHostTarget();
+
     std::vector<std::string> inputFiles = {
             "Examples/TestFile1.gul",
             "Examples/TestFile2.gul"
@@ -47,15 +50,15 @@ int main() {
     std::vector<NamespaceDecl*> prototypes = namespacePrototyper.generatePrototypes(parsedFiles);
 
     // Resolve types
-    TypeResolver typeResolver(prototypes);
+    TypeResolver typeResolver(&target, prototypes);
     typeResolver.processFile(parsedFiles);
 
     // Resolve inherited members
-    Inheriter inheriter;
+    Inheriter inheriter(&target);
     inheriter.processFile(parsedFiles);
 
     // Resolve declarations
-    DeclResolver declResolver;
+    DeclResolver declResolver(&target);
     declResolver.processFile(parsedFiles);
 
     Lifetimes lifetimes;
@@ -69,6 +72,9 @@ int main() {
     std::vector<ObjFile> objFiles;
     objFiles.reserve(parsedFiles.size());
 
+    ObjGen::init();
+    ObjGen objGen = ObjGen();
+
     // The last three stages can be threaded at some point. No modifications should be made after this point so it should be okay to thread
     for (FileAST* fileAst : parsedFiles) {
         // Translate operations and verify operations can be performed
@@ -76,12 +82,10 @@ int main() {
         codeVerifier.verifyFile(fileAst);
 
         // Generate the LLVM IR
-        CodeGen codeGen = CodeGen();
+        CodeGen codeGen = CodeGen(&target);
         gulc::Module module = codeGen.generate(fileAst);
 
         // Generate the object files
-        ObjGen::init();
-        ObjGen objGen = ObjGen();
         objFiles.push_back(objGen.generate(module));
     }
 

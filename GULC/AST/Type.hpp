@@ -20,6 +20,12 @@
 #include <string>
 
 namespace gulc {
+    enum class TypeQualifier {
+        None,
+        Mut,
+        Const
+    };
+
     class Type {
     public:
         enum class Kind {
@@ -29,15 +35,14 @@ namespace gulc {
             BuiltIn,
             Pointer,
             FunctionPointer,
-            Const,
-            Mut,
-            Immut,
             Reference,
-            RValueReference,
             Enum,
-            Struct
+            Struct,
+            FlatArray
         };
 
+        TypeQualifier qualifier() const { return _qualifier; }
+        void setQualifier(TypeQualifier qualifier) { _qualifier = qualifier; }
         Kind getTypeKind() const { return _kind; }
         TextPosition startPosition() const { return _startPosition; }
         TextPosition endPosition() const { return _endPosition; }
@@ -51,10 +56,12 @@ namespace gulc {
         virtual ~Type() = default;
 
     protected:
-        Type(Kind kind, TextPosition startPosition, TextPosition endPosition)
-                : _kind(kind), _startPosition(startPosition), _endPosition(endPosition), _isLValue(false) {}
+        Type(Kind kind, TextPosition startPosition, TextPosition endPosition, TypeQualifier qualifier)
+                : _qualifier(qualifier), _kind(kind), _startPosition(startPosition), _endPosition(endPosition),
+                  _isLValue(false) {}
 
     private:
+        TypeQualifier _qualifier;
         const Kind _kind;
         const TextPosition _startPosition;
         const TextPosition _endPosition;

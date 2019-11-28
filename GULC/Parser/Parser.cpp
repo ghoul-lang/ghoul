@@ -35,13 +35,9 @@
 #include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
 #include <AST/Stmts/LabeledStmt.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
-#include <AST/Types/ConstType.hpp>
-#include <AST/Types/MutType.hpp>
-#include <AST/Types/ImmutType.hpp>
 #include <AST/Exprs/LocalVariableDeclExpr.hpp>
 #include <AST/Types/PointerType.hpp>
 #include <AST/Types/ReferenceType.hpp>
-#include <AST/Types/RValueReferenceType.hpp>
 #include <AST/Decls/GlobalVariableDecl.hpp>
 #include <AST/Decls/EnumConstantDecl.hpp>
 #include <AST/Decls/EnumDecl.hpp>
@@ -343,8 +339,7 @@ Decl *Parser::parseTopLevelDecl() {
                 break;
             case TokenType::CONST:
             case TokenType::MUT:
-            case TokenType::IMMUT:
-                // We break from the loop if the token is `const`, `mut`, or `immut`
+                // We break from the loop if the token is `const` or `mut`
                 goto qualifierFound;
             default:
                 printError("unknown qualifier '" + peekedToken.currentSymbol + "'!",
@@ -595,7 +590,6 @@ qualifierFound:
         }
         case TokenType::CONST:
         case TokenType::MUT:
-        case TokenType::IMMUT:
         case TokenType::SYMBOL: {
             Type* resultType = parseType();
 
@@ -933,61 +927,53 @@ Type* Parser::parseType(bool parseSuffix) {
         case TokenType::CONST: {
             _lexer.consumeType(TokenType::CONST);
 
-            Type* nestedType;
-
             if (_lexer.peekType() == TokenType::LPAREN) {
                 // Type constructor?...
                 _lexer.consumeType(TokenType::LPAREN);
-                nestedType = parseType();
+                result = parseType();
                 if (!_lexer.consumeType(TokenType::RPAREN)) {
                     printError("expected closing ')' to `const` type constructor!",
                                _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                 }
             } else {
-                nestedType = parseType(false);
+                result = parseType(false);
             }
 
-            result = new ConstType(peekedToken.startPosition, peekedToken.endPosition, nestedType);
+            if (result->qualifier() == TypeQualifier::Const) {
+                printWarning("duplicate `const` qualifier not needed!",
+                             result->startPosition(), result->endPosition());
+            } else if (result->qualifier() == TypeQualifier::Mut) {
+                printError("using `mut` and `const` at the same time is not allowed!",
+                           result->startPosition(), result->endPosition());
+            }
+
+            result->setQualifier(TypeQualifier::Const);
             break;
         }
         case TokenType::MUT: {
             _lexer.consumeType(TokenType::MUT);
 
-            Type* nestedType;
-
             if (_lexer.peekType() == TokenType::LPAREN) {
                 // Type constructor?...
                 _lexer.consumeType(TokenType::LPAREN);
-                nestedType = parseType();
+                result = parseType();
                 if (!_lexer.consumeType(TokenType::RPAREN)) {
                     printError("expected closing ')' to `const` type constructor!",
                                _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                 }
             } else {
-                nestedType = parseType(false);
+                result = parseType(false);
             }
 
-            result = new MutType(peekedToken.startPosition, peekedToken.endPosition, nestedType);
-            break;
-        }
-        case TokenType::IMMUT: {
-            _lexer.consumeType(TokenType::MUT);
-
-            Type* nestedType;
-
-            if (_lexer.peekType() == TokenType::LPAREN) {
-                // Type constructor?...
-                _lexer.consumeType(TokenType::LPAREN);
-                nestedType = parseType();
-                if (!_lexer.consumeType(TokenType::RPAREN)) {
-                    printError("expected closing ')' to `const` type constructor!",
-                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
-                }
-            } else {
-                nestedType = parseType(false);
+            if (result->qualifier() == TypeQualifier::Const) {
+                printError("using `mut` and `const` at the same time is not allowed!",
+                           result->startPosition(), result->endPosition());
+            } else if (result->qualifier() == TypeQualifier::Mut) {
+                printWarning("duplicate `mut` qualifier not needed!",
+                             result->startPosition(), result->endPosition());
             }
 
-            result = new ImmutType(peekedToken.startPosition, peekedToken.endPosition, nestedType);
+            result->setQualifier(TypeQualifier::Mut);
             break;
         }
         case TokenType::SYMBOL: {
@@ -1036,7 +1022,7 @@ Type* Parser::parseType(bool parseSuffix) {
                 _lexer.setRightShiftState(oldRightShiftEnabledValue);
             }
 
-            result = new UnresolvedType(peekedToken.startPosition, peekedToken. endPosition,
+            result = new UnresolvedType(peekedToken.startPosition, peekedToken. endPosition, TypeQualifier::None,
                                         std::move(namespacePath), typeName, templateArguments);
             break;
         }
@@ -1061,7 +1047,6 @@ Type* Parser::parseTypeSuffix(Type* type) {
          peekedToken.tokenType != TokenType::ENDOFFILE &&
          (peekedToken.tokenType == TokenType::CONST ||
           peekedToken.tokenType == TokenType::MUT ||
-          peekedToken.tokenType == TokenType::IMMUT ||
           peekedToken.tokenType == TokenType::STAR ||
           peekedToken.tokenType == TokenType::AMPERSAND ||
           peekedToken.tokenType == TokenType::CARET ||
@@ -1071,27 +1056,39 @@ Type* Parser::parseTypeSuffix(Type* type) {
         switch (peekedToken.tokenType) {
             case TokenType::CONST:
                 _lexer.consumeType(TokenType::CONST);
-                result = new ConstType(peekedToken.startPosition, peekedToken.endPosition, result);
+
+                if (result->qualifier() == TypeQualifier::Const) {
+                    printWarning("duplicate `const` qualifier not needed!",
+                                 result->startPosition(), result->endPosition());
+                } else if (result->qualifier() == TypeQualifier::Mut) {
+                    printError("using `mut` and `const` at the same time is not allowed!",
+                               result->startPosition(), result->endPosition());
+                }
+
+                result->setQualifier(TypeQualifier::Const);
                 break;
             case TokenType::MUT:
                 _lexer.consumeType(TokenType::MUT);
-                result = new MutType(peekedToken.startPosition, peekedToken.endPosition, result);
-                break;
-            case TokenType::IMMUT:
-                _lexer.consumeType(TokenType::IMMUT);
-                result = new ImmutType(peekedToken.startPosition, peekedToken.endPosition, result);
+
+                if (result->qualifier() == TypeQualifier::Const) {
+                    printError("using `mut` and `const` at the same time is not allowed!",
+                               result->startPosition(), result->endPosition());
+                } else if (result->qualifier() == TypeQualifier::Mut) {
+                    printWarning("duplicate `mut` qualifier not needed!",
+                                 result->startPosition(), result->endPosition());
+                }
+
+                result->setQualifier(TypeQualifier::Mut);
                 break;
             case TokenType::STAR:
                 _lexer.consumeType(TokenType::STAR);
-                result = new PointerType(peekedToken.startPosition, peekedToken.endPosition, result);
+                result = new PointerType(peekedToken.startPosition, peekedToken.endPosition, TypeQualifier::None,
+                                         result);
                 break;
             case TokenType::AMPERSAND:
                 _lexer.consumeType(TokenType::AMPERSAND);
-                result = new ReferenceType(peekedToken.startPosition, peekedToken.endPosition, result);
-                break;
-            case TokenType::AMPERSANDAMPERSAND:
-                _lexer.consumeType(TokenType::AMPERSANDAMPERSAND);
-                result = new RValueReferenceType(peekedToken.startPosition, peekedToken.endPosition, result);
+                result = new ReferenceType(peekedToken.startPosition, peekedToken.endPosition, TypeQualifier::None,
+                                           result);
                 break;
             default:
                 printError("custom type suffixes not yet supported!", peekedToken.startPosition,
@@ -2593,7 +2590,7 @@ Expr *Parser::parseVariableLiteralOrParen(bool isStatement, bool templateTypingA
 
             // TODO: Support `&`, `^`, `%`, `$`, `?'
             // For this point what we do is: if there is a `*` after the symbol we check the token after the `*` to
-            //  see if it is another `*`, `)` (for casting), `>` (for templates)`, `mut`, `const`, `immut`, etc.
+            //  see if it is another `*`, `)` (for casting), `>` (for templates)`, `mut`, `const`, etc.
             // If there is one of the above Tokens then we parse the type suffix and the check for a symbol after the
             //  type for local variable declarations
             if (isStatement && _lexer.peekType() == TokenType::STAR) {
@@ -2605,14 +2602,13 @@ Expr *Parser::parseVariableLiteralOrParen(bool isStatement, bool templateTypingA
                     _lexer.peekType() == TokenType::RPAREN ||
                     _lexer.peekType() == TokenType::TEMPLATEEND ||
                     _lexer.peekType() == TokenType::MUT ||
-                    _lexer.peekType() == TokenType::IMMUT ||
                     _lexer.peekType() == TokenType::CONST) {
-                    auto unresolvedType = new UnresolvedType(result->startPosition(), result->endPosition(),
+                    auto unresolvedType = new UnresolvedType(result->startPosition(), result->endPosition(), TypeQualifier::None,
                                                              {}, result->name(), std::move(result->templateArguments));
                     delete result;
 
                     auto unresolvedPointerType = new PointerType(unresolvedType->startPosition(),
-                                                                 unresolvedType->endPosition(),
+                                                                 unresolvedType->endPosition(), TypeQualifier::None,
                                                                  unresolvedType);
 
                     Expr* potentialResult =  new UnresolvedTypeRefExpr(unresolvedPointerType->startPosition(),
@@ -2636,9 +2632,8 @@ Expr *Parser::parseVariableLiteralOrParen(bool isStatement, bool templateTypingA
             }
 
             if (_lexer.peekType() == TokenType::MUT ||
-                _lexer.peekType() == TokenType::IMMUT ||
                 _lexer.peekType() == TokenType::CONST) {
-                auto unresolvedType = new UnresolvedType(result->startPosition(), result->endPosition(),
+                auto unresolvedType = new UnresolvedType(result->startPosition(), result->endPosition(), TypeQualifier::None,
                                                          {}, result->name(), std::move(result->templateArguments));
 
                 delete result;
@@ -2672,7 +2667,6 @@ Expr *Parser::parseVariableLiteralOrParen(bool isStatement, bool templateTypingA
             return new CharacterLiteralExpr(startPosition, endPosition, characterValue);
         }
         case TokenType::MUT:
-        case TokenType::IMMUT:
         case TokenType::CONST: {
             // NOTE: We parse the type without parsing the type suffix (`*`, `&`, etc.) because this is adopted from C.
             // In C `const int *` is `const(int)*` or `int const*` NOT `const(int*)` or `int *const`

@@ -25,13 +25,13 @@ namespace gulc {
     public:
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::Enum; }
 
-        EnumType(TextPosition startPosition, TextPosition endPosition,
+        EnumType(TextPosition startPosition, TextPosition endPosition, TypeQualifier qualifier,
                  std::string name, Type* baseType, EnumDecl* decl)
-                : EnumType(startPosition, endPosition, std::move(name), baseType, decl, nullptr) {}
+                : EnumType(startPosition, endPosition, qualifier, std::move(name), baseType, decl, nullptr) {}
 
-        EnumType(TextPosition startPosition, TextPosition endPosition,
+        EnumType(TextPosition startPosition, TextPosition endPosition, TypeQualifier qualifier,
                  std::string name, Type* baseType, EnumDecl* decl, NamespaceDecl* owningPrototype)
-                : Type(Kind::Enum, startPosition, endPosition),
+                : Type(Kind::Enum, startPosition, endPosition, qualifier),
                   _name(std::move(name)), _baseType(baseType), _decl(decl), _owningPrototype(owningPrototype) {}
 
         std::string name() const { return _name; }
@@ -43,7 +43,7 @@ namespace gulc {
         NamespaceDecl* owningPrototype() const { return _owningPrototype; }
 
         Type* deepCopy() const override {
-            return new EnumType(startPosition(), endPosition(), _name,
+            return new EnumType(startPosition(), endPosition(), qualifier(), _name,
                                 _baseType->deepCopy(), _decl, _owningPrototype);
         }
 

@@ -49,6 +49,7 @@
 #include <AST/Decls/NamespaceDecl.hpp>
 #include <AST/Decls/TemplateFunctionDecl.hpp>
 #include <AST/Decls/StructDecl.hpp>
+#include <Targets/Target.hpp>
 
 namespace gulc {
     /**
@@ -57,10 +58,14 @@ namespace gulc {
      * we resolve anything else.
      */
     class TypeResolver {
+    private:
+        Target* _target;
+
     public:
-        explicit TypeResolver(std::vector<NamespaceDecl*>& namespacePrototypes)
-                : _namespacePrototypes(namespacePrototypes), currentFileAst(nullptr), currentImports(nullptr),
-                  functionTemplateParams(nullptr), currentNamespace(nullptr) {}
+        explicit TypeResolver(Target* target, std::vector<NamespaceDecl*>& namespacePrototypes)
+                : _target(target), _namespacePrototypes(namespacePrototypes), currentFileAst(nullptr),
+                  currentImports(nullptr), functionTemplateParams(nullptr), currentNamespace(nullptr),
+                  currentStruct(nullptr) {}
 
         void processFile(std::vector<FileAST*>& files);
 

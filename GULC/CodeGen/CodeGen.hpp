@@ -57,14 +57,19 @@
 #include <AST/Exprs/DestructMemberVariableExpr.hpp>
 #include <AST/Exprs/BaseDestructorCallExpr.hpp>
 #include <AST/Exprs/RefBaseExpr.hpp>
+#include <Targets/Target.hpp>
+#include <ASTHelpers/SizeofHelper.hpp>
 #include "Module.hpp"
 
 namespace gulc {
     class CodeGen {
+    private:
+        Target* genTarget;
+
     public:
-        CodeGen()
-                : currentFileAst(nullptr), currentStruct(nullptr), currentNamespace(nullptr), llvmContext(nullptr),
-                  irBuilder(nullptr), module(nullptr), funcPass(nullptr),
+        CodeGen(Target* genTarget)
+                : genTarget(genTarget), currentFileAst(nullptr), currentStruct(nullptr), currentNamespace(nullptr),
+                  llvmContext(nullptr), irBuilder(nullptr), module(nullptr), funcPass(nullptr),
                   loopNameNumber(0),
                   currentFunction(nullptr), currentFunctionParameters(), entryBlockBuilder(nullptr),
                   currentFunctionLabels(), currentFunctionLocalVariablesCount(0),  currentFunctionLocalVariables(),
@@ -170,7 +175,7 @@ namespace gulc {
         std::vector<llvm::BasicBlock*> nestedLoopContinues;
         std::vector<llvm::BasicBlock*> nestedLoopBreaks;
 
-        std::map<const StructDecl*, llvm::StructType*> llvmStructTypes;
+        std::map<std::string, llvm::StructType*> llvmStructTypes;
 
         bool currentFunctionLabelsContains(const std::string& labelName) {
             return currentFunctionLabels.find(labelName) != currentFunctionLabels.end();
@@ -271,24 +276,63 @@ namespace gulc {
             return nullptr;
         }
 
-        llvm::StructType* getLlvmStructType(const StructDecl* structDecl) {
-            if (llvmStructTypes.find(structDecl) != llvmStructTypes.end()) {
-                return llvmStructTypes[structDecl];
+        llvm::StructType* getLlvmStructType(const StructDecl* structDecl, bool unpadded = false) {
+            if (unpadded && llvmStructTypes.find(structDecl->mangledName() + ".unpadded") != llvmStructTypes.end()) {
+                return llvmStructTypes[structDecl->mangledName() + ".unpadded"];
+            } else if (!unpadded && llvmStructTypes.find(structDecl->mangledName()) != llvmStructTypes.end()) {
+                return llvmStructTypes[structDecl->mangledName()];
             } else {
+                // TODO: Support `[packed]` attribute...
                 std::vector<llvm::Type*> elements;
+                std::vector<llvm::Type*> elementsPadded;
 
                 if (structDecl->baseStruct != nullptr) {
-                    elements.push_back(getLlvmStructType(structDecl->baseStruct));
+                    llvm::Type* baseType = getLlvmStructType(structDecl->baseStruct, true);
+
+                    elements.push_back(baseType);
+                    elementsPadded.push_back(baseType);
                 }
 
                 for (GlobalVariableDecl* dataMember : structDecl->dataMembers) {
-                    elements.push_back(generateLlvmType(dataMember->type));
+                    llvm::Type* memberType = generateLlvmType(dataMember->type);
+
+                    elements.push_back(memberType);
+                    elementsPadded.push_back(memberType);
                 }
 
-                // TODO: Support `[packed]` attribute...
-                auto result = llvm::StructType::create(*llvmContext, elements, structDecl->name(), false);
-                llvmStructTypes.insert({structDecl, result});
-                return result;
+                std::size_t structAlign = genTarget->alignofStruct();
+                std::size_t alignPadding = 0;
+
+                // `align` can't be zero, `n % 0` is illegal since `n / 0` is illegal
+                if (structAlign != 0) {
+                    alignPadding = structAlign - (structDecl->completeSizeWithoutPad % structAlign);
+
+                    // Rather than deal with casting to a signed type and rearrange the above algorithm to prevent
+                    // this from happening, we just check if the `alignPadding` is equal to the `align` and set
+                    // `alignPadding` to zero if it happens
+                    if (alignPadding == structAlign) {
+                        alignPadding = 0;
+                    }
+                }
+
+                // If the `alignPadding` isn't zero then we pad the end of the struct
+                if (alignPadding > 0) {
+                    elementsPadded.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(*llvmContext),
+                                                                  alignPadding));
+                }
+
+                auto result = llvm::StructType::create(*llvmContext, elements,
+                                                       structDecl->name() + ".unpadded", true);
+                auto resultPadded = llvm::StructType::create(*llvmContext, elementsPadded, structDecl->name(),
+                                                             true);
+                llvmStructTypes.insert({structDecl->mangledName() + ".unpadded", result});
+                llvmStructTypes.insert({structDecl->mangledName(), resultPadded});
+
+                if (unpadded) {
+                    return result;
+                } else {
+                    return resultPadded;
+                }
             }
         }
 

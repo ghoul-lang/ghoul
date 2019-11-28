@@ -13,4 +13,29 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#include "MutType.hpp"
+#ifndef GULC_MAKE_REVERSE_ITERATOR_HPP
+#define GULC_MAKE_REVERSE_ITERATOR_HPP
+
+namespace gulc {
+    template<typename T>
+    struct reverse_iterator_wrapper {
+        T& _iterator;
+
+        auto begin() {
+            return _iterator.rbegin();
+        }
+
+        auto end() {
+            return _iterator.rend();
+        }
+    };
+
+    template<typename T>
+    reverse_iterator_wrapper<T> reverse(T&& iterator) {
+        return reverse_iterator_wrapper<T> {
+                iterator
+        };
+    }
+}
+
+#endif //GULC_MAKE_REVERSE_ITERATOR_HPP

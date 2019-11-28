@@ -23,8 +23,9 @@ namespace gulc {
     public:
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::Reference; }
 
-        ReferenceType(TextPosition startPosition, TextPosition endPosition, Type* referenceToType)
-                : Type(Kind::Reference, startPosition, endPosition), referenceToType(referenceToType) {
+        ReferenceType(TextPosition startPosition, TextPosition endPosition, TypeQualifier qualifier,
+                      Type* referenceToType)
+                : Type(Kind::Reference, startPosition, endPosition, qualifier), referenceToType(referenceToType) {
             // `ReferenceType` is an lvalue by default.
             setIsLValue(true);
         }
@@ -34,7 +35,7 @@ namespace gulc {
         std::string getString() const override { return referenceToType->getString() + "&"; }
 
         Type* deepCopy() const override {
-            return new ReferenceType(startPosition(), endPosition(),
+            return new ReferenceType(startPosition(), endPosition(), qualifier(),
                                      referenceToType->deepCopy());
         }
 

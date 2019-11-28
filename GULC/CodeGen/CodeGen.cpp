@@ -32,14 +32,12 @@
 #include <AST/Types/PointerType.hpp>
 #include <AST/Exprs/ParenExpr.hpp>
 #include <AST/Types/ReferenceType.hpp>
-#include <AST/Types/ConstType.hpp>
-#include <AST/Types/ImmutType.hpp>
-#include <AST/Types/MutType.hpp>
 #include <AST/Exprs/CharacterLiteralExpr.hpp>
 #include <AST/Types/EnumType.hpp>
 #include <AST/Decls/EnumDecl.hpp>
 #include <AST/Types/StructType.hpp>
 #include <AST/Exprs/RefStructMemberFunctionExpr.hpp>
+#include <AST/Types/FlatArrayType.hpp>
 #include "CodeGen.hpp"
 
 gulc::Module gulc::CodeGen::generate(gulc::FileAST* file) {
@@ -99,6 +97,27 @@ void gulc::CodeGen::printError(const std::string &message, TextPosition startPos
 
 llvm::Type *gulc::CodeGen::generateLlvmType(const gulc::Type* type) {
     switch (type->getTypeKind()) {
+        case gulc::Type::Kind::FlatArray: {
+            auto flatArrayType = llvm::dyn_cast<gulc::FlatArrayType>(type);
+            auto indexType = generateLlvmType(flatArrayType->indexType);
+            std::uint64_t length = 0;
+
+            if (!llvm::isa<IntegerLiteralExpr>(flatArrayType->length)) {
+                printError("[INTERNAL] `FlatArrayType::indexType` was NOT `IntegerLiteralExpr`, cannot continue!",
+                           flatArrayType->startPosition(), flatArrayType->endPosition());
+            }
+
+            auto integerSize = llvm::dyn_cast<IntegerLiteralExpr>(flatArrayType->length);
+
+            if (integerSize->numberBase() != 10) {
+                printError("[INTERNAL] `IntegerLiteralExpr::numberBase()` was NOT `10` in CodeGen, cannot continue!",
+                           integerSize->startPosition(), integerSize->endPosition());
+            }
+
+            length = std::stoull(integerSize->numberString);
+
+            return llvm::ArrayType::get(indexType, length);
+        }
         case gulc::Type::Kind::BuiltIn: {
             auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(type);
 
@@ -156,18 +175,6 @@ llvm::Type *gulc::CodeGen::generateLlvmType(const gulc::Type* type) {
         case gulc::Type::Kind::Reference: {
             auto referenceType = llvm::dyn_cast<gulc::ReferenceType>(type);
             return llvm::PointerType::getUnqual(generateLlvmType(referenceType->referenceToType));
-        }
-        case gulc::Type::Kind::Const: {
-            auto constType = llvm::dyn_cast<ConstType>(type);
-            return generateLlvmType(constType->pointToType);
-        }
-        case gulc::Type::Kind::Immut: {
-            auto immutType = llvm::dyn_cast<ImmutType>(type);
-            return generateLlvmType(immutType->pointToType);
-        }
-        case gulc::Type::Kind::Mut: {
-            auto mutType = llvm::dyn_cast<MutType>(type);
-            return generateLlvmType(mutType->pointToType);
         }
         case gulc::Type::Kind::Enum: {
             auto enumType = llvm::dyn_cast<EnumType>(type);
@@ -409,7 +416,7 @@ void gulc::CodeGen::generateExternFunctionDecl(const FunctionDecl* functionDecl)
 void gulc::CodeGen::generateExternGlobalVariableDecl(const GlobalVariableDecl* globalVariableDecl) {
     llvm::Type* llvmType = generateLlvmType(globalVariableDecl->type);
 
-    bool isConstant = llvm::isa<ImmutType>(globalVariableDecl->type) || llvm::isa<ConstType>(globalVariableDecl->type);
+    bool isConstant = globalVariableDecl->type->qualifier() == TypeQualifier::Const;
 
     new llvm::GlobalVariable(*module, llvmType, isConstant, llvm::Function::LinkageTypes::ExternalLinkage,
                              nullptr, globalVariableDecl->mangledName());
@@ -546,7 +553,7 @@ void gulc::CodeGen::generateGlobalVariableDecl(const gulc::GlobalVariableDecl *g
     } else {
         llvm::Type* llvmType = generateLlvmType(globalVariableDecl->type);
 
-        bool isConstant = llvm::isa<ImmutType>(globalVariableDecl->type) || llvm::isa<ConstType>(globalVariableDecl->type);
+        bool isConstant = globalVariableDecl->type->qualifier() == TypeQualifier::Const;
 
         auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
 
@@ -980,15 +987,6 @@ llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperato
 
     gulc::Type* resultType = binaryOperatorExpr->resultType;
 
-    // Ignore the const, mut, and immut...
-    if (llvm::isa<ConstType>(resultType)) {
-        resultType = llvm::dyn_cast<ConstType>(resultType)->pointToType;
-    } else if (llvm::isa<ImmutType>(resultType)) {
-        resultType = llvm::dyn_cast<ImmutType>(resultType)->pointToType;
-    } else if (llvm::isa<MutType>(resultType)) {
-        resultType = llvm::dyn_cast<MutType>(resultType)->pointToType;
-    }
-
     // We handle the binary operators based on the result type...
     if (llvm::isa<EnumType>(resultType)) {
         resultType = llvm::dyn_cast<EnumType>(resultType)->baseType();
@@ -1249,15 +1247,6 @@ llvm::Value *gulc::CodeGen::generateFunctionCallExpr(const gulc::FunctionCallExp
 
 llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperatorExpr *prefixOperatorExpr) {
     gulc::Type* exprResultType = prefixOperatorExpr->expr->resultType;
-
-    // Ignore the const, mut, and immut...
-    if (llvm::isa<ConstType>(exprResultType)) {
-        exprResultType = llvm::dyn_cast<ConstType>(exprResultType)->pointToType;
-    } else if (llvm::isa<ImmutType>(exprResultType)) {
-        exprResultType = llvm::dyn_cast<ImmutType>(exprResultType)->pointToType;
-    } else if (llvm::isa<MutType>(exprResultType)) {
-        exprResultType = llvm::dyn_cast<MutType>(exprResultType)->pointToType;
-    }
 
     if (llvm::isa<gulc::BuiltInType>(exprResultType)) {
         auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(exprResultType);
@@ -1561,23 +1550,6 @@ void gulc::CodeGen::generateBaseDestructorCallExpr(const gulc::BaseDestructorCal
 }
 
 void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& value) {
-    // We ignore const, mut, and immut here since LLVM doesn't have any concept of these...
-    if (llvm::isa<ConstType>(to)) {
-        to = llvm::dyn_cast<ConstType>(to)->pointToType;
-    } else if (llvm::isa<MutType>(to)) {
-        to = llvm::dyn_cast<MutType>(to)->pointToType;
-    } else if (llvm::isa<ImmutType>(to)) {
-        to = llvm::dyn_cast<ImmutType>(to)->pointToType;
-    }
-
-    if (llvm::isa<ConstType>(from)) {
-        from = llvm::dyn_cast<ConstType>(from)->pointToType;
-    } else if (llvm::isa<MutType>(from)) {
-        from = llvm::dyn_cast<MutType>(from)->pointToType;
-    } else if (llvm::isa<ImmutType>(from)) {
-        from = llvm::dyn_cast<ImmutType>(from)->pointToType;
-    }
-
     if (llvm::isa<BuiltInType>(from)) {
         auto fromBuiltIn = llvm::dyn_cast<BuiltInType>(from);
 

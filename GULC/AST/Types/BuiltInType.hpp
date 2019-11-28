@@ -24,8 +24,8 @@ namespace gulc {
     public:
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::BuiltIn; }
 
-        BuiltInType(TextPosition startPosition, TextPosition endPosition, std::string name)
-                : Type(Kind::BuiltIn, startPosition, endPosition),
+        BuiltInType(TextPosition startPosition, TextPosition endPosition, TypeQualifier qualifier, std::string name)
+                : Type(Kind::BuiltIn, startPosition, endPosition, qualifier),
                   _name(std::move(name)), _isBool(false), _isFloating(false), _isSigned(true) {
             if (_name == "bool") {
                 _isBool = true;
@@ -35,7 +35,7 @@ namespace gulc {
             // TODO: Remove the names that aren't `int#` and `float32`/`float64`
             if (_name == "void") {
                 _sizeInBytes = 0;
-            } else if (_name == "int8" || _name == "uint8" || _name == "char" || _name == "byte" || _name == "sbyte") {
+            } else if (_name == "bool" || _name == "int8" || _name == "uint8" || _name == "char" || _name == "byte" || _name == "sbyte") {
                 _sizeInBytes = 1;
             } else if (_name == "int16" || _name == "uint16" || _name == "float16" || _name == "short" || _name == "ushort") {
                 _sizeInBytes = 2;
@@ -53,7 +53,7 @@ namespace gulc {
                 _isFloating = true;
             }
 
-            if (_name == "uint8" || _name == "char" || _name == "byte" ||
+            if (_name == "bool" || _name == "uint8" || _name == "char" || _name == "byte" ||
                 _name == "uint16" || _name == "ushort" ||
                 _name == "uint32" || _name == "uint" ||
                 _name == "uint64" || _name == "ulong") {
@@ -78,7 +78,8 @@ namespace gulc {
         }
 
         Type* deepCopy() const override {
-            return new BuiltInType(startPosition(), endPosition(), _name);
+            return new BuiltInType(startPosition(), endPosition(), qualifier(),
+                                   _name);
         }
 
     private:

@@ -25,7 +25,7 @@ namespace gulc {
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::TemplateTypename; }
 
         TemplateTypenameType(TextPosition startPosition, TextPosition endPosition)
-                : Type(Kind::TemplateTypename, startPosition, endPosition) {}
+                : Type(Kind::TemplateTypename, startPosition, endPosition, TypeQualifier::Mut) {}
 
         std::string getString() const override { return "typename"; }
 

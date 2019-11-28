@@ -52,6 +52,9 @@ namespace gulc {
         // We do not own this so we don't free it
         std::vector<Decl*> inheritedMembers;
 
+        // This is the COMPLETE size of the struct plus the base without padding at the end
+        std::size_t completeSizeWithoutPad;
+
         Decl* deepCopy() const override {
             std::vector<Type*> copiedBaseTypes{};
             std::vector<ConstructorDecl*> copiedConstructors{};
@@ -82,6 +85,7 @@ namespace gulc {
             result->parentStruct = parentStruct;
             result->baseStruct = baseStruct;
             result->inheritedMembers = std::vector<Decl*>(inheritedMembers);
+            result->completeSizeWithoutPad = completeSizeWithoutPad;
 
             return result;
         }

@@ -24,9 +24,9 @@ namespace gulc {
     public:
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::Struct; }
 
-        StructType(TextPosition startPosition, TextPosition endPosition,
+        StructType(TextPosition startPosition, TextPosition endPosition, TypeQualifier qualifier,
                    std::string name, StructDecl* decl)
-                : Type(Kind::Struct, startPosition, endPosition),
+                : Type(Kind::Struct, startPosition, endPosition, qualifier),
                   _name(std::move(name)), _decl(decl) {}
 
         StructDecl* decl() const { return _decl; }
@@ -34,7 +34,8 @@ namespace gulc {
         std::string getString() const override { return _name; }
 
         Type* deepCopy() const override {
-            return new StructType(startPosition(), endPosition(), _name, _decl);
+            return new StructType(startPosition(), endPosition(), qualifier(),
+                                  _name, _decl);
         }
 
     private:

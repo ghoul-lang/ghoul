@@ -60,18 +60,22 @@
 #include <AST/Decls/TemplateFunctionDecl.hpp>
 #include <AST/Decls/StructDecl.hpp>
 #include <AST/Types/StructType.hpp>
+#include <Targets/Target.hpp>
 
 namespace gulc {
     // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
     class DeclResolver {
         friend class CodeVerifier;
+    private:
+        Target* _target;
 
     public:
-        DeclResolver()
-                : currentFileAst(nullptr), currentImports(nullptr), currentNamespace(nullptr), currentStruct(nullptr),
-                  returnType(nullptr), currentFunction(nullptr), functionTemplateParams(nullptr),
-                  functionTemplateArgs(nullptr), functionParams(nullptr), exprIsFunctionCall(false),
-                  functionCallArgs(nullptr), labelNames(), functionLocalVariablesCount(0), functionLocalVariables() {}
+        DeclResolver(Target* target)
+                : _target(target), currentFileAst(nullptr), currentImports(nullptr), currentNamespace(nullptr),
+                  currentStruct(nullptr), returnType(nullptr), currentFunction(nullptr),
+                  functionTemplateParams(nullptr), functionTemplateArgs(nullptr), functionParams(nullptr),
+                  exprIsFunctionCall(false), functionCallArgs(nullptr), labelNames(), functionLocalVariablesCount(0),
+                  functionLocalVariables() {}
 
         void processFile(std::vector<FileAST*>& files);
 

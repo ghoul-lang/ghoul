@@ -26,9 +26,10 @@ namespace gulc {
     public:
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::Unresolved; }
 
-        UnresolvedType(TextPosition startPosition, TextPosition endPosition, std::vector<std::string> namespacePath,
+        UnresolvedType(TextPosition startPosition, TextPosition endPosition, TypeQualifier qualifier,
+                       std::vector<std::string> namespacePath,
                        std::string name, std::vector<Expr*> templateArguments)
-                : Type(Kind::Unresolved, startPosition, endPosition),
+                : Type(Kind::Unresolved, startPosition, endPosition, qualifier),
                   _namespacePath(std::move(namespacePath)), _name(std::move(name)),
                   _templateArguments(std::move(templateArguments)) {}
 
@@ -66,7 +67,7 @@ namespace gulc {
                 copiedTemplateArguments.push_back(templateArgument->deepCopy());
             }
 
-            return new UnresolvedType(startPosition(), endPosition(),
+            return new UnresolvedType(startPosition(), endPosition(), qualifier(),
                                       std::move(copiedNamespacePath), _name, std::move(copiedTemplateArguments));
         }
 

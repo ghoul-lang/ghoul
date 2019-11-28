@@ -24,9 +24,9 @@ namespace gulc {
     public:
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::FunctionPointer; }
 
-        FunctionPointerType(TextPosition startPosition, TextPosition endPosition,
+        FunctionPointerType(TextPosition startPosition, TextPosition endPosition, TypeQualifier qualifier,
                             Type* resultType, std::vector<Type*> paramTypes)
-                : Type(Kind::FunctionPointer, startPosition, endPosition),
+                : Type(Kind::FunctionPointer, startPosition, endPosition, qualifier),
                   resultType(resultType), paramTypes(std::move(paramTypes)) {}
 
         Type* resultType;
@@ -50,7 +50,7 @@ namespace gulc {
                 copiedParamTypes.push_back(paramType->deepCopy());
             }
 
-            return new FunctionPointerType(startPosition(), endPosition(),
+            return new FunctionPointerType(startPosition(), endPosition(), qualifier(),
                                            resultType->deepCopy(), std::move(copiedParamTypes));
         }
 

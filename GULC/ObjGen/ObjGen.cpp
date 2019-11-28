@@ -47,6 +47,7 @@ void gulc::ObjGen::init() {
     llvm::InitializeNativeTargetAsmPrinter();
 }
 
+// TODO: We need to handle passing a `Target` to this that will be converted to an llvm target triple
 gulc::ObjFile gulc::ObjGen::generate(gulc::Module module) {
     std::string filename = "build/objs/" + module.filePath + ".o";
 
@@ -62,6 +63,8 @@ gulc::ObjFile gulc::ObjGen::generate(gulc::Module module) {
 
     std::string targetTriple = llvm::sys::getDefaultTargetTriple();
     module.llvmModule->setTargetTriple(targetTriple);
+
+    std::cout << "LLVM Target Triple: " << targetTriple << std::endl;
 
     std::string Error;
     auto target = llvm::TargetRegistry::lookupTarget(targetTriple, Error);
