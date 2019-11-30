@@ -183,6 +183,8 @@ Decl *Parser::parseTopLevelDecl() {
     bool isVolatile = false;
     bool isAbstract = false;
     bool isSealed = false;
+    bool isVirtual = false;
+    bool isOverride = false;
     /*
 		IN, // 'in'
 		OUT, // 'out'
@@ -308,11 +310,27 @@ Decl *Parser::parseTopLevelDecl() {
                 printError("'static' cannot be applied to top-level declarations!", peekedToken.startPosition, peekedToken.endPosition);
                 return nullptr;
             case TokenType::VIRTUAL:
-                printError("'virtual' cannot be applied to top-level declarations!", peekedToken.startPosition, peekedToken.endPosition);
-                return nullptr;
+                if (isVirtual) {
+                    printWarning("duplicate 'virtual' specifier", peekedToken.startPosition, peekedToken.endPosition);
+                }
+
+                if (isAbstract) printError("'virtual' and 'abstract' cannot be used at the same time!", peekedToken.startPosition, peekedToken.endPosition);
+                if (isOverride) printError("'virtual' and 'override' cannot be used at the same time!", peekedToken.startPosition, peekedToken.endPosition);
+
+                _lexer.consumeType(TokenType::VIRTUAL);
+                isVirtual = true;
+                break;
             case TokenType::OVERRIDE:
-                printError("'override' cannot be applied to top-level declarations!", peekedToken.startPosition, peekedToken.endPosition);
-                return nullptr;
+                if (isOverride) {
+                    printWarning("duplicate 'override' specifier", peekedToken.startPosition, peekedToken.endPosition);
+                }
+
+                if (isAbstract) printError("'override' and 'abstract' cannot be used at the same time!", peekedToken.startPosition, peekedToken.endPosition);
+                if (isVirtual) printError("'override' and 'virtual' cannot be used at the same time!", peekedToken.startPosition, peekedToken.endPosition);
+
+                _lexer.consumeType(TokenType::OVERRIDE);
+                isOverride = true;
+                break;
             case TokenType::EXTERN:
                 if (isExtern) printWarning("duplicate 'extern' specifier", peekedToken.startPosition, peekedToken.endPosition);
 
@@ -320,13 +338,20 @@ Decl *Parser::parseTopLevelDecl() {
                 isExtern = true;
                 break;
             case TokenType::VOLATILE:
-                if (isVolatile) printWarning("duplicate 'volatile' specifier", peekedToken.startPosition, peekedToken.endPosition);
+                if (isVolatile) {
+                    printWarning("duplicate 'volatile' specifier", peekedToken.startPosition, peekedToken.endPosition);
+                }
 
                 _lexer.consumeType(TokenType::VOLATILE);
                 isVolatile = true;
                 break;
             case TokenType::ABSTRACT:
-                if (isAbstract) printWarning("duplicate 'abstract' specifier", peekedToken.startPosition, peekedToken.endPosition);
+                if (isAbstract) {
+                    printWarning("duplicate 'abstract' specifier", peekedToken.startPosition, peekedToken.endPosition);
+                }
+
+                if (isVirtual) printError("'abstract' and 'virtual' cannot be used at the same time!", peekedToken.startPosition, peekedToken.endPosition);
+                if (isOverride) printError("'abstract' and 'override' cannot be used at the same time!", peekedToken.startPosition, peekedToken.endPosition);
 
                 _lexer.consumeType(TokenType::ABSTRACT);
                 isAbstract = true;
@@ -642,7 +667,17 @@ qualifierFound:
                     // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
                     CompoundStmt* compoundStmt = parseCompoundStmt();
 
-                    return new TemplateFunctionDecl(name, _filePath, startPosition, endPosition, visibility, resultType, templateParameters, parameters, compoundStmt);
+                    if (isVirtual) {
+                        printError("template functions cannot be `virtual`!", startPosition, endPosition);
+                    } else if (isAbstract) {
+                        printError("template functions cannot be `abstract`!", startPosition, endPosition);
+                    } else if (isOverride) {
+                        printError("template functions cannot be `override`!", startPosition, endPosition);
+                    }
+
+                    return new TemplateFunctionDecl(name, _filePath, startPosition, endPosition, visibility,
+                                                    FunctionModifiers::None, resultType, templateParameters,
+                                                    parameters, compoundStmt);
                 }
                 case TokenType::LPAREN: { // Function
                     std::vector<ParameterDecl*> parameters = parseParameterDecls(startPosition);
@@ -708,8 +743,18 @@ qualifierFound:
                         // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
                         CompoundStmt* compoundStmt = parseCompoundStmt();
 
+                        FunctionModifiers modifier = FunctionModifiers::None;
+
+                        if (isVirtual) {
+                            modifier = FunctionModifiers::Virtual;
+                        } else if (isAbstract) {
+                            modifier = FunctionModifiers::Abstract;
+                        } else if (isOverride) {
+                            modifier = FunctionModifiers::Override;
+                        }
+
                         return new FunctionDecl(name, _filePath, startPosition, endPosition, visibility,
-                                                resultType, parameters, compoundStmt);
+                                                modifier, resultType, parameters, compoundStmt);
                     }
                 }
                 case TokenType::EQUALS: {

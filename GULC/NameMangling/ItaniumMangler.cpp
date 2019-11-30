@@ -132,6 +132,13 @@ void ItaniumMangler::mangleStruct(StructDecl *structDecl, const std::string &pre
     if (structDecl->destructor != nullptr) {
         mangleDestructor(structDecl->destructor, "N" + nPrefix, "E");
     }
+
+    // Set vtable mangled name
+    if (prefix.empty()) {
+        structDecl->vtableName = "_ZTVN" + nPrefix + "E";
+    } else {
+        structDecl->vtableName = "_ZTV" + nPrefix;
+    }
 }
 
 void ItaniumMangler::mangleTemplateFunction(TemplateFunctionDecl* templateFunctionDecl, const std::string& prefix, const std::string& nameSuffix) {
@@ -157,21 +164,20 @@ void ItaniumMangler::mangleTemplateFunction(TemplateFunctionDecl* templateFuncti
 
 void ItaniumMangler::mangleConstructor(ConstructorDecl *constructorDecl, const std::string &prefix, const std::string &nameSuffix) {
     // All mangled names start with "_Z"...
-    std::string mangledName = "_Z" + prefix;
-
-    // We don't allow allocating within the constructor so we don't do export a `C3`
-    if (constructorDecl->assignsVTable()) {
-        mangledName += "C1";
-    } else {
-        mangledName += "C2";
-    }
+    std::string mangledName = "_Z" + prefix + "C2";
+    std::string mangledNameVTable = "_Z" + prefix + "C1";
 
     mangledName += nameSuffix;
+    mangledNameVTable += nameSuffix;
+
+    std::string bareFunctionTypeResult = bareFunctionType(constructorDecl->parameters);
 
     // We only have to use <bare-function-name> since there isn't a namespace yet.
-    mangledName += bareFunctionType(constructorDecl->parameters);
+    mangledName += bareFunctionTypeResult;
+    mangledNameVTable += bareFunctionTypeResult;
 
     constructorDecl->setMangledName(mangledName);
+    constructorDecl->setMangledNameVTable(mangledNameVTable);
 }
 
 void ItaniumMangler::mangleDestructor(DestructorDecl *destructorDecl, const std::string &prefix, const std::string &nameSuffix) {

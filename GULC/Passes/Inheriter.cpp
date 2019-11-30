@@ -26,15 +26,27 @@
 #include <ASTHelpers/SizeofHelper.hpp>
 #include <make_reverse_iterator.hpp>
 #include <AST/Types/FlatArrayType.hpp>
+#include <AST/Types/VTableType.hpp>
 
 using namespace gulc;
 
 void Inheriter::processFile(std::vector<FileAST *> &files) {
     for (FileAST* fileAst : files) {
+        currentFileAst = fileAst;
+
         for (Decl *decl : fileAst->topLevelDecls()) {
             processDecl(decl);
         }
     }
+}
+
+void Inheriter::printError(const std::string &message, TextPosition startPosition, TextPosition endPosition) {
+    std::cout << "gulc resolver error[" << currentFileAst->filePath() << ", "
+                                     "{" << startPosition.line << ", " << startPosition.column << "} "
+                                     "to {" << endPosition.line << ", " << endPosition.column << "}]: "
+              << message
+              << std::endl;
+    std::exit(1);
 }
 
 void Inheriter::processDecl(Decl *decl) {
@@ -51,13 +63,20 @@ void Inheriter::processNamespaceDecl(NamespaceDecl *namespaceDecl) {
     }
 }
 
+// TODO: We will have to reorganize this to put the vtable construction before the size and padding code.
+//       While handling size and padding we need to insert a `vtable` variable into the proper struct the same way we
+//       add padding to align the members
 void Inheriter::processStructDecl(StructDecl *structDecl) {
     // This function might be called more than once for the same struct decl. Because of this we do a check to see if
     // the struct already has inherited members. If it does then we assume we've already processed the struct.
     if (structDecl->inheritedMembers.empty()) {
+        // List of all members, current and inherited. Used to properly handle overriding virtual functions
+        std::vector<std::vector<Decl*>*> allKnownMembers;
+        // List of all inherited data members. Used to properly handle shadowing the data members
         std::vector<std::vector<GlobalVariableDecl*>*> allInheritedDataMembers;
 
         //allDataMembers.push_back(&structDecl->dataMembers);
+        allKnownMembers.push_back(&structDecl->members);
 
         if (structDecl->baseStruct != nullptr) {
             // Loop through all inherited structs, check if they should be in our inherited member list, and add them to
@@ -75,6 +94,76 @@ void Inheriter::processStructDecl(StructDecl *structDecl) {
 
                 // Add the inherited data members to the `allDataMembers` list
                 allInheritedDataMembers.push_back(&inheritedBase->dataMembers);
+
+                // Add the inherited members to the `allKnownMembers` list
+                allKnownMembers.push_back(&inheritedBase->members);
+            }
+        }
+
+        // Construct this current struct's vtable using the `allKnownMembers`
+        // To do this, we loop from the greatest grandparent to the current struct. While doing this we add any virtual
+        // functions to the vtable and then replace any functions that are overriding
+        for (std::vector<Decl*>* dataMembers : gulc::reverse(allKnownMembers)) {
+            for (Decl* checkMember : *dataMembers) {
+                if (llvm::isa<FunctionDecl>(checkMember)) {
+                    auto checkFunction = llvm::dyn_cast<FunctionDecl>(checkMember);
+
+                    // Check if the function should be in the vtable
+                    if (checkFunction->modifier() == FunctionModifiers::Abstract ||
+                        checkFunction->modifier() == FunctionModifiers::Virtual ||
+                        checkFunction->modifier() == FunctionModifiers::Override) {
+                        // If the function should be in the vtable check if a function with the same signature already
+                        // exists in the function table
+                        bool functionAddedToVtable = false;
+
+                        // We only check if we should replace the vtable entry if it is `override`, you're allowed
+                        // to shadow vtable entries.
+                        if (checkFunction->modifier() == FunctionModifiers::Override) {
+                            // We loop the vtable backwards to account for shadowing.
+                            for (std::size_t vtableIndex = structDecl->vtable.size() - 1; vtableIndex >= 0;
+                                 --vtableIndex) {
+                                FunctionDecl* vtableEntry = structDecl->vtable[vtableIndex];
+
+                                if (vtableEntry->name() == checkFunction->name()) {
+                                    // If the names match then we have to check that the signatures match exactly
+                                    if (FunctionComparer::compare(vtableEntry, checkFunction) ==
+                                        FunctionComparer::CompareResult::Identical) {
+                                        // If everything matches then a proper override was found. We replace the entry,
+                                        // notify the next if statement we added the function, and break from our search
+                                        structDecl->vtable[vtableIndex] = checkFunction;
+                                        functionAddedToVtable = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // If it wasn't added to the vtable then we just add it to the end.
+                        if (!functionAddedToVtable) {
+                            // We do have to verify the `checkFunction` is either abstract or virtual for this to work
+                            // properly (if it was override at this point then the function that was being overridden
+                            // was not found)
+                            // NOTE: We only perform the modifier check if the `checkFunction` is owned by the current
+                            //       `structDecl`. If we don't do this check the error will be printed for the wrong
+                            //       file.
+                            if (checkFunction->parentStruct == structDecl &&
+                                checkFunction->modifier() != FunctionModifiers::Abstract &&
+                                checkFunction->modifier() != FunctionModifiers::Virtual) {
+                                printError("no suitable function found to override! (did you mean `virtual`?)",
+                                           checkFunction->startPosition(), checkFunction->endPosition());
+                            }
+
+                            structDecl->vtable.push_back(checkFunction);
+
+                            // If the vtable owner isn't set then we set it to the parent struct of the function we're
+                            // adding. We can be sure this is the owner because this will be the first virtual function
+                            // found in our inheritance
+                            if (structDecl->vtableOwner == nullptr) {
+                                structDecl->vtableOwner = checkFunction->parentStruct;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -82,6 +171,34 @@ void Inheriter::processStructDecl(StructDecl *structDecl) {
 
         // Loop through all pointers to struct declaration data members from the greatest grandparent to the direct parent
         for (std::vector<GlobalVariableDecl*>* dataMembers : gulc::reverse(allInheritedDataMembers)) {
+            // At this point in execution the base struct is not guaranteed to have its vtable member. Because of this,
+            // we have to check if the `dataMembers` are owned by the vtable owner and if it is check if the first
+            // data member is the vtable. If it isn't we increment `currentSize` by the size of a vtable
+            if (!dataMembers->empty()) {
+                GlobalVariableDecl* checkVTable = (*dataMembers)[0];
+
+                // If the `checkVTable` is owned by our vtable owner...
+                if (checkVTable->parentStruct == structDecl->vtableOwner) {
+                    // If the first member isn't a vtable then we have to change `currentSize` as if it was a vtable...
+                    if (!llvm::isa<VTableType>(checkVTable->type)) {
+                        std::size_t vtableSize = _target->sizeofPtr();
+                        std::size_t alignPadding = vtableSize - (currentSize % vtableSize);
+
+                        // Rather than deal with casting to a signed type and rearrange the above algorithm to prevent
+                        // this from happening, we just check if the `alignPadding` is equal to the `align` and set
+                        // `alignPadding` to zero if it happens
+                        if (alignPadding == vtableSize) {
+                            alignPadding = 0;
+                        }
+
+                        // Add padding to give the member the proper alignment
+                        currentSize += alignPadding;
+                        // Add the size of the member
+                        currentSize += vtableSize;
+                    }
+                }
+            }
+
             // Loop through each data member normally
             for (GlobalVariableDecl *dataMember : *dataMembers) {
                 SizeAndAlignment sizeAndAlignment(0, 0);
@@ -122,6 +239,14 @@ void Inheriter::processStructDecl(StructDecl *structDecl) {
                 // Add the size of the member
                 currentSize += sizeAndAlignment.size;
             }
+        }
+
+        // Since the current `structDecl` might be the vtable owner we have to check for that...
+        if (structDecl->vtableOwner == structDecl) {
+            // We just add it to the beginning of our data members. We'll let the loop below handle the size normally
+            auto vtableMember = new GlobalVariableDecl("", "", {}, {}, Decl::Visibility::Private,
+                                                       new VTableType({}, {}));
+            structDecl->dataMembers.insert(structDecl->dataMembers.begin(), vtableMember);
         }
 
         // I'm separating this out here as I don't know if this will be optimized to only be called once in C++ within

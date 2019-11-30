@@ -38,6 +38,7 @@
 #include <AST/Types/StructType.hpp>
 #include <AST/Exprs/RefStructMemberFunctionExpr.hpp>
 #include <AST/Types/FlatArrayType.hpp>
+#include <AST/Types/VTableType.hpp>
 #include "CodeGen.hpp"
 
 gulc::Module gulc::CodeGen::generate(gulc::FileAST* file) {
@@ -117,6 +118,11 @@ llvm::Type *gulc::CodeGen::generateLlvmType(const gulc::Type* type) {
             length = std::stoull(integerSize->numberString);
 
             return llvm::ArrayType::get(indexType, length);
+        }
+        case gulc::Type::Kind::VTable: {
+            // We just make the vtable a `void**` and will bitcast later to what it needs to be later.
+            llvm::Type* varArgFuncType = llvm::FunctionType::get(llvm::Type::getVoidTy(*llvmContext), true);
+            return llvm::PointerType::get(llvm::PointerType::get(varArgFuncType, 0), 0);
         }
         case gulc::Type::Kind::BuiltIn: {
             auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(type);
@@ -389,12 +395,19 @@ void gulc::CodeGen::addBlockAndSetInsertionPoint(llvm::BasicBlock* basicBlock) {
 
 // Externs
 void gulc::CodeGen::generateExternConstructorDecl(const gulc::ConstructorDecl *constructorDecl) {
+    // Add the constructor that DOESN'T assign the vtable
     std::vector<llvm::Type*> paramTypes = generateParamTypes(constructorDecl->parameters, constructorDecl->parentStruct);
     // Constructors can ONLY return void, they only modify the `this` reference...
     llvm::Type* returnType = llvm::Type::getVoidTy(*llvmContext);
     llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
     llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::LinkageTypes::ExternalLinkage,
                                                       constructorDecl->mangledName(), module);
+
+    // Add the constructor that DOES assign the vtable
+    // Constructors can ONLY return void, they only modify the `this` reference...
+    llvm::Function* functionVTable = llvm::Function::Create(functionType,
+                                                            llvm::Function::LinkageTypes::ExternalLinkage,
+                                                            constructorDecl->mangledNameVTable(), module);
 }
 
 void gulc::CodeGen::generateExternDestructorDecl(const gulc::DestructorDecl *destructorDecl) {
@@ -430,6 +443,7 @@ void gulc::CodeGen::generateConstructorDecl(const gulc::ConstructorDecl *constru
     llvm::Type* returnType = llvm::Type::getVoidTy(*llvmContext);
     llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
     llvm::Function* function = module->getFunction(constructorDecl->mangledName());
+    llvm::Function* functionVTable = module->getFunction(constructorDecl->mangledNameVTable());
 
     if (!function) {
         auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
@@ -441,27 +455,100 @@ void gulc::CodeGen::generateConstructorDecl(const gulc::ConstructorDecl *constru
         function = llvm::Function::Create(functionType, linkageType, constructorDecl->mangledName(), module);
     }
 
-    llvm::BasicBlock* funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", function);
-    irBuilder->SetInsertPoint(funcBody);
+    // Generate the constructor that DOESN'T assign the vtable
+    {
+        llvm::BasicBlock *funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", function);
+        irBuilder->SetInsertPoint(funcBody);
 
-    setCurrentFunction(function);
+        setCurrentFunction(function);
 
-    // If there is a base constructor we HAVE to call it as the first line of the constructor
-    if (constructorDecl->baseConstructor != nullptr) {
-        generateBaseConstructorCallExpr(constructorDecl->baseConstructorCall);
+        // If there is a base constructor we HAVE to call it as the first line of the constructor
+        if (constructorDecl->baseConstructor != nullptr) {
+            generateBaseConstructorCallExpr(constructorDecl->baseConstructorCall);
+        }
+
+        // Generate the function body
+        currentFunctionLocalVariablesCount = 0;
+        generateStmt(constructorDecl->body());
+        currentFunctionLocalVariablesCount = 0;
+
+        verifyFunction(*function);
+        funcPass->run(*function);
+
+        // Reset the insertion point (this probably isn't needed but oh well)
+        irBuilder->ClearInsertionPoint();
+        currentFunction = nullptr;
     }
 
-    // Generate the function body
-    currentFunctionLocalVariablesCount = 0;
-    generateStmt(constructorDecl->body());
-    currentFunctionLocalVariablesCount = 0;
+    if (!functionVTable) {
+        auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
 
-    verifyFunction(*function);
-    funcPass->run(*function);
+        if (isInternal) {
+            linkageType = llvm::Function::LinkageTypes::InternalLinkage;
+        }
 
-    // Reset the insertion point (this probably isn't needed but oh well)
-    irBuilder->ClearInsertionPoint();
-    currentFunction = nullptr;
+        functionVTable = llvm::Function::Create(functionType, linkageType, constructorDecl->mangledNameVTable(),
+                                                module);
+    }
+
+    // Generate the constructor that DOES assign the vtable
+    {
+        gulc::StructType gulcVTableOwnerType({}, {}, TypeQualifier::Mut, "",
+                                             constructorDecl->parentStruct->vtableOwner);
+        llvm::Type* vtableOwnerType = generateLlvmType(&gulcVTableOwnerType);
+
+        llvm::BasicBlock *funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", functionVTable);
+        irBuilder->SetInsertPoint(funcBody);
+
+        setCurrentFunction(functionVTable);
+
+        // TODO: Assign vtable here
+        {
+            llvm::Value *refThis = currentFunctionParameters[0];
+            llvm::Value *derefThis = irBuilder->CreateLoad(refThis);
+            llvm::Value *vtableOwner = derefThis;
+
+            // Cast to the vtable owner if we have to
+            if (constructorDecl->parentStruct != constructorDecl->parentStruct->vtableOwner) {
+                vtableOwner = irBuilder->CreateBitCast(vtableOwner, llvm::PointerType::getUnqual(vtableOwnerType));
+            }
+
+            // Get a reference to the vtable
+            llvm::Value* vtableRef = module->getGlobalVariable(constructorDecl->parentStruct->vtableName, true);
+
+            // Get a pointer to array
+            llvm::Value* index0 = llvm::ConstantInt::get(*llvmContext, llvm::APInt(32, 0, false));
+            vtableRef = irBuilder->CreateGEP(vtableRef, index0);
+
+            // Cast the pointer to the correct type (void (...)**)
+            llvm::Type* elementType = llvm::FunctionType::get(llvm::Type::getVoidTy(*llvmContext), true);
+            elementType = llvm::PointerType::get(elementType, 0);
+            elementType = llvm::PointerType::get(elementType, 0);
+
+            vtableRef = irBuilder->CreateBitCast(vtableRef, elementType);
+
+            // Grab the vtable member and set it
+            llvm::Value* vtableMemberRef = irBuilder->CreateStructGEP(vtableOwner, 0);
+            irBuilder->CreateStore(vtableRef, vtableMemberRef, false);
+        }
+
+        // If there is a base constructor we HAVE to call it as the first line of the constructor
+        if (constructorDecl->baseConstructor != nullptr) {
+            generateBaseConstructorCallExpr(constructorDecl->baseConstructorCall);
+        }
+
+        // Generate the function body
+        currentFunctionLocalVariablesCount = 0;
+        generateStmt(constructorDecl->body());
+        currentFunctionLocalVariablesCount = 0;
+
+        verifyFunction(*functionVTable);
+        funcPass->run(*functionVTable);
+
+        // Reset the insertion point (this probably isn't needed but oh well)
+        irBuilder->ClearInsertionPoint();
+        currentFunction = nullptr;
+    }
 }
 
 void gulc::CodeGen::generateDestructorDecl(const gulc::DestructorDecl *destructorDecl, bool isInternal) {
@@ -529,7 +616,6 @@ void gulc::CodeGen::generateFunctionDecl(const gulc::FunctionDecl *functionDecl,
     verifyFunction(*function);
     funcPass->run(*function);
 
-
     // Reset the insertion point (this probably isn't needed but oh well)
     irBuilder->ClearInsertionPoint();
 	currentFunction = nullptr;
@@ -580,6 +666,26 @@ void gulc::CodeGen::generateNamespace(const gulc::NamespaceDecl *namespaceDecl) 
 void gulc::CodeGen::generateStructDecl(const gulc::StructDecl *structDecl, bool isInternal) {
     const gulc::StructDecl* oldStruct = currentStruct;
     currentStruct = structDecl;
+
+    if (!structDecl->vtable.empty()) {
+        // If the struct has a vtable we have to generate a global variable for it...
+        llvm::Type* vtableEntryType = llvm::PointerType::get(llvm::FunctionType::get(llvm::Type::getVoidTy(*llvmContext), true), 0);
+
+        std::vector<llvm::Constant*> vtableEntries;
+
+        for (FunctionDecl* functionDecl : structDecl->vtable) {
+            llvm::Function* vtableFunction = getFunction(functionDecl);
+            vtableEntries.push_back(llvm::ConstantExpr::getBitCast(vtableFunction, vtableEntryType));
+        }
+
+        llvm::ArrayType* vtableType = llvm::ArrayType::get(vtableEntryType, vtableEntries.size());
+
+        llvm::Constant* llvmVTableEntries = llvm::ConstantArray::get(vtableType, vtableEntries);
+
+        new llvm::GlobalVariable(*module, vtableType, false,
+                                 llvm::GlobalVariable::LinkageTypes::ExternalLinkage,
+                                 llvmVTableEntries, structDecl->vtableName);
+    }
 
     for (const ConstructorDecl* constructor : structDecl->constructors) {
         // TODO: If the constructor is `private` then `isInternal` must be set to true even if our `isInternal` is false
@@ -1012,98 +1118,98 @@ llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperato
         return irBuilder->CreateStore(rightValue, leftValue, false);
     } else if (binaryOperatorExpr->operatorName() == "+") {
         if (isFloat) {
-            return irBuilder->CreateFAdd(leftValue, rightValue, "addtmp");
+            return irBuilder->CreateFAdd(leftValue, rightValue);
         } else {
-            return irBuilder->CreateAdd(leftValue, rightValue, "addtmp");
+            return irBuilder->CreateAdd(leftValue, rightValue);
         }
     } else if (binaryOperatorExpr->operatorName() == "-") {
         if (isFloat) {
-            return irBuilder->CreateFSub(leftValue, rightValue, "subtmp");
+            return irBuilder->CreateFSub(leftValue, rightValue);
         } else {
-            return irBuilder->CreateSub(leftValue, rightValue, "subtmp");
+            return irBuilder->CreateSub(leftValue, rightValue);
         }
     } else if (binaryOperatorExpr->operatorName() == "*") {
         if (isFloat) {
-            return irBuilder->CreateFMul(leftValue, rightValue, "multmp");
+            return irBuilder->CreateFMul(leftValue, rightValue);
         } else {
-            return irBuilder->CreateMul(leftValue, rightValue, "multmp");
+            return irBuilder->CreateMul(leftValue, rightValue);
         }
     } else if (binaryOperatorExpr->operatorName() == "/") {
         if (isFloat) {
-            return irBuilder->CreateFDiv(leftValue, rightValue, "divtmp");
+            return irBuilder->CreateFDiv(leftValue, rightValue);
         } else {
             // TODO: What are the `Exact` variants?
             if (isSigned) {
-                return irBuilder->CreateSDiv(leftValue, rightValue, "divtmp");
+                return irBuilder->CreateSDiv(leftValue, rightValue);
             } else {
-                return irBuilder->CreateUDiv(leftValue, rightValue, "divtmp");
+                return irBuilder->CreateUDiv(leftValue, rightValue);
             }
         }
     } else if (binaryOperatorExpr->operatorName() == "%") {
         if (isFloat) {
-            return irBuilder->CreateFRem(leftValue, rightValue, "remtmp");
+            return irBuilder->CreateFRem(leftValue, rightValue);
         } else {
             // TODO: What are the `Exact` variants?
             if (isSigned) {
-                return irBuilder->CreateSRem(leftValue, rightValue, "remtmp");
+                return irBuilder->CreateSRem(leftValue, rightValue);
             } else {
-                return irBuilder->CreateURem(leftValue, rightValue, "remtmp");
+                return irBuilder->CreateURem(leftValue, rightValue);
             }
         }
     } else if (binaryOperatorExpr->operatorName() == "^") {
-        return irBuilder->CreateXor(leftValue, rightValue, "xortmp");
+        return irBuilder->CreateXor(leftValue, rightValue);
     } else if (binaryOperatorExpr->operatorName() == "<<") {
-        return irBuilder->CreateShl(leftValue, rightValue, "shltmp");
+        return irBuilder->CreateShl(leftValue, rightValue);
     } else if (binaryOperatorExpr->operatorName() == ">>") {
         if (isSigned) {
-            return irBuilder->CreateAShr(leftValue, rightValue, "ashrtmp");
+            return irBuilder->CreateAShr(leftValue, rightValue);
         } else {
-            return irBuilder->CreateLShr(leftValue, rightValue, "lshrtmp");
+            return irBuilder->CreateLShr(leftValue, rightValue);
         }
     } else if (binaryOperatorExpr->operatorName() == "==") {
         if (isFloat) {
-            return irBuilder->CreateFCmpOEQ(leftValue, rightValue, "eqtmp");
+            return irBuilder->CreateFCmpOEQ(leftValue, rightValue);
         } else {
-            return irBuilder->CreateICmpEQ(leftValue, rightValue, "eqtmp");
+            return irBuilder->CreateICmpEQ(leftValue, rightValue);
         }
     } else if (binaryOperatorExpr->operatorName() == ">") {
         if (isFloat) {
-            return irBuilder->CreateFCmpOGT(leftValue, rightValue, "gttmp");
+            return irBuilder->CreateFCmpOGT(leftValue, rightValue);
         } else {
             if (isSigned) {
-                return irBuilder->CreateICmpSGT(leftValue, rightValue, "gttmp");
+                return irBuilder->CreateICmpSGT(leftValue, rightValue);
             } else {
-                return irBuilder->CreateICmpUGT(leftValue, rightValue, "gttmp");
+                return irBuilder->CreateICmpUGT(leftValue, rightValue);
             }
         }
     } else if (binaryOperatorExpr->operatorName() == ">=") {
         if (isFloat) {
-            return irBuilder->CreateFCmpOGE(leftValue, rightValue, "getmp");
+            return irBuilder->CreateFCmpOGE(leftValue, rightValue);
         } else {
             if (isSigned) {
-                return irBuilder->CreateICmpSGE(leftValue, rightValue, "getmp");
+                return irBuilder->CreateICmpSGE(leftValue, rightValue);
             } else {
-                return irBuilder->CreateICmpUGE(leftValue, rightValue, "getmp");
+                return irBuilder->CreateICmpUGE(leftValue, rightValue);
             }
         }
     } else if (binaryOperatorExpr->operatorName() == "<") {
         if (isFloat) {
-            return irBuilder->CreateFCmpOLT(leftValue, rightValue, "lttmp");
+            return irBuilder->CreateFCmpOLT(leftValue, rightValue);
         } else {
             if (isSigned) {
-                return irBuilder->CreateICmpSLT(leftValue, rightValue, "lttmp");
+                return irBuilder->CreateICmpSLT(leftValue, rightValue);
             } else {
-                return irBuilder->CreateICmpULT(leftValue, rightValue, "lttmp");
+                return irBuilder->CreateICmpULT(leftValue, rightValue);
             }
         }
     } else if (binaryOperatorExpr->operatorName() == "<=") {
         if (isFloat) {
-            return irBuilder->CreateFCmpOLE(leftValue, rightValue, "letmp");
+            return irBuilder->CreateFCmpOLE(leftValue, rightValue);
         } else {
             if (isSigned) {
-                return irBuilder->CreateICmpSLE(leftValue, rightValue, "letmp");
+                return irBuilder->CreateICmpSLE(leftValue, rightValue);
             } else {
-                return irBuilder->CreateICmpULE(leftValue, rightValue, "letmp");
+                return irBuilder->CreateICmpULE(leftValue, rightValue);
             }
         }
     } else {
@@ -1153,7 +1259,14 @@ llvm::Value *gulc::CodeGen::generateLocalVariableDeclExpr(const gulc::LocalVaria
 
     // If we have a constructor call...
     if (localVariableDeclExpr->foundConstructor) {
-        llvm::Function* constructorFunc = module->getFunction(localVariableDeclExpr->foundConstructor->mangledName());
+        llvm::Function* constructorFunc;
+
+        // If there is a vtable we call the vtable constructor
+        if (localVariableDeclExpr->foundConstructor->parentStruct->vtable.empty()) {
+            constructorFunc = module->getFunction(localVariableDeclExpr->foundConstructor->mangledName());
+        } else {
+            constructorFunc = module->getFunction(localVariableDeclExpr->foundConstructor->mangledNameVTable());
+        }
 
         std::vector<llvm::Value*> llvmArgs{};
         llvmArgs.reserve(localVariableDeclExpr->initializerArgs.size() + 1);
@@ -1202,12 +1315,11 @@ llvm::Value *gulc::CodeGen::generateImplicitCastExpr(const gulc::ImplicitCastExp
 llvm::Value *gulc::CodeGen::generateLValueToRValue(const gulc::LValueToRValueExpr *lValueToRValueExpr) {
     llvm::Value* lValue = generateExpr(lValueToRValueExpr->lvalue);
 
-    return irBuilder->CreateLoad(lValue, "l2r");
+    return irBuilder->CreateLoad(lValue);
 }
 
 llvm::Value *gulc::CodeGen::generateFunctionCallExpr(const gulc::FunctionCallExpr *functionCallExpr) {
-    std::string funcName;
-    llvm::Function* func = generateRefFunctionExpr(functionCallExpr->functionReference, &funcName);
+    llvm::Value* func = generateRefFunctionExpr(functionCallExpr->functionReference);
 
     std::vector<llvm::Value*> llvmArgs{};
 
@@ -1233,16 +1345,7 @@ llvm::Value *gulc::CodeGen::generateFunctionCallExpr(const gulc::FunctionCallExp
         }
     }
 
-    llvm::Value* result = irBuilder->CreateCall(func, llvmArgs, funcName + "_result");
-
-//    if (!func->getReturnType()->isVoidTy()) {
-//        llvm::AllocaInst *retValue = irBuilder->CreateAlloca(func->getReturnType(), nullptr, funcName + "_result");
-//        irBuilder->CreateStore(result, retValue);
-//        result = retValue;
-//    }
-
-
-    return result;
+    return irBuilder->CreateCall(func, llvmArgs);
 }
 
 llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperatorExpr *prefixOperatorExpr) {
@@ -1252,29 +1355,29 @@ llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperato
         auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(exprResultType);
 
         llvm::Value* lvalue = generateExpr(prefixOperatorExpr->expr);
-        llvm::Value* rvalue = irBuilder->CreateLoad(lvalue, "l2r");
+        llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
 
         if (prefixOperatorExpr->operatorName() == "++") {
             if (builtInType->isFloating()) {
-                llvm::Value* newValue = irBuilder->CreateFAdd(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)), "preinctmp");
+                llvm::Value* newValue = irBuilder->CreateFAdd(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)));
                 irBuilder->CreateStore(newValue, lvalue);
             } else {
-                llvm::Value* newValue = irBuilder->CreateAdd(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "preinctmp");
+                llvm::Value* newValue = irBuilder->CreateAdd(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)));
                 irBuilder->CreateStore(newValue, lvalue);
             }
         } else if (prefixOperatorExpr->operatorName() == "--") {
             if (builtInType->isFloating()) {
-                llvm::Value* newValue = irBuilder->CreateFSub(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)), "predectmp");
+                llvm::Value* newValue = irBuilder->CreateFSub(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)));
                 irBuilder->CreateStore(newValue, lvalue);
             } else {
-                llvm::Value* newValue = irBuilder->CreateSub(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "predectmp");
+                llvm::Value* newValue = irBuilder->CreateSub(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)));
                 irBuilder->CreateStore(newValue, lvalue);
             }
         } else if (prefixOperatorExpr->operatorName() == "-") {
             if (builtInType->isFloating()) {
-                return irBuilder->CreateFNeg(rvalue, "negtmp");
+                return irBuilder->CreateFNeg(rvalue);
             } else {
-                return irBuilder->CreateNeg(rvalue, "negtmp");
+                return irBuilder->CreateNeg(rvalue);
             }
         } else if (prefixOperatorExpr->operatorName() == "&" || prefixOperatorExpr->operatorName() == ".ref") {
             // NOTE: All error checking for this should be performed in a pass before the code generator
@@ -1289,7 +1392,7 @@ llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperato
         llvm::Value *lvalue = generateExpr(prefixOperatorExpr->expr);
 
         if (prefixOperatorExpr->operatorName() == "*") {
-            return irBuilder->CreateLoad(lvalue, "deref");
+            return irBuilder->CreateLoad(lvalue);
         } else if (prefixOperatorExpr->operatorName() == "++" || prefixOperatorExpr->operatorName() == "--") {
             // TODO: We need to know the size of a pointer to support this...
             printError("increment and decrement operators not yet supported on pointer types!",
@@ -1302,7 +1405,7 @@ llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperato
         llvm::Value *lvalue = generateExpr(prefixOperatorExpr->expr);
 
         if (prefixOperatorExpr->operatorName() == ".deref") {
-            return irBuilder->CreateLoad(lvalue, "deref");
+            return irBuilder->CreateLoad(lvalue);
             //return lvalue;
         } else if (prefixOperatorExpr->operatorName() == "++" || prefixOperatorExpr->operatorName() == "--") {
             // TODO: We need to know the size of a pointer to support this...
@@ -1330,22 +1433,22 @@ llvm::Value *gulc::CodeGen::generatePostfixOperatorExpr(const gulc::PostfixOpera
     auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(postfixOperatorExpr->resultType);
 
     llvm::Value* lvalue = generateExpr(postfixOperatorExpr->expr);
-    llvm::Value* rvalue = irBuilder->CreateLoad(lvalue, "l2r");
+    llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
 
     if (postfixOperatorExpr->operatorName() == "++") {
         if (builtInType->isFloating()) {
-            llvm::Value* newValue = irBuilder->CreateFAdd(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)), "preinctmp");
+            llvm::Value* newValue = irBuilder->CreateFAdd(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)));
             irBuilder->CreateStore(newValue, lvalue);
         } else {
-            llvm::Value* newValue = irBuilder->CreateAdd(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "preinctmp");
+            llvm::Value* newValue = irBuilder->CreateAdd(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)));
             irBuilder->CreateStore(newValue, lvalue);
         }
     } else if (postfixOperatorExpr->operatorName() == "--") {
         if (builtInType->isFloating()) {
-            llvm::Value* newValue = irBuilder->CreateFSub(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)), "predectmp");
+            llvm::Value* newValue = irBuilder->CreateFSub(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)));
             irBuilder->CreateStore(newValue, lvalue);
         } else {
-            llvm::Value* newValue = irBuilder->CreateSub(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)), "predectmp");
+            llvm::Value* newValue = irBuilder->CreateSub(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)));
             irBuilder->CreateStore(newValue, lvalue);
         }
     } else {
@@ -1423,17 +1526,70 @@ llvm::Value *gulc::CodeGen::generateRefStructMemberVariableExpr(const gulc::RefS
     return irBuilder->CreateStructGEP(nullptr, objectRef, index);
 }
 
-llvm::Function *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr, std::string *nameOut) {
+llvm::Value *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr) {
     switch (expr->getExprKind()) {
         case gulc::Expr::Kind::RefFunction: {
             auto refFileFunction = llvm::dyn_cast<RefFunctionExpr>(expr);
-            *nameOut = refFileFunction->function()->name();
             return module->getFunction(refFileFunction->function()->mangledName());
         }
         case gulc::Expr::Kind::RefStructMemberFunction: {
             auto refStructMemberFunction = llvm::dyn_cast<RefStructMemberFunctionExpr>(expr);
-            *nameOut = refStructMemberFunction->refFunction->name();
-            return module->getFunction(refStructMemberFunction->refFunction->mangledName());
+
+            if (refStructMemberFunction->isVTableCall) {
+                llvm::Type* indexType = llvm::Type::getInt32Ty(*llvmContext);
+                llvm::Value* index0 = llvm::ConstantInt::get(indexType, 0);
+
+                llvm::Value* objectRef = generateExpr(refStructMemberFunction->objectRef);
+                gulc::StructDecl* structDecl = refStructMemberFunction->structType->decl();
+
+                // If the current struct type isn't the vtable owner we have to cast it to the owner to grab the vtable
+                if (structDecl->vtableOwner != structDecl) {
+                    llvm::Type* vtableOwnerType = getLlvmStructType(structDecl->vtableOwner);
+
+                    objectRef = irBuilder->CreateBitCast(objectRef, llvm::PointerType::getUnqual(vtableOwnerType));
+                }
+
+                llvm::Value* vtablePointer = irBuilder->CreateStructGEP(nullptr, objectRef, 0);
+
+                bool vtableFunctionFound = false;
+                std::size_t vtableFunctionIndex = 0;
+
+                // Find the index of the referenced function in the vtable
+                for (std::size_t i = 0; i < structDecl->vtable.size(); ++i) {
+                    if (refStructMemberFunction->refFunction == structDecl->vtable[i]) {
+                        vtableFunctionFound = true;
+                        vtableFunctionIndex = i;
+                        break;
+                    }
+                }
+
+                if (!vtableFunctionFound) {
+                    printError("[INTERNAL] referenced virtual function was not found in the vtable!",
+                               expr->startPosition(), expr->endPosition());
+                }
+
+                llvm::Value* indexVTableEntry = llvm::ConstantInt::get(indexType, vtableFunctionIndex);
+
+                // Load the vtable entry pointer
+                llvm::Value* vtableFunctionPointer = irBuilder->CreateGEP(nullptr, vtablePointer, index0);
+
+                vtableFunctionPointer = irBuilder->CreateLoad(vtableFunctionPointer);
+
+                // Cast the vtable entry pointer to the appropriate function pointer type
+                llvm::FunctionType* refFunctionType = getFunctionType(refStructMemberFunction->refFunction);
+                llvm::Type* vtableFunctionType = llvm::PointerType::getUnqual(refFunctionType);
+                vtableFunctionType = llvm::PointerType::getUnqual(vtableFunctionType);
+
+                // This is now a vtable where all function are the type we need...
+                llvm::Value* vtableFunctions = irBuilder->CreateBitCast(vtableFunctionPointer, vtableFunctionType);
+
+                // This is finally a pointer to the function
+                llvm::Value* finalFunctionPointer = irBuilder->CreateGEP(nullptr, vtableFunctions, indexVTableEntry);
+
+                return irBuilder->CreateLoad(finalFunctionPointer);
+            } else {
+                return module->getFunction(refStructMemberFunction->refFunction->mangledName());
+            }
         }
         default:
             printError("[INTERNAL] unsupported function reference!",
@@ -1508,6 +1664,7 @@ llvm::Value *gulc::CodeGen::generateRefBaseExpr(const gulc::RefBaseExpr *refBase
 }
 
 void gulc::CodeGen::generateBaseConstructorCallExpr(const gulc::BaseConstructorCallExpr *baseConstructorCallExpr) {
+    // NOTE: We NEVER call the vtable constructor when calling the base constructor
     llvm::Function* baseConstructorFunc = module->getFunction(baseConstructorCallExpr->baseConstructor->mangledName());
 
     std::vector<llvm::Value*> llvmArgs{};
@@ -1515,11 +1672,14 @@ void gulc::CodeGen::generateBaseConstructorCallExpr(const gulc::BaseConstructorC
 
     gulc::RefParameterExpr refThisExpr({}, {}, 0);
     llvm::Value* refThis = generateRefParameterExpr(&refThisExpr);
-    llvm::Value* derefThis = irBuilder->CreateLoad(refThis, "deref");
+    llvm::Value* derefThis = irBuilder->CreateLoad(refThis);
 
-    // The `0` index is our base struct. This is the same as bitcasting to the base type (and an llvm pass will even
-    // convert the bitcast to the member access)
-    llvm::Value* thisCastedToBase = irBuilder->CreateStructGEP(nullptr, derefThis, 0);
+    gulc::StructType gulcBaseType({}, {}, TypeQualifier::Mut, "",
+                                  baseConstructorCallExpr->baseConstructor->parentStruct);
+    llvm::Type* baseType = generateLlvmType(&gulcBaseType);
+
+    llvm::Value* thisCastedToBase = irBuilder->CreateBitCast(derefThis,
+                                                             llvm::PointerType::getUnqual(baseType));
 
     llvmArgs.push_back(thisCastedToBase);
 
@@ -1538,11 +1698,14 @@ void gulc::CodeGen::generateBaseDestructorCallExpr(const gulc::BaseDestructorCal
 
     gulc::RefParameterExpr refThisExpr({}, {}, 0);
     llvm::Value* refThis = generateRefParameterExpr(&refThisExpr);
-    llvm::Value* derefThis = irBuilder->CreateLoad(refThis, "deref");
+    llvm::Value* derefThis = irBuilder->CreateLoad(refThis);
 
-    // The `0` index is our base struct. This is the same as bitcasting to the base type (and an llvm pass will even
-    // convert the bitcast to the member access)
-    llvm::Value* thisCastedToBase = irBuilder->CreateStructGEP(nullptr, derefThis, 0);
+    gulc::StructType gulcBaseType({}, {}, TypeQualifier::Mut, "",
+                                  baseDestructorCallExpr->baseDestructor->parentStruct);
+    llvm::Type* baseType = generateLlvmType(&gulcBaseType);
+
+    llvm::Value* thisCastedToBase = irBuilder->CreateBitCast(derefThis,
+                                                             llvm::PointerType::getUnqual(baseType));
 
     llvmArgs.push_back(thisCastedToBase);
 
@@ -1559,35 +1722,35 @@ void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& va
             if (fromBuiltIn->isFloating()) {
                 if (toBuiltIn->isFloating()) {
                     if (toBuiltIn->size() > fromBuiltIn->size()) {
-                        value = irBuilder->CreateFPExt(value, generateLlvmType(to), "fpext");
+                        value = irBuilder->CreateFPExt(value, generateLlvmType(to));
                         return;
                     } else {
-                        value = irBuilder->CreateFPTrunc(value, generateLlvmType(to), "fptrunc");
+                        value = irBuilder->CreateFPTrunc(value, generateLlvmType(to));
                         return;
                     }
                 } else if (toBuiltIn->isSigned()) {
-                    value = irBuilder->CreateFPToSI(value, generateLlvmType(to), "fp2si");
+                    value = irBuilder->CreateFPToSI(value, generateLlvmType(to));
                     return;
                 } else {
-                    value = irBuilder->CreateFPToUI(value, generateLlvmType(to), "fp2ui");
+                    value = irBuilder->CreateFPToUI(value, generateLlvmType(to));
                     return;
                 }
             } else if (fromBuiltIn->isSigned()) {
                 if (toBuiltIn->isFloating()) {
-                    value = irBuilder->CreateSIToFP(value, generateLlvmType(to), "si2fp");
+                    value = irBuilder->CreateSIToFP(value, generateLlvmType(to));
                     return;
                 } else {
                     // TODO: I'm not sure if the `isSigned` is meant for `value` or `destTy`? Assuming value...
-                    value = irBuilder->CreateIntCast(value, generateLlvmType(to), fromBuiltIn->isSigned(), "si2int");
+                    value = irBuilder->CreateIntCast(value, generateLlvmType(to), fromBuiltIn->isSigned());
                     return;
                 }
             } else {
                 if (toBuiltIn->isFloating()) {
-                    value = irBuilder->CreateUIToFP(value, generateLlvmType(to), "ui2fp");
+                    value = irBuilder->CreateUIToFP(value, generateLlvmType(to));
                     return;
                 } else {
                     // TODO: I'm not sure if the `isSigned` is meant for `value` or `destTy`? Assuming value...
-                    value = irBuilder->CreateIntCast(value, generateLlvmType(to), fromBuiltIn->isSigned(), "ui2int");
+                    value = irBuilder->CreateIntCast(value, generateLlvmType(to), fromBuiltIn->isSigned());
                     return;
                 }
             }
@@ -1598,7 +1761,7 @@ void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& va
                 return;
             }
 
-            value = irBuilder->CreateIntToPtr(value, generateLlvmType(to), "int2ptr");
+            value = irBuilder->CreateIntToPtr(value, generateLlvmType(to));
             return;
         }
     } else if (llvm::isa<gulc::ReferenceType>(from)) {

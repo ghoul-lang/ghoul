@@ -26,23 +26,31 @@
 #include "TemplateParameterDecl.hpp"
 
 namespace gulc {
+    enum class FunctionModifiers {
+        None,
+        Virtual,
+        Override,
+        Abstract,
+        Static
+    };
+
     class FunctionDecl : public Decl {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Function; }
 
         FunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                     Visibility visibility, Type* resultType, std::vector<ParameterDecl*> parameters,
-                     CompoundStmt* body)
+                     Visibility visibility, FunctionModifiers modifier, Type* resultType,
+                     std::vector<ParameterDecl*> parameters, CompoundStmt* body)
                 : FunctionDecl(std::move(name), std::move(sourceFile), startPosition, endPosition, visibility,
-                               resultType, std::move(parameters), body, {}) {}
+                               modifier, resultType, std::move(parameters), body, {}) {}
 
         FunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                     Visibility visibility, Type* resultType, std::vector<ParameterDecl*> parameters,
-                     CompoundStmt* body, std::vector<Expr*> templateArguments)
+                     Visibility visibility, FunctionModifiers modifier, Type* resultType,
+                     std::vector<ParameterDecl*> parameters, CompoundStmt* body, std::vector<Expr*> templateArguments)
                 : Decl(Kind::Function, std::move(name), std::move(sourceFile), startPosition, endPosition,
                        visibility),
                   templateArguments(std::move(templateArguments)), resultType(resultType),
-                  parameters(std::move(parameters)), _body(body), _isMain(false) {
+                  parameters(std::move(parameters)), _body(body), _isMain(false), _modifier(modifier) {
             if (this->name() == "main") {
                 _isMain = true;
             }
@@ -56,6 +64,14 @@ namespace gulc {
         bool hasParameters() const { return !parameters.empty(); }
 
         bool isMain() const { return _isMain; }
+
+        FunctionModifiers modifier() const { return _modifier; }
+        
+        // Returns true if the function is `abstract`, `virtual`, or `override`
+        bool isVirtual() const {
+            return _modifier == FunctionModifiers::Abstract || _modifier == FunctionModifiers::Virtual ||
+                   _modifier == FunctionModifiers::Override;
+        }
 
         Decl* deepCopy() const override {
             std::vector<Expr*> copiedTemplateArguments;
@@ -71,7 +87,7 @@ namespace gulc {
 
             auto result = new FunctionDecl(name(), sourceFile(),
                                            startPosition(), endPosition(),
-                                           visibility(),
+                                           visibility(), _modifier,
                                            resultType->deepCopy(),
                                            std::move(copiedParameters), static_cast<CompoundStmt*>(_body->deepCopy()),
                                            std::move(copiedTemplateArguments));
@@ -100,6 +116,7 @@ namespace gulc {
     private:
         CompoundStmt* _body;
         bool _isMain;
+        FunctionModifiers _modifier;
 
     };
 }

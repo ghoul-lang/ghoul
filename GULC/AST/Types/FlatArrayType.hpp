@@ -42,6 +42,9 @@ namespace gulc {
      *         int[] dynamicArray;
      *     }
      */
+    // TODO: Should we remove this and make this apart of `GlobalVariableExpr`? Variables declared `FlatArrayType`
+    //       ARE NOT passable, unless you take the address of it and make it an unsafe pointer with no compiler defined
+    //       length anymore.
     class FlatArrayType : public Type {
     public:
         static bool classof(const Type *expr) { return expr->getTypeKind() == Kind::FlatArray; }

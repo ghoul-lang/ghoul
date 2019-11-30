@@ -36,14 +36,15 @@ namespace gulc {
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::TemplateFunction; }
 
         TemplateFunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                             Visibility visibility, Type* resultType,
+                             Visibility visibility, FunctionModifiers modifier, Type* resultType,
                              std::vector<TemplateParameterDecl*> templateParameters,
                              std::vector<ParameterDecl*> parameters, CompoundStmt* body)
                 : TemplateFunctionDecl(std::move(name), std::move(sourceFile), startPosition, endPosition, visibility,
-                                       resultType, std::move(templateParameters), std::move(parameters), body, {}) {}
+                                       modifier, resultType, std::move(templateParameters), std::move(parameters),
+                                       body, {}) {}
 
         TemplateFunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                             Visibility visibility, Type* resultType,
+                             Visibility visibility, FunctionModifiers modifier, Type* resultType,
                              std::vector<TemplateParameterDecl*> templateParameters,
                              std::vector<ParameterDecl*> parameters, CompoundStmt* body,
                              std::vector<FunctionDecl*> implementedFunctions)
@@ -51,7 +52,7 @@ namespace gulc {
                        visibility),
                   resultType(resultType), templateParameters(std::move(templateParameters)),
                   parameters(std::move(parameters)), _body(body),
-                  _implementedFunctions(std::move(implementedFunctions)) {}
+                  _implementedFunctions(std::move(implementedFunctions)), _modifier(modifier) {}
 
         Type* resultType;
         std::vector<TemplateParameterDecl*> templateParameters;
@@ -171,7 +172,7 @@ namespace gulc {
 
             auto newFunction = new FunctionDecl(name(), sourceFile(),
                                                 startPosition(), endPosition(),
-                                                visibility(),
+                                                visibility(), _modifier,
                                                 resultType->deepCopy(), copiedParameters,
                                                 static_cast<CompoundStmt*>(_body->deepCopy()),
                                                 resultTemplateArguments);
@@ -196,7 +197,7 @@ namespace gulc {
 
             auto result = new FunctionDecl(name(), sourceFile(),
                                            startPosition(), endPosition(),
-                                           visibility(),
+                                           visibility(), _modifier,
                                            resultType->deepCopy(),
                                            std::move(copiedParameters), static_cast<CompoundStmt*>(_body->deepCopy()));
             result->parentNamespace = parentNamespace;
@@ -220,6 +221,9 @@ namespace gulc {
     private:
         CompoundStmt* _body;
         std::vector<FunctionDecl*> _implementedFunctions;
+        // NOTE: Template functions CANNOT be `virtual`, `override`, or `abstract`. Must use slower `generic` functions
+        //       that have to have the `generic` types passed as arguments
+        FunctionModifiers _modifier;
 
     };
 }

@@ -27,19 +27,23 @@ namespace gulc {
 
         RefStructMemberFunctionExpr(TextPosition startPosition, TextPosition endPosition,
                                     Expr* objectRef,
-                                    StructType* structType, FunctionDecl* refFunction)
+                                    StructType* structType, FunctionDecl* refFunction,
+                                    bool isVTableCall)
                 : Expr(Kind::RefStructMemberFunction, startPosition, endPosition),
-                  objectRef(objectRef), structType(structType), refFunction(refFunction) {}
+                  objectRef(objectRef), structType(structType), refFunction(refFunction), isVTableCall(isVTableCall) {}
 
         Expr* objectRef;
         StructType* structType;
         FunctionDecl* refFunction;
+        // Tells the codegen whether or not to access the vtable for this call
+        bool isVTableCall;
 
         Expr* deepCopy() const override {
             auto result = new RefStructMemberFunctionExpr(startPosition(), endPosition(),
                                                           objectRef->deepCopy(),
                                                           llvm::dyn_cast<StructType>(structType->deepCopy()),
-                                                          llvm::dyn_cast<FunctionDecl>(refFunction->deepCopy()));
+                                                          llvm::dyn_cast<FunctionDecl>(refFunction->deepCopy()),
+                                                          isVTableCall);
             if (resultType) {
                 result->resultType = resultType->deepCopy();
             }

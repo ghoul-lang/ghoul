@@ -32,12 +32,14 @@ namespace gulc {
                 : Decl(Kind::Constructor, std::move(name), std::move(sourceFile), startPosition, endPosition,
                        visibility),
                   parameters(std::move(parameters)), baseConstructor(nullptr),
-                  baseConstructorCall(baseConstructorCall), _body(body), _assignsVTable(false) {}
+                  baseConstructorCall(baseConstructorCall), _body(body) {}
 
         std::vector<ParameterDecl*> parameters;
         bool hasParameters() const { return !parameters.empty(); }
         CompoundStmt* body() const { return _body; }
-        bool assignsVTable() const { return _assignsVTable; }
+
+        std::string mangledNameVTable() const { return _mangledNameVTable; }
+        void setMangledNameVTable(std::string const& mangledName) { _mangledNameVTable = mangledName; }
 
         // This is used for calling a base struct's constructor
         // We don't own this so we don't free it
@@ -66,6 +68,7 @@ namespace gulc {
             result->parentNamespace = parentNamespace;
             result->parentStruct = parentStruct;
             result->baseConstructor = baseConstructor;
+            result->_mangledNameVTable = _mangledNameVTable;
 
             return result;
         }
@@ -82,8 +85,9 @@ namespace gulc {
 
     private:
         CompoundStmt* _body;
-        // This is used to differentiate between constructors that can be called as a base constructor and ones that cannot
-        bool _assignsVTable;
+        // We force `CodeGen` to generate the vtable variant of every constructor instead of duplicating constructors.
+        // So we have a separate mangled name here for the vtable setting constructor
+        std::string _mangledNameVTable;
 
     };
 }

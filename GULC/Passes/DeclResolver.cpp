@@ -1568,11 +1568,12 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
             }
 
             expr = new RefBaseExpr(refParam->startPosition(), refParam->endPosition(), refParam);
-            // TODO: Function calls on `RefBaseExpr` should ONLY be non-virtual, if a `virtual` function is called
-            //       then we DO NOT use the vtable to look it up. We put in a direct call
-            expr->resultType = new StructType({}, {}, TypeQualifier::None,
-                                              currentStruct->baseStruct->name(),
-                                              currentStruct->baseStruct);
+            auto baseType = new StructType({}, {}, TypeQualifier::None,
+                                           currentStruct->baseStruct->name(),
+                                           currentStruct->baseStruct);
+            // Disallow using the vtable for any function calls
+            baseType->setDoVTableCalls(false);
+            expr->resultType = baseType;
         } else {
             // TODO: We should implement a `RefThisExpr` to make error checking easier
             expr = refParam;
@@ -2282,7 +2283,8 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
                                                                              memberAccessCallExpr->endPosition(),
                                                                              memberAccessCallExpr->objectRef,
                                                                              accessAsStructType,
-                                                                             foundFunction);
+                                                                             foundFunction,
+                                                                             structType->doVTableCalls() && foundFunction->isVirtual());
                     // TODO: We should probably replace this with a `MemberFunctionPointerType` or something so the `this` parameter is apart of the type...
                     refStructFunction->resultType = new FunctionPointerType({}, {}, TypeQualifier::None, resultTypeCopy, paramTypeCopy);
 

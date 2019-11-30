@@ -21,6 +21,7 @@
 #include "GlobalVariableDecl.hpp"
 #include "ConstructorDecl.hpp"
 #include "DestructorDecl.hpp"
+#include "FunctionDecl.hpp"
 
 namespace gulc {
     class StructDecl : public Decl {
@@ -55,7 +56,24 @@ namespace gulc {
         // This is the COMPLETE size of the struct plus the base without padding at the end
         std::size_t completeSizeWithoutPad;
 
+        // The virtual function table for this struct
+        std::vector<FunctionDecl*> vtable;
+
+        // The `StructDecl` that contains the vtable
+        // NOTE: Structs only contain ONE vtable in GUL since we only support single inheritance
+        //       If a struct inherits a `trait` the functions in that trait are NOT virtual by default so we don't have
+        //       to worry about including those functions in our vtable unless the struct explicitly marks those
+        //       functions it inherits as `virtual` inside the struct. At which point they will be added to the `vtable`
+        //       the same way any other struct is added to the vtable. Constructing the `vtable` for a `trait` will be
+        //       handled differently
+        StructDecl* vtableOwner;
+
+        // Since the Itanium spec gives us a mangled name specification for the vtable, we will use it here.
+        std::string vtableName;
+
         Decl* deepCopy() const override {
+            // TODO: Currently this doesn't properly copy `vtable`, `dataMembers`, `virtualFunctions`, etc.
+            throw std::runtime_error("`StructDecl::deepCopy` is broken.");
             std::vector<Type*> copiedBaseTypes{};
             std::vector<ConstructorDecl*> copiedConstructors{};
             std::vector<Decl*> copiedMembers{};
@@ -86,6 +104,9 @@ namespace gulc {
             result->baseStruct = baseStruct;
             result->inheritedMembers = std::vector<Decl*>(inheritedMembers);
             result->completeSizeWithoutPad = completeSizeWithoutPad;
+            result->vtable = vtable;
+            result->vtableOwner = vtableOwner;
+            result->vtableName = vtableName;
 
             return result;
         }

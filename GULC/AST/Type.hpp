@@ -38,7 +38,8 @@ namespace gulc {
             Reference,
             Enum,
             Struct,
-            FlatArray
+            FlatArray,
+            VTable
         };
 
         TypeQualifier qualifier() const { return _qualifier; }

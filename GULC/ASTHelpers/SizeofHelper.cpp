@@ -20,6 +20,7 @@
 #include <AST/Types/PointerType.hpp>
 #include <AST/Types/ReferenceType.hpp>
 #include <AST/Types/StructType.hpp>
+#include <AST/Types/VTableType.hpp>
 #include "SizeofHelper.hpp"
 
 gulc::SizeAndAlignment gulc::SizeofHelper::getSizeAndAlignmentOf(Target* target, gulc::Type *type) {
@@ -42,6 +43,8 @@ gulc::SizeAndAlignment gulc::SizeofHelper::getSizeAndAlignmentOf(Target* target,
         structSize += target->alignofStruct() - (structSize % target->alignofStruct());
 
         return gulc::SizeAndAlignment(structSize, target->alignofStruct());
+    } else if (llvm::isa<VTableType>(type)) {
+        return gulc::SizeAndAlignment(target->sizeofPtr(), target->sizeofPtr());
     }
 
     // Anything else is zero since we don't handle errors here

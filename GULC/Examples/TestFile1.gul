@@ -18,7 +18,7 @@ struct BaseStruct
         this.l = i + j;
     }
 
-    public void setI()
+    public virtual void setI()
     {
         i = 4;
     }
@@ -37,9 +37,9 @@ struct ChildStruct : BaseStruct
         this.k = k;
     }
 
-    public void setI()
+    public override void setI()
     {
-        base.setI();
+        i = 12;
     }
 
     public int getBaseI()
@@ -55,5 +55,5 @@ int main()
 
     cs.setI();
 
-    return cs.getBaseI();
+    return cs.i;
 }

@@ -27,21 +27,28 @@ namespace gulc {
         StructType(TextPosition startPosition, TextPosition endPosition, TypeQualifier qualifier,
                    std::string name, StructDecl* decl)
                 : Type(Kind::Struct, startPosition, endPosition, qualifier),
-                  _name(std::move(name)), _decl(decl) {}
+                  _name(std::move(name)), _decl(decl), _doVTableCalls(true) {}
 
         StructDecl* decl() const { return _decl; }
 
         std::string getString() const override { return _name; }
 
+        bool doVTableCalls() const { return _doVTableCalls; }
+        void setDoVTableCalls(bool val) { _doVTableCalls = val; }
+
         Type* deepCopy() const override {
-            return new StructType(startPosition(), endPosition(), qualifier(),
-                                  _name, _decl);
+            auto result = new StructType(startPosition(), endPosition(), qualifier(),
+                                         _name, _decl);
+            result->setDoVTableCalls(_doVTableCalls);
+            return result;
         }
 
     private:
         std::string _name;
         // We don't own this so we don't free it.
         StructDecl* _decl;
+        // In some scenarios (mainly just with `base`) we don't perform vtable calls, we call the straight function
+        bool _doVTableCalls;
 
     };
 }

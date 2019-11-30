@@ -147,7 +147,7 @@ namespace gulc {
         void generateBaseConstructorCallExpr(const BaseConstructorCallExpr* baseConstructorCallExpr);
         void generateBaseDestructorCallExpr(const BaseDestructorCallExpr* baseDestructorCallExpr);
 
-        llvm::Function* generateRefFunctionExpr(const Expr* expr, std::string* nameOut);
+        llvm::Value* generateRefFunctionExpr(const Expr* expr);
 
         void castValue(gulc::Type* to, gulc::Type* from, llvm::Value*& value);
 
@@ -334,6 +334,24 @@ namespace gulc {
                     return resultPadded;
                 }
             }
+        }
+
+        llvm::FunctionType* getFunctionType(FunctionDecl* functionDecl) {
+            std::vector<llvm::Type*> paramTypes = generateParamTypes(functionDecl->parameters,
+                                                                     functionDecl->parentStruct);
+            llvm::Type* returnType = generateLlvmType(functionDecl->resultType);
+
+            return llvm::FunctionType::get(returnType, paramTypes, false);
+        }
+
+        llvm::Function* getFunction(FunctionDecl* functionDecl) {
+            std::vector<llvm::Type*> paramTypes = generateParamTypes(functionDecl->parameters,
+                                                                     functionDecl->parentStruct);
+            llvm::Type* returnType = generateLlvmType(functionDecl->resultType);
+            llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
+
+            // TODO: Why does this return `llvm::Constant*` instead of `llvm::Function*`?
+            return llvm::dyn_cast<llvm::Function>(module->getOrInsertFunction(functionDecl->mangledName(), functionType));
         }
 
     };

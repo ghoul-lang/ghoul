@@ -34,13 +34,16 @@ namespace gulc {
     class Inheriter {
     private:
         Target* _target;
+        FileAST* currentFileAst;
 
     public:
-        explicit Inheriter(Target* target) : _target(target) {}
+        explicit Inheriter(Target* target) : _target(target), currentFileAst(nullptr) {}
 
         void processFile(std::vector<FileAST*>& files);
 
     private:
+        void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
+
         void processDecl(Decl* decl);
 
         void processNamespaceDecl(NamespaceDecl* namespaceDecl);
