@@ -59,6 +59,7 @@
 #include <AST/Exprs/RefBaseExpr.hpp>
 #include <Targets/Target.hpp>
 #include <ASTHelpers/SizeofHelper.hpp>
+#include <AST/Stmts/ConstructStructMemberVariableStmt.hpp>
 #include "Module.hpp"
 
 namespace gulc {
@@ -115,6 +116,7 @@ namespace gulc {
         void generateForStmt(const ForStmt* forStmt, const std::string& loopName);
         void generateBreakStmt(const BreakStmt* breakStmt);
         void generateContinueStmt(const ContinueStmt* continueStmt);
+        void generateConstructStructMemberVariableStmt(const ConstructStructMemberVariableStmt* constructStructMemberVariableStmt);
 
         // Types
         llvm::Type* generateLlvmType(const gulc::Type* type);

@@ -41,7 +41,9 @@ namespace gulc {
 
             Try,
             TryCatch,
-            TryFinally
+            TryFinally,
+
+            ConstructStructMemberVariable
         };
 
         Kind getStmtKind() const { return _kind; }

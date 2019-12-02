@@ -19,6 +19,9 @@ namespace gulc {
             Different
         };
 
+        static CompareResult compareParams(const std::vector<ParameterDecl*>& originalParams,
+                                           const std::vector<ParameterDecl*>& compareToParams);
+
         /**
          * Compare two functions to see how similar they are
          *

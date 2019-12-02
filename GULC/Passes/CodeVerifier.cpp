@@ -22,6 +22,7 @@
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
 #include <AST/Types/StructType.hpp>
 #include <ASTHelpers/VisibilityChecker.hpp>
+#include <ASTHelpers/FunctionComparer.hpp>
 #include "CodeVerifier.hpp"
 #include "DeclResolver.hpp"
 
@@ -301,7 +302,17 @@ void CodeVerifier::verifyExpr(Expr*& expr) {
 
 // Decls
 void CodeVerifier::verifyConstructorDecl(ConstructorDecl *constructorDecl) {
-    // TODO: We have to verify a constructor with the same signature doesn't already exist...
+    // Verify a constructor with the same signature doesn't already exist...
+    for (ConstructorDecl* checkConstructor : currentStruct->constructors) {
+        if (checkConstructor != constructorDecl) {
+            if (FunctionComparer::compareParams(constructorDecl->parameters, checkConstructor->parameters) ==
+                    FunctionComparer::CompareResult::Identical) {
+                printError("a constructor with the same signature already exists!",
+                           constructorDecl->startPosition(), constructorDecl->endPosition());
+            }
+        }
+    }
+
     currentFunctionReturnType = nullptr;
     currentFunctionParameters = &constructorDecl->parameters;
 

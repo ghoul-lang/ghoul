@@ -21,6 +21,9 @@
 #include <AST/Types/ReferenceType.hpp>
 #include <AST/Types/StructType.hpp>
 #include <AST/Types/VTableType.hpp>
+#include <AST/Types/FlatArrayType.hpp>
+#include <AST/Exprs/IntegerLiteralExpr.hpp>
+#include <iostream>
 #include "SizeofHelper.hpp"
 
 gulc::SizeAndAlignment gulc::SizeofHelper::getSizeAndAlignmentOf(Target* target, gulc::Type *type) {
@@ -45,6 +48,30 @@ gulc::SizeAndAlignment gulc::SizeofHelper::getSizeAndAlignmentOf(Target* target,
         return gulc::SizeAndAlignment(structSize, target->alignofStruct());
     } else if (llvm::isa<VTableType>(type)) {
         return gulc::SizeAndAlignment(target->sizeofPtr(), target->sizeofPtr());
+    } else if (llvm::isa<FlatArrayType>(type)) {
+        auto flatArrayType = llvm::dyn_cast<FlatArrayType>(type);
+
+        gulc::SizeAndAlignment indexSizeAndAlign = getSizeAndAlignmentOf(target, flatArrayType->indexType);
+
+        std::size_t flatArraySize = 0;
+
+        if (!llvm::isa<IntegerLiteralExpr>(flatArrayType->length)) {
+            std::cerr << "[INTERNAL ERROR] flat array type found in `SizeOfHelper` with length type that is NOT an integer!" << std::endl;
+            std::exit(1);
+        }
+
+        auto integerLiteral = llvm::dyn_cast<IntegerLiteralExpr>(flatArrayType->length);
+
+        if (target->sizeofUSize() == 8) {
+            flatArraySize = std::stoull(integerLiteral->numberString, nullptr, integerLiteral->numberBase());
+        } else {
+            // Assume 32 bit
+            flatArraySize = std::stoul(integerLiteral->numberString, nullptr, integerLiteral->numberBase());
+        }
+
+        flatArraySize *= indexSizeAndAlign.size;
+
+        return gulc::SizeAndAlignment(flatArraySize, indexSizeAndAlign.align);
     }
 
     // Anything else is zero since we don't handle errors here

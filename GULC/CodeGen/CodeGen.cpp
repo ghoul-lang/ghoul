@@ -302,9 +302,15 @@ void gulc::CodeGen::generateStmt(const gulc::Stmt *stmt, const std::string& stmt
             return;
         case gulc::Stmt::Kind::While:
             return generateWhileStmt(llvm::dyn_cast<WhileStmt>(stmt), stmtName);
+        case gulc::Stmt::Kind::ConstructStructMemberVariable:
+            return generateConstructStructMemberVariableStmt(llvm::dyn_cast<ConstructStructMemberVariableStmt>(stmt));
         case gulc::Stmt::Kind::Expr:
             generateExpr(llvm::dyn_cast<Expr>(stmt));
             break;
+        default:
+            printError("unexpected statement type in code generator!",
+                       stmt->startPosition(), stmt->endPosition());
+            return;
     }
 }
 
@@ -443,7 +449,6 @@ void gulc::CodeGen::generateConstructorDecl(const gulc::ConstructorDecl *constru
     llvm::Type* returnType = llvm::Type::getVoidTy(*llvmContext);
     llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
     llvm::Function* function = module->getFunction(constructorDecl->mangledName());
-    llvm::Function* functionVTable = module->getFunction(constructorDecl->mangledNameVTable());
 
     if (!function) {
         auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
@@ -480,74 +485,79 @@ void gulc::CodeGen::generateConstructorDecl(const gulc::ConstructorDecl *constru
         currentFunction = nullptr;
     }
 
-    if (!functionVTable) {
-        auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
+    // If there is a vtable we generate a vtable constructor
+    if (!constructorDecl->parentStruct->vtable.empty()) {
+        llvm::Function *functionVTable = module->getFunction(constructorDecl->mangledNameVTable());
 
-        if (isInternal) {
-            linkageType = llvm::Function::LinkageTypes::InternalLinkage;
-        }
+        if (!functionVTable) {
+            auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
 
-        functionVTable = llvm::Function::Create(functionType, linkageType, constructorDecl->mangledNameVTable(),
-                                                module);
-    }
-
-    // Generate the constructor that DOES assign the vtable
-    {
-        gulc::StructType gulcVTableOwnerType({}, {}, TypeQualifier::Mut, "",
-                                             constructorDecl->parentStruct->vtableOwner);
-        llvm::Type* vtableOwnerType = generateLlvmType(&gulcVTableOwnerType);
-
-        llvm::BasicBlock *funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", functionVTable);
-        irBuilder->SetInsertPoint(funcBody);
-
-        setCurrentFunction(functionVTable);
-
-        // TODO: Assign vtable here
-        {
-            llvm::Value *refThis = currentFunctionParameters[0];
-            llvm::Value *derefThis = irBuilder->CreateLoad(refThis);
-            llvm::Value *vtableOwner = derefThis;
-
-            // Cast to the vtable owner if we have to
-            if (constructorDecl->parentStruct != constructorDecl->parentStruct->vtableOwner) {
-                vtableOwner = irBuilder->CreateBitCast(vtableOwner, llvm::PointerType::getUnqual(vtableOwnerType));
+            if (isInternal) {
+                linkageType = llvm::Function::LinkageTypes::InternalLinkage;
             }
 
-            // Get a reference to the vtable
-            llvm::Value* vtableRef = module->getGlobalVariable(constructorDecl->parentStruct->vtableName, true);
-
-            // Get a pointer to array
-            llvm::Value* index0 = llvm::ConstantInt::get(*llvmContext, llvm::APInt(32, 0, false));
-            vtableRef = irBuilder->CreateGEP(vtableRef, index0);
-
-            // Cast the pointer to the correct type (void (...)**)
-            llvm::Type* elementType = llvm::FunctionType::get(llvm::Type::getVoidTy(*llvmContext), true);
-            elementType = llvm::PointerType::get(elementType, 0);
-            elementType = llvm::PointerType::get(elementType, 0);
-
-            vtableRef = irBuilder->CreateBitCast(vtableRef, elementType);
-
-            // Grab the vtable member and set it
-            llvm::Value* vtableMemberRef = irBuilder->CreateStructGEP(vtableOwner, 0);
-            irBuilder->CreateStore(vtableRef, vtableMemberRef, false);
+            functionVTable = llvm::Function::Create(functionType, linkageType, constructorDecl->mangledNameVTable(),
+                                                    module);
         }
 
-        // If there is a base constructor we HAVE to call it as the first line of the constructor
-        if (constructorDecl->baseConstructor != nullptr) {
-            generateBaseConstructorCallExpr(constructorDecl->baseConstructorCall);
+        // Generate the constructor that DOES assign the vtable
+        {
+            gulc::StructType gulcVTableOwnerType({}, {}, TypeQualifier::Mut, "",
+                                                 constructorDecl->parentStruct->vtableOwner);
+            llvm::Type *vtableOwnerType = generateLlvmType(&gulcVTableOwnerType);
+
+            llvm::BasicBlock *funcBody = llvm::BasicBlock::Create(*llvmContext, "entry", functionVTable);
+            irBuilder->SetInsertPoint(funcBody);
+
+            setCurrentFunction(functionVTable);
+
+            // TODO: Assign vtable here
+            {
+                llvm::Value *refThis = currentFunctionParameters[0];
+                llvm::Value *derefThis = irBuilder->CreateLoad(refThis);
+                llvm::Value *vtableOwner = derefThis;
+
+                // Cast to the vtable owner if we have to
+                if (constructorDecl->parentStruct != constructorDecl->parentStruct->vtableOwner) {
+                    vtableOwner = irBuilder->CreateBitCast(vtableOwner, llvm::PointerType::getUnqual(vtableOwnerType));
+                }
+
+                // Get a reference to the vtable
+                llvm::Value *vtableRef = module->getGlobalVariable(constructorDecl->parentStruct->vtableName, true);
+
+                // Get a pointer to array
+                llvm::Value *index0 = llvm::ConstantInt::get(*llvmContext, llvm::APInt(32, 0, false));
+                vtableRef = irBuilder->CreateGEP(vtableRef, index0);
+
+                // Cast the pointer to the correct type (void (...)**)
+                llvm::Type *elementType = llvm::FunctionType::get(llvm::Type::getVoidTy(*llvmContext), true);
+                elementType = llvm::PointerType::get(elementType, 0);
+                elementType = llvm::PointerType::get(elementType, 0);
+
+                vtableRef = irBuilder->CreateBitCast(vtableRef, elementType);
+
+                // Grab the vtable member and set it
+                llvm::Value *vtableMemberRef = irBuilder->CreateStructGEP(vtableOwner, 0);
+                irBuilder->CreateStore(vtableRef, vtableMemberRef, false);
+            }
+
+            // If there is a base constructor we HAVE to call it as the first line of the constructor
+            if (constructorDecl->baseConstructor != nullptr) {
+                generateBaseConstructorCallExpr(constructorDecl->baseConstructorCall);
+            }
+
+            // Generate the function body
+            currentFunctionLocalVariablesCount = 0;
+            generateStmt(constructorDecl->body());
+            currentFunctionLocalVariablesCount = 0;
+
+            verifyFunction(*functionVTable);
+            funcPass->run(*functionVTable);
+
+            // Reset the insertion point (this probably isn't needed but oh well)
+            irBuilder->ClearInsertionPoint();
+            currentFunction = nullptr;
         }
-
-        // Generate the function body
-        currentFunctionLocalVariablesCount = 0;
-        generateStmt(constructorDecl->body());
-        currentFunctionLocalVariablesCount = 0;
-
-        verifyFunction(*functionVTable);
-        funcPass->run(*functionVTable);
-
-        // Reset the insertion point (this probably isn't needed but oh well)
-        irBuilder->ClearInsertionPoint();
-        currentFunction = nullptr;
     }
 }
 
@@ -1043,6 +1053,52 @@ void gulc::CodeGen::generateContinueStmt(const gulc::ContinueStmt *continueStmt)
 
         irBuilder->CreateBr(continueBlock);
     }
+}
+
+void gulc::CodeGen::generateConstructStructMemberVariableStmt(const gulc::ConstructStructMemberVariableStmt *constructStructMemberVariableStmt) {
+    // Grab the `this` variable for the struct we will be constructing the member of
+    llvm::Value *refThis = currentFunctionParameters[0];
+    llvm::Value *derefThis = irBuilder->CreateLoad(refThis);
+
+    const std::vector<GlobalVariableDecl*>& dataMembers = currentStruct->dataMembers;
+    unsigned int index = 0;
+    bool elementFound = false;
+
+    for (std::size_t i = 0; i < dataMembers.size(); ++i) {
+        // We check if the pointers are the same for equality...
+        if (dataMembers[i] == constructStructMemberVariableStmt->refMemberVariable) {
+            index = i;
+            elementFound = true;
+            break;
+        }
+    }
+
+    if (!elementFound) {
+        printError("[INTERNAL] struct element '" + constructStructMemberVariableStmt->refMemberVariable->name() + "' was not found!",
+                   constructStructMemberVariableStmt->startPosition(), constructStructMemberVariableStmt->endPosition());
+    }
+
+    // If the struct has a base type we increment it by one to account for the base class member
+    if (currentStruct->baseStruct != nullptr) {
+        index += 1;
+    }
+
+    // Get the member reference for construction
+    llvm::Value* memberRef = irBuilder->CreateStructGEP(nullptr, derefThis, index);
+    // TODO: Do we need to dereference it?
+//    memberRef = irBuilder->CreateLoad(memberRef);
+
+    llvm::Function* memberConstructor;
+
+    // Call constructor based on if the type has a vtable or not
+    if (constructStructMemberVariableStmt->constructorDecl->parentStruct->vtable.empty()) {
+        memberConstructor = module->getFunction(constructStructMemberVariableStmt->constructorDecl->mangledName());
+    } else {
+        memberConstructor = module->getFunction(constructStructMemberVariableStmt->constructorDecl->mangledNameVTable());
+    }
+
+    // Call the constructor
+    irBuilder->CreateCall(memberConstructor, llvm::ArrayRef<llvm::Value*>(&memberRef, 1));
 }
 
 // Exprs

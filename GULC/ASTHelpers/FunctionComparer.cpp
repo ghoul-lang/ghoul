@@ -3,15 +3,10 @@
 
 using namespace gulc;
 
-FunctionComparer::CompareResult FunctionComparer::compare(const FunctionDecl *original,
-                                                          const FunctionDecl *compareTo) {
-    // If they have different names then they are always different
-    if (original->name() != compareTo->name()) {
-        return CompareResult::Different;
-    }
-
-    std::size_t originalSize = original->parameters.size();
-    std::size_t compareToSize = compareTo->parameters.size();
+FunctionComparer::CompareResult FunctionComparer::compareParams(const std::vector<ParameterDecl *> &originalParams,
+                                                                const std::vector<ParameterDecl *> &compareToParams) {
+    std::size_t originalSize = originalParams.size();
+    std::size_t compareToSize = compareToParams.size();
     std::size_t paramSize = originalSize;
 
     if (compareToSize > paramSize) {
@@ -21,7 +16,7 @@ FunctionComparer::CompareResult FunctionComparer::compare(const FunctionDecl *or
     for (std::size_t i = 0; i < paramSize; ++i) {
         if (i >= originalSize) {
             // If we've reached the end of the original's parameters...
-            if (compareTo->parameters[i]->hasDefaultArgument()) {
+            if (compareToParams[i]->hasDefaultArgument()) {
                 // If the compare to parameter has a default value then the two functions are similar but differentiable
                 return CompareResult::SimilarDifferentiable;
             } else {
@@ -30,21 +25,21 @@ FunctionComparer::CompareResult FunctionComparer::compare(const FunctionDecl *or
             }
         } else if (i >= compareToSize) {
             // If we've reached the end of the compare to's parameters...
-            if (original->parameters[i]->hasDefaultArgument()) {
+            if (originalParams[i]->hasDefaultArgument()) {
                 // If the original parameter has a default value then the two functions are similar but differentiable
                 return CompareResult::SimilarDifferentiable;
             } else {
                 // If the compare to parameter does not have a default value then the two functions are different
                 return CompareResult::Different;
             }
-        } else if (original->parameters[i]->hasDefaultArgument() != compareTo->parameters[i]->hasDefaultArgument()) {
+        } else if (originalParams[i]->hasDefaultArgument() != compareToParams[i]->hasDefaultArgument()) {
             // If one of the parameters is default and the other isn't then the two functions are similar but
             // differentiable
             return CompareResult::SimilarDifferentiable;
         } else {
             bool ignoreFirstQualifier = false;
-            Type* originalParam = original->parameters[i]->type;
-            Type* compareToParam = compareTo->parameters[i]->type;
+            Type* originalParam = originalParams[i]->type;
+            Type* compareToParam = compareToParams[i]->type;
 
             bool originalParamIsRef = false;
 
@@ -82,6 +77,16 @@ FunctionComparer::CompareResult FunctionComparer::compare(const FunctionDecl *or
     }
 
     return CompareResult::Identical;
+}
+
+FunctionComparer::CompareResult FunctionComparer::compare(const FunctionDecl *original,
+                                                          const FunctionDecl *compareTo) {
+    // If they have different names then they are always different
+    if (original->name() != compareTo->name()) {
+        return CompareResult::Different;
+    }
+
+    return compareParams(original->parameters, compareTo->parameters);
 }
 
 FunctionComparer::CompareResult FunctionComparer::compare(const TemplateFunctionDecl *original,

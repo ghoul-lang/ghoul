@@ -63,13 +63,40 @@ void Inheriter::processNamespaceDecl(NamespaceDecl *namespaceDecl) {
     }
 }
 
-// TODO: We will have to reorganize this to put the vtable construction before the size and padding code.
-//       While handling size and padding we need to insert a `vtable` variable into the proper struct the same way we
-//       add padding to align the members
 void Inheriter::processStructDecl(StructDecl *structDecl) {
     // This function might be called more than once for the same struct decl. Because of this we do a check to see if
     // the struct already has inherited members. If it does then we assume we've already processed the struct.
     if (structDecl->inheritedMembers.empty()) {
+        // We ALSO have to verify that the current struct and its base structs DO NOT have a value reference of our
+        // struct. This is a long process but is required to prevent infinite loops within our compiler
+        // We do this check first to prevent any potential issues with inheritance
+        // (like circular references in the inheritance list)
+        // TODO: We need to improve our checks for potential circular references in the inheritance list...
+        for (GlobalVariableDecl* checkVariable : structDecl->dataMembers) {
+            if (llvm::dyn_cast<StructType>(checkVariable->type)) {
+                auto checkStructType = llvm::dyn_cast<StructType>(checkVariable->type);
+
+                if (checkStructType->decl() == structDecl) {
+                    printError("struct members CANNOT be the same type as the structs they are in! (did you mean to make `" + checkVariable->name() + "` a pointer or reference instead?)",
+                               checkVariable->startPosition(), checkVariable->endPosition());
+                }
+
+                if (structUsesStructTypeAsValue(structDecl, checkStructType->decl(), true)) {
+                    // TODO: This error message seems like it could be a little confusing?
+                    printError("type of member variable `" + checkVariable->name() + "` uses the current struct `" + structDecl->name() + "` by value in it's members or inheritance, this creates an illegal circular reference!",
+                               checkVariable->startPosition(), checkVariable->endPosition());
+                }
+            }
+        }
+
+        if (structDecl->baseStruct != nullptr) {
+            if (structUsesStructTypeAsValue(structDecl, structDecl->baseStruct, true)) {
+                // TODO: This error message also seems like it could be a little confusing?
+                printError("cannot extend from base type `" + structDecl->baseStruct->name() + "`, base type uses current struct `" + structDecl->name() + "` by value which is illegal!",
+                           structDecl->startPosition(), structDecl->endPosition());
+            }
+        }
+
         // List of all members, current and inherited. Used to properly handle overriding virtual functions
         std::vector<std::vector<Decl*>*> allKnownMembers;
         // List of all inherited data members. Used to properly handle shadowing the data members
@@ -382,4 +409,47 @@ bool Inheriter::structShouldInheritMember(StructDecl *checkStruct, Decl *checkMe
     }
 
     return true;
+}
+
+
+bool Inheriter::structUsesStructTypeAsValue(StructDecl *structType, StructDecl *checkStruct, bool checkBaseStruct) {
+    if (checkStruct == structType) {
+        // If the check struct IS struct type we return true
+        return true;
+    }
+
+    for (GlobalVariableDecl* checkVariable : checkStruct->dataMembers) {
+        if (llvm::isa<StructType>(checkVariable->type)) {
+            auto checkStructType = llvm::dyn_cast<StructType>(checkVariable->type);
+
+            if (checkStructType->decl() == structType) {
+                // If the member's type is `structType` we immediately stop searching and return true
+                return true;
+            } else {
+                // If it isn't the `structType` we also have to check the type to see if it uses `structType`
+                if (structUsesStructTypeAsValue(structType, checkStructType->decl(), true)) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    if (checkBaseStruct) {
+        // If the base struct IS the struct type we return true
+        if (checkStruct->baseStruct == structType) {
+            return true;
+        }
+
+        // We also have to check the base classes for it...
+        for (StructDecl *checkBase = checkStruct->baseStruct; checkBase != nullptr;
+             checkBase = checkBase->baseStruct) {
+            // If the base type uses `structType` we immediately return true...
+            if (structUsesStructTypeAsValue(structType, checkBase, true)) {
+                return true;
+            }
+        }
+    }
+
+    // If we reach this point then `checkStruct` doesn't implement `structType` in any way as a value type
+    return false;
 }

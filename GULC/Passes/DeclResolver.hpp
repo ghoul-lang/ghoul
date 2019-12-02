@@ -70,12 +70,12 @@ namespace gulc {
         Target* _target;
 
     public:
-        DeclResolver(Target* target)
+        explicit DeclResolver(Target* target)
                 : _target(target), currentFileAst(nullptr), currentImports(nullptr), currentNamespace(nullptr),
                   currentStruct(nullptr), returnType(nullptr), currentFunction(nullptr),
                   functionTemplateParams(nullptr), functionTemplateArgs(nullptr), functionParams(nullptr),
                   exprIsFunctionCall(false), functionCallArgs(nullptr), labelNames(), functionLocalVariablesCount(0),
-                  functionLocalVariables() {}
+                  functionLocalVariables(), constructorAssignedMember(), currentFunctionIsConstructor(false) {}
 
         void processFile(std::vector<FileAST*>& files);
 
@@ -192,6 +192,12 @@ namespace gulc {
         std::map<std::string, bool> labelNames;
         unsigned int functionLocalVariablesCount;
         std::vector<LocalVariableDeclExpr*> functionLocalVariables;
+
+        // This is only used in constructors. This is used to tell us if a member is assigned within the constructor.
+        // If the type of this is a struct then we won't look for a default constructor for it
+        std::vector<GlobalVariableDecl*> constructorAssignedMember;
+        // We only add to `constructorAssignedMember` if this is true
+        bool currentFunctionIsConstructor;
 
         void labelResolved(const std::string& labelName) {
             labelNames.insert_or_assign(labelName, true);

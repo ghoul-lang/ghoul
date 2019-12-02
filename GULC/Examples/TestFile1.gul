@@ -1,10 +1,29 @@
 import std;
 
+struct vec2i
+{
+    public int x;
+    public int y;
+
+    private vec2i()
+    {
+        x = 0;
+        y = 0;
+    }
+
+    public vec2i(int x, int y)
+    {
+        this.x = x;
+        this.y = y;
+    }
+}
+
 struct BaseStruct
 {
     public int i;
     public int j;
     public int l;
+    public vec2i hmm;
 
     public BaseStruct()
     {
@@ -27,6 +46,7 @@ struct BaseStruct
 struct ChildStruct : BaseStruct
 {
     public int k;
+    public vec2i position;
 
     public ChildStruct()
         : this(69, 420, 12) {}

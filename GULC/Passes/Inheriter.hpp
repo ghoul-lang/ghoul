@@ -54,6 +54,10 @@ namespace gulc {
         // TODO: This might be better to split this into its own class?
         bool structShouldInheritMember(StructDecl* checkStruct, Decl* checkMember);
 
+        // This is used to verify none of the data members uses the `structType` as a value type
+        // (i.e. a pointer or reference to `structType` is ok)
+        bool structUsesStructTypeAsValue(StructDecl* structType, StructDecl* checkStruct, bool checkBaseStruct);
+
     };
 }
 

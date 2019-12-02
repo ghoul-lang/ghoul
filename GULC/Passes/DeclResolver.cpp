@@ -32,6 +32,8 @@
 #include <ASTHelpers/VisibilityChecker.hpp>
 #include <ASTHelpers/FunctionComparer.hpp>
 #include <AST/Exprs/RefBaseExpr.hpp>
+#include <AST/Stmts/ConstructStructMemberVariableStmt.hpp>
+#include <make_reverse_iterator.hpp>
 #include "DeclResolver.hpp"
 #include "TypeResolver.hpp"
 
@@ -220,6 +222,9 @@ void DeclResolver::processConstructorDecl(ConstructorDecl* constructorDecl) {
     auto oldFunctionLocalVariablesCount = functionLocalVariablesCount;
     auto oldFunctionLocalVariables = std::move(functionLocalVariables);
     auto oldLabelNames = std::move(labelNames);
+    auto oldCurrentFunctionIsConstructor = currentFunctionIsConstructor;
+
+    currentFunctionIsConstructor = true;
 
     if (constructorDecl->hasParameters()) {
         functionParams = &constructorDecl->parameters;
@@ -252,8 +257,6 @@ void DeclResolver::processConstructorDecl(ConstructorDecl* constructorDecl) {
             for (Expr *&argument : constructorDecl->baseConstructorCall->arguments) {
                 processExpr(argument);
             }
-
-//            auto structType =
 
             StructType* structType = nullptr;
 
@@ -330,8 +333,66 @@ void DeclResolver::processConstructorDecl(ConstructorDecl* constructorDecl) {
                                                                            constructorDecl->baseConstructor, {});
     }
 
+    // Clear the list of member assignments since we need to know if they've been assigned in this constructor
+    constructorAssignedMember.clear();
+
     processCompoundStmt(constructorDecl->body(), true);
 
+    // TODO: We need to go through the constructor body and detect any assignments. If an assignment is detected, then
+    //       we shouldn't implicitly construct the variable below. We will also need to detect when we don't implicitly
+    //       construct variables and remove any destructor calls that will be placed once we add `move` and `copy`
+    //       constructors...
+    // If the base constructor is null or isn't a `this` call...
+    if (constructorDecl->baseConstructor == nullptr ||
+            constructorDecl->baseConstructor->parentStruct != constructorDecl->parentStruct) {
+        // Construct any members or error if a member doesn't have a default constructor
+        // NOTE: We loop backwards so the variables are constructed in the body in the order they're declared
+        //       (since we always insert at the beginning we have to loop backwards or they will be backwards)
+        // TODO: We need to detect if a member variable is assigned in the constructor body
+        for (GlobalVariableDecl *dataMember : gulc::reverse(constructorDecl->parentStruct->dataMembers)) {
+            if (llvm::isa<StructType>(dataMember->type)) {
+                if (std::find(constructorAssignedMember.begin(), constructorAssignedMember.end(),
+                              dataMember) == constructorAssignedMember.end()) {
+                    // We skip any member that has already been constructed in the constructor body...
+                    continue;
+                }
+
+                auto structType = llvm::dyn_cast<StructType>(dataMember->type);
+                auto structDecl = structType->decl();
+
+                ConstructorDecl *foundConstructor = nullptr;
+
+                // Find the default constructor
+                for (ConstructorDecl *checkConstructor : structDecl->constructors) {
+                    if (checkConstructor->parameters.empty()) {
+                        // Skip any constructors not visible to us
+                        if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
+                                                                      checkConstructor)) {
+                            continue;
+                        } else {
+                            foundConstructor = checkConstructor;
+                            break;
+                        }
+                    }
+                }
+
+                if (!foundConstructor) {
+                    printError(
+                            "struct '" + structDecl->name() + "' does not have a publicly visible default constructor!",
+                            dataMember->startPosition(), dataMember->endPosition());
+                }
+
+                auto constructStructMemberVariable = new ConstructStructMemberVariableStmt({}, {},
+                                                                                           dataMember,
+                                                                                           foundConstructor);
+
+                std::vector<Stmt *> &bodyStmts = constructorDecl->body()->statements();
+                bodyStmts.insert(bodyStmts.begin(), constructStructMemberVariable);
+            }
+        }
+    }
+
+    currentFunctionIsConstructor = oldCurrentFunctionIsConstructor;
     labelNames = std::move(oldLabelNames);
     functionLocalVariablesCount = oldFunctionLocalVariablesCount;
     functionLocalVariables = std::move(oldFunctionLocalVariables);
@@ -1042,6 +1103,32 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr, bool isNestedBinaryOpe
             // Set the new right value and change the operator name to '='
             binaryOperatorExpr->setOperatorName("=");
             binaryOperatorExpr->rightValue = newRightValue;
+        } else {
+            // At this point the operator is an "="
+            if (currentFunctionIsConstructor &&
+                    llvm::isa<RefStructMemberVariableExpr>(binaryOperatorExpr->leftValue)) {
+                // If the left value is a struct member variable then we have to set `constructorAssignedMember` when
+                // we're in a constructor
+                auto refStructMemberVariable = llvm::dyn_cast<RefStructMemberVariableExpr>(binaryOperatorExpr->leftValue);
+
+                if (llvm::isa<StructType>(refStructMemberVariable->refVariable->type)) {
+                    // We only do this when it is a struct type...
+                    if (refStructMemberVariable->structType->decl() == currentStruct) {
+                        // We only check if the struct is the same type as our current type (we also don't set
+                        // `constructorAssignedMember` if it is a base member we're setting)
+
+                        if (std::find(constructorAssignedMember.begin(), constructorAssignedMember.end(),
+                                      refStructMemberVariable->refVariable) == constructorAssignedMember.end()) {
+                            // If the variable being set isn't in `constructorAssignedMember` then we have to add it
+                            constructorAssignedMember.push_back(refStructMemberVariable->refVariable);
+                            // TODO: We need to convert a move constructor here WITHOUT destructing the member variable
+                            //       (because the member variable is garbage right now, this will be the first construction)
+                            //       We might want a special `assign` constructor for only this scenario? Or how should we
+                            //       perform this?
+                        }
+                    }
+                }
+            }
         }
 
         return;

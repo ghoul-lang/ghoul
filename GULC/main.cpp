@@ -26,6 +26,7 @@
 #include <Passes/Lifetimes.hpp>
 #include <Passes/Inheriter.hpp>
 #include <Targets/Target.hpp>
+#include <Passes/CircularInheritanceChecker.hpp>
 
 using namespace gulc;
 
@@ -52,6 +53,10 @@ int main() {
     // Resolve types
     TypeResolver typeResolver(&target, prototypes);
     typeResolver.processFile(parsedFiles);
+
+    // Check for any circular references in inheritance lists
+    CircularInheritanceChecker circularInheritanceChecker;
+    circularInheritanceChecker.processFile(parsedFiles);
 
     // Resolve inherited members
     Inheriter inheriter(&target);
