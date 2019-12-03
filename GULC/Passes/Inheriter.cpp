@@ -21,7 +21,6 @@
 #include <AST/Types/EnumType.hpp>
 #include <AST/Types/FunctionPointerType.hpp>
 #include <AST/Types/PointerType.hpp>
-#include <AST/Types/ReferenceType.hpp>
 #include <AST/Types/StructType.hpp>
 #include <ASTHelpers/SizeofHelper.hpp>
 #include <make_reverse_iterator.hpp>
@@ -71,7 +70,6 @@ void Inheriter::processStructDecl(StructDecl *structDecl) {
         // struct. This is a long process but is required to prevent infinite loops within our compiler
         // We do this check first to prevent any potential issues with inheritance
         // (like circular references in the inheritance list)
-        // TODO: We need to improve our checks for potential circular references in the inheritance list...
         for (GlobalVariableDecl* checkVariable : structDecl->dataMembers) {
             if (llvm::dyn_cast<StructType>(checkVariable->type)) {
                 auto checkStructType = llvm::dyn_cast<StructType>(checkVariable->type);
@@ -97,41 +95,31 @@ void Inheriter::processStructDecl(StructDecl *structDecl) {
             }
         }
 
-        // List of all members, current and inherited. Used to properly handle overriding virtual functions
-        std::vector<std::vector<Decl*>*> allKnownMembers;
-        // List of all inherited data members. Used to properly handle shadowing the data members
-        std::vector<std::vector<GlobalVariableDecl*>*> allInheritedDataMembers;
+        // List of the current struct decl and all inherited struct decls. We will use this tor overriding virtual
+        // functions and properly handling shadowing of the data members
+        std::vector<StructDecl*> allStructDecls;
 
-        //allDataMembers.push_back(&structDecl->dataMembers);
-        allKnownMembers.push_back(&structDecl->members);
+        allStructDecls.push_back(structDecl);
 
-        if (structDecl->baseStruct != nullptr) {
-            // Loop through all inherited structs, check if they should be in our inherited member list, and add them to
-            // the list if they should be.
-            for (StructDecl *inheritedBase = structDecl->baseStruct;
-                 inheritedBase != nullptr;
-                 inheritedBase = inheritedBase->baseStruct) {
-                // Loop through the members and add them to the list when necessary.
-                for (Decl *inheritMember : inheritedBase->members) {
-                    // Check if we should inherit the member
-                    if (structShouldInheritMember(structDecl, inheritMember)) {
-                        structDecl->inheritedMembers.push_back(inheritMember);
-                    }
+        // Loop through all inherited structs and add them to the list of `allStructDecls`
+        for (StructDecl* inheritedBase = structDecl->baseStruct; inheritedBase != nullptr;
+             inheritedBase = inheritedBase->baseStruct) {
+            // Loop through the members and add them to the list when necessary.
+            for (Decl *inheritMember : inheritedBase->members) {
+                // Check if we should inherit the member
+                if (structShouldInheritMember(structDecl, inheritMember)) {
+                    structDecl->inheritedMembers.push_back(inheritMember);
                 }
-
-                // Add the inherited data members to the `allDataMembers` list
-                allInheritedDataMembers.push_back(&inheritedBase->dataMembers);
-
-                // Add the inherited members to the `allKnownMembers` list
-                allKnownMembers.push_back(&inheritedBase->members);
             }
+
+            allStructDecls.push_back(inheritedBase);
         }
 
-        // Construct this current struct's vtable using the `allKnownMembers`
+        // Construct this current struct's vtable
         // To do this, we loop from the greatest grandparent to the current struct. While doing this we add any virtual
         // functions to the vtable and then replace any functions that are overriding
-        for (std::vector<Decl*>* dataMembers : gulc::reverse(allKnownMembers)) {
-            for (Decl* checkMember : *dataMembers) {
+        for (StructDecl* checkStructDecl : gulc::reverse(allStructDecls)) {
+            for (Decl* checkMember : checkStructDecl->members) {
                 if (llvm::isa<FunctionDecl>(checkMember)) {
                     auto checkFunction = llvm::dyn_cast<FunctionDecl>(checkMember);
 
@@ -192,17 +180,45 @@ void Inheriter::processStructDecl(StructDecl *structDecl) {
                     }
                 }
             }
+
+            // Because of how we loop through the inheritance list, we only have to process the destructor
+            // if the struct currently doesn't have its `hasVirtualDestructor` bool set
+            // NOTE: We always make the destructor the last index of the type that declares the first virtual destructor
+            if (!structDecl->hasVirtualDestructor) {
+                // NOTE: If a struct has a virtual destructor then ALL destructors of it's descendants will also
+                //       be virtual, regardless of if it is marked virtual or not.
+                if (checkStructDecl->destructor->modifier() == FunctionModifiers::Abstract ||
+                    checkStructDecl->destructor->modifier() == FunctionModifiers::Virtual ||
+                    checkStructDecl->destructor->modifier() == FunctionModifiers::Override) {
+                    structDecl->hasVirtualDestructor = true;
+                    structDecl->virtualDestructorIndex = structDecl->vtable.size();
+
+                    structDecl->fakeVirtualDestructionFunction = new FunctionDecl(".~dest",
+                                                                                  structDecl->sourceFile(),
+                                                                                  {}, {},
+                                                                                  Decl::Visibility::Public,
+                                                                                  FunctionModifiers::Virtual,
+                                                                                  nullptr, {}, {});
+
+                    structDecl->vtable.push_back(structDecl->fakeVirtualDestructionFunction);
+                }
+            }
         }
 
         std::size_t currentSize = 0;
 
         // Loop through all pointers to struct declaration data members from the greatest grandparent to the direct parent
-        for (std::vector<GlobalVariableDecl*>* dataMembers : gulc::reverse(allInheritedDataMembers)) {
+        for (StructDecl* checkStructDecl : gulc::reverse(allStructDecls)) {
+            if (checkStructDecl == structDecl) {
+                // Skip the current struct decl
+                continue;
+            }
+
             // At this point in execution the base struct is not guaranteed to have its vtable member. Because of this,
             // we have to check if the `dataMembers` are owned by the vtable owner and if it is check if the first
             // data member is the vtable. If it isn't we increment `currentSize` by the size of a vtable
-            if (!dataMembers->empty()) {
-                GlobalVariableDecl* checkVTable = (*dataMembers)[0];
+            if (!checkStructDecl->dataMembers.empty()) {
+                GlobalVariableDecl* checkVTable = checkStructDecl->dataMembers[0];
 
                 // If the `checkVTable` is owned by our vtable owner...
                 if (checkVTable->parentStruct == structDecl->vtableOwner) {
@@ -227,7 +243,7 @@ void Inheriter::processStructDecl(StructDecl *structDecl) {
             }
 
             // Loop through each data member normally
-            for (GlobalVariableDecl *dataMember : *dataMembers) {
+            for (GlobalVariableDecl *dataMember : checkStructDecl->dataMembers) {
                 SizeAndAlignment sizeAndAlignment(0, 0);
 
                 if (llvm::isa<StructType>(dataMember->type)) {
@@ -410,7 +426,6 @@ bool Inheriter::structShouldInheritMember(StructDecl *checkStruct, Decl *checkMe
 
     return true;
 }
-
 
 bool Inheriter::structUsesStructTypeAsValue(StructDecl *structType, StructDecl *checkStruct, bool checkBaseStruct) {
     if (checkStruct == structType) {

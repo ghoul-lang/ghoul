@@ -41,6 +41,13 @@ struct BaseStruct
     {
         i = 4;
     }
+
+    virtual ~BaseStruct()
+    {
+        i = 0;
+        j = 0;
+        l = 0;
+    }
 }
 
 struct ChildStruct : BaseStruct

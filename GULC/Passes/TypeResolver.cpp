@@ -610,6 +610,7 @@ void TypeResolver::processStructDecl(StructDecl *structDecl) {
         defaultDestructorBody->statements().push_back(new ReturnStmt({}, {}, nullptr));
 
         structDecl->destructor = new DestructorDecl(structDecl->name(), structDecl->sourceFile(), {}, {},
+                                                    FunctionModifiers::None,
                                                     defaultDestructorBody);
     }
 

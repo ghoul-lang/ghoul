@@ -141,6 +141,10 @@ namespace gulc {
         llvm::Value* generateRefParameterExpr(const RefParameterExpr* refParameterExpr);
         llvm::Value* generateRefGlobalVariableExpr(const RefGlobalVariableExpr* refGlobalFileVariableExpr);
         llvm::Value* generateRefStructMemberVariableExpr(const RefStructMemberVariableExpr* refStructMemberVariableExpr);
+        llvm::Value* getVTableFunctionPointer(gulc::StructDecl* structDecl, llvm::Value* objectRef,
+                                              std::size_t vtableIndex, llvm::FunctionType* functionType);
+        llvm::Value* generateRefFunctionExpr(const Expr* expr);
+        llvm::Value* getDestructorFunctionPointer(llvm::Value* objectRef, DestructorDecl* destructor);
         llvm::Value* generateDestructLocalVariableExpr(const DestructLocalVariableExpr* destructLocalVariableExpr);
         llvm::Value* generateDestructParameterExpr(const DestructParameterExpr* destructParameterExpr);
         llvm::Value* generateDestructMemberVariableExpr(const DestructMemberVariableExpr* destructMemberVariableExpr);
@@ -148,8 +152,6 @@ namespace gulc {
 
         void generateBaseConstructorCallExpr(const BaseConstructorCallExpr* baseConstructorCallExpr);
         void generateBaseDestructorCallExpr(const BaseDestructorCallExpr* baseDestructorCallExpr);
-
-        llvm::Value* generateRefFunctionExpr(const Expr* expr);
 
         void castValue(gulc::Type* to, gulc::Type* from, llvm::Value*& value);
 

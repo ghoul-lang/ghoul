@@ -18,6 +18,7 @@
 
 #include <AST/Decl.hpp>
 #include <AST/Stmts/CompoundStmt.hpp>
+#include "FunctionDecl.hpp"
 
 namespace gulc {
     class DestructorDecl : public Decl {
@@ -25,12 +26,20 @@ namespace gulc {
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Destructor; }
 
         DestructorDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                       CompoundStmt *body)
+                       FunctionModifiers modifier, CompoundStmt *body)
                 : Decl(Kind::Destructor, std::move(name), std::move(sourceFile), startPosition, endPosition,
                        Visibility::Unspecified),
-                  baseDestructor(nullptr), _body(body) {}
+                  baseDestructor(nullptr), _body(body), _modifier(modifier) {}
 
         CompoundStmt *body() const { return _body; }
+
+        FunctionModifiers modifier() const { return _modifier; }
+
+        // Returns true if the function is `abstract`, `virtual`, or `override`
+        bool isVirtual() const {
+            return _modifier == FunctionModifiers::Abstract || _modifier == FunctionModifiers::Virtual ||
+                   _modifier == FunctionModifiers::Override;
+        }
 
         // This is used for calling a base struct's destructor
         // We don't own this so we don't free it
@@ -39,6 +48,7 @@ namespace gulc {
         Decl *deepCopy() const override {
             auto result = new DestructorDecl(name(), sourceFile(),
                                               startPosition(), endPosition(),
+                                              _modifier,
                                               static_cast<CompoundStmt*>(_body->deepCopy()));
             result->parentNamespace = parentNamespace;
             result->parentStruct = parentStruct;
@@ -52,6 +62,7 @@ namespace gulc {
 
     private:
         CompoundStmt *_body;
+        FunctionModifiers _modifier;
 
     };
 }

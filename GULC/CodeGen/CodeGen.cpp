@@ -684,7 +684,31 @@ void gulc::CodeGen::generateStructDecl(const gulc::StructDecl *structDecl, bool 
         std::vector<llvm::Constant*> vtableEntries;
 
         for (FunctionDecl* functionDecl : structDecl->vtable) {
-            llvm::Function* vtableFunction = getFunction(functionDecl);
+            llvm::Function* vtableFunction;
+
+            if (structDecl->hasVirtualDestructor && functionDecl == structDecl->fakeVirtualDestructionFunction) {
+                // Destructors DO NOT support parameters except for the single `this` parameter
+                std::vector<llvm::Type*> paramTypes = generateParamTypes({}, structDecl);
+                // All constructors return void. We construct the `this` parameter. Memory allocation for the struct is
+                // NOT handled by the constructor
+                llvm::Type* returnType = llvm::Type::getVoidTy(*llvmContext);
+                llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
+                vtableFunction = module->getFunction(structDecl->destructor->mangledName());
+
+                if (!vtableFunction) {
+                    auto linkageType = llvm::Function::LinkageTypes::ExternalLinkage;
+
+                    if (isInternal) {
+                        linkageType = llvm::Function::LinkageTypes::InternalLinkage;
+                    }
+
+                    vtableFunction = llvm::Function::Create(functionType, linkageType,
+                                                            structDecl->destructor->mangledName(), module);
+                }
+            } else {
+                vtableFunction = getFunction(functionDecl);
+            }
+
             vtableEntries.push_back(llvm::ConstantExpr::getBitCast(vtableFunction, vtableEntryType));
         }
 
@@ -1582,6 +1606,39 @@ llvm::Value *gulc::CodeGen::generateRefStructMemberVariableExpr(const gulc::RefS
     return irBuilder->CreateStructGEP(nullptr, objectRef, index);
 }
 
+llvm::Value *gulc::CodeGen::getVTableFunctionPointer(gulc::StructDecl *structDecl, llvm::Value *objectRef,
+                                                     std::size_t vtableIndex, llvm::FunctionType* functionType) {
+    llvm::Type* indexType = llvm::Type::getInt32Ty(*llvmContext);
+    llvm::Value* index0 = llvm::ConstantInt::get(indexType, 0);
+
+    // If the current struct type isn't the vtable owner we have to cast it to the owner to grab the vtable
+    if (structDecl->vtableOwner != structDecl) {
+        llvm::Type* vtableOwnerType = getLlvmStructType(structDecl->vtableOwner);
+
+        objectRef = irBuilder->CreateBitCast(objectRef, llvm::PointerType::getUnqual(vtableOwnerType));
+    }
+
+    llvm::Value* vtablePointer = irBuilder->CreateStructGEP(nullptr, objectRef, 0);
+    llvm::Value* indexVTableEntry = llvm::ConstantInt::get(indexType, vtableIndex);
+
+    // Load the vtable entry pointer
+    llvm::Value* vtableFunctionPointer = irBuilder->CreateGEP(nullptr, vtablePointer, index0);
+
+    vtableFunctionPointer = irBuilder->CreateLoad(vtableFunctionPointer);
+
+    // Cast the vtable entry pointer to the appropriate function pointer type
+    llvm::Type* vtableFunctionType = llvm::PointerType::getUnqual(functionType);
+    vtableFunctionType = llvm::PointerType::getUnqual(vtableFunctionType);
+
+    // This is now a vtable where all function are the type we need...
+    llvm::Value* vtableFunctions = irBuilder->CreateBitCast(vtableFunctionPointer, vtableFunctionType);
+
+    // This is finally a pointer to the function
+    llvm::Value* finalFunctionPointer = irBuilder->CreateGEP(nullptr, vtableFunctions, indexVTableEntry);
+
+    return irBuilder->CreateLoad(finalFunctionPointer);
+}
+
 llvm::Value *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr) {
     switch (expr->getExprKind()) {
         case gulc::Expr::Kind::RefFunction: {
@@ -1592,20 +1649,8 @@ llvm::Value *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr) {
             auto refStructMemberFunction = llvm::dyn_cast<RefStructMemberFunctionExpr>(expr);
 
             if (refStructMemberFunction->isVTableCall) {
-                llvm::Type* indexType = llvm::Type::getInt32Ty(*llvmContext);
-                llvm::Value* index0 = llvm::ConstantInt::get(indexType, 0);
-
-                llvm::Value* objectRef = generateExpr(refStructMemberFunction->objectRef);
                 gulc::StructDecl* structDecl = refStructMemberFunction->structType->decl();
-
-                // If the current struct type isn't the vtable owner we have to cast it to the owner to grab the vtable
-                if (structDecl->vtableOwner != structDecl) {
-                    llvm::Type* vtableOwnerType = getLlvmStructType(structDecl->vtableOwner);
-
-                    objectRef = irBuilder->CreateBitCast(objectRef, llvm::PointerType::getUnqual(vtableOwnerType));
-                }
-
-                llvm::Value* vtablePointer = irBuilder->CreateStructGEP(nullptr, objectRef, 0);
+                llvm::Value* objectRef = generateExpr(refStructMemberFunction->objectRef);
 
                 bool vtableFunctionFound = false;
                 std::size_t vtableFunctionIndex = 0;
@@ -1624,25 +1669,8 @@ llvm::Value *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr) {
                                expr->startPosition(), expr->endPosition());
                 }
 
-                llvm::Value* indexVTableEntry = llvm::ConstantInt::get(indexType, vtableFunctionIndex);
-
-                // Load the vtable entry pointer
-                llvm::Value* vtableFunctionPointer = irBuilder->CreateGEP(nullptr, vtablePointer, index0);
-
-                vtableFunctionPointer = irBuilder->CreateLoad(vtableFunctionPointer);
-
-                // Cast the vtable entry pointer to the appropriate function pointer type
-                llvm::FunctionType* refFunctionType = getFunctionType(refStructMemberFunction->refFunction);
-                llvm::Type* vtableFunctionType = llvm::PointerType::getUnqual(refFunctionType);
-                vtableFunctionType = llvm::PointerType::getUnqual(vtableFunctionType);
-
-                // This is now a vtable where all function are the type we need...
-                llvm::Value* vtableFunctions = irBuilder->CreateBitCast(vtableFunctionPointer, vtableFunctionType);
-
-                // This is finally a pointer to the function
-                llvm::Value* finalFunctionPointer = irBuilder->CreateGEP(nullptr, vtableFunctions, indexVTableEntry);
-
-                return irBuilder->CreateLoad(finalFunctionPointer);
+                return getVTableFunctionPointer(structDecl, objectRef, vtableFunctionIndex,
+                                                getFunctionType(refStructMemberFunction->refFunction));
             } else {
                 return module->getFunction(refStructMemberFunction->refFunction->mangledName());
             }
@@ -1654,10 +1682,26 @@ llvm::Value *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr) {
     }
 }
 
+llvm::Value *gulc::CodeGen::getDestructorFunctionPointer(llvm::Value *objectRef, gulc::DestructorDecl *destructor) {
+    if (destructor->parentStruct->hasVirtualDestructor) {
+        // Destructors DO NOT support parameters except for the single `this` parameter
+        std::vector<llvm::Type*> paramTypes = generateParamTypes({}, destructor->parentStruct);
+        // All constructors return void. We construct the `this` parameter. Memory allocation for the struct is
+        // NOT handled by the constructor
+        llvm::Type* returnType = llvm::Type::getVoidTy(*llvmContext);
+        llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
+
+        return getVTableFunctionPointer(destructor->parentStruct, objectRef,
+                                        destructor->parentStruct->virtualDestructorIndex, functionType);
+    } else {
+        return module->getFunction(destructor->mangledName());
+    }
+}
+
 llvm::Value *gulc::CodeGen::generateDestructLocalVariableExpr(const gulc::DestructLocalVariableExpr *destructLocalVariableExpr) {
     llvm::AllocaInst* variableRef = getLocalVariableOrNull(destructLocalVariableExpr->localVariable->name());
 
-    llvm::Function* destructorFunc = module->getFunction(destructLocalVariableExpr->destructor->mangledName());
+    llvm::Value* destructorFunc = getDestructorFunctionPointer(variableRef, destructLocalVariableExpr->destructor);
 
     std::vector<llvm::Value*> llvmArgs{};
     llvmArgs.reserve(1);
@@ -1676,7 +1720,7 @@ llvm::Value *gulc::CodeGen::generateDestructLocalVariableExpr(const gulc::Destru
 llvm::Value *gulc::CodeGen::generateDestructParameterExpr(const gulc::DestructParameterExpr *destructParameterExpr) {
     llvm::Value* parameterRef = generateRefParameterExpr(destructParameterExpr->parameter);
 
-    llvm::Function* destructorFunc = module->getFunction(destructParameterExpr->destructor->mangledName());
+    llvm::Value* destructorFunc = getDestructorFunctionPointer(parameterRef, destructParameterExpr->destructor);
 
     std::vector<llvm::Value*> llvmArgs{};
     llvmArgs.reserve(1);
@@ -1695,7 +1739,7 @@ llvm::Value *gulc::CodeGen::generateDestructParameterExpr(const gulc::DestructPa
 llvm::Value *gulc::CodeGen::generateDestructMemberVariableExpr(const gulc::DestructMemberVariableExpr *destructMemberVariableExpr) {
     llvm::Value* memberVariableRef = generateRefStructMemberVariableExpr(destructMemberVariableExpr->memberVariable);
 
-    llvm::Function* destructorFunc = module->getFunction(destructMemberVariableExpr->destructor->mangledName());
+    llvm::Value* destructorFunc = getDestructorFunctionPointer(memberVariableRef, destructMemberVariableExpr->destructor);
 
     std::vector<llvm::Value*> llvmArgs{};
     llvmArgs.reserve(1);

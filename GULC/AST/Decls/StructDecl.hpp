@@ -33,8 +33,10 @@ namespace gulc {
                    std::vector<Decl*> members, DestructorDecl* destructor)
                 : Decl(Kind::Struct, std::move(name), std::move(sourceFile), startPosition, endPosition,
                        visibility),
-                  baseTypes(std::move(baseTypes)), constructors(std::move(constructors)), members(std::move(members)),
-                  destructor(destructor) {}
+                  baseTypes(std::move(baseTypes)), baseStruct(nullptr), constructors(std::move(constructors)),
+                  members(std::move(members)), destructor(destructor), inheritedMembers(), completeSizeWithoutPad(0),
+                  vtable(), vtableOwner(nullptr), vtableName(), hasVirtualDestructor(false), virtualDestructorIndex(0)
+                {}
 
         // These are just sorted references to already existing members within the `members` list, we do NOT free these as that would cause a double free issue.
         std::vector<GlobalVariableDecl*> dataMembers;
@@ -70,6 +72,16 @@ namespace gulc {
 
         // Since the Itanium spec gives us a mangled name specification for the vtable, we will use it here.
         std::string vtableName;
+
+        // These two are used to tell us if the struct has a virtual destructor and what the index in the vtable for
+        // the virtual destructor is
+        bool hasVirtualDestructor;
+        int virtualDestructorIndex;
+
+        // We insert this into the vtable to identify the virtual destructor since `DestructorDecl` doesn't extend
+        // `FunctionDecl`
+        // We own this and delete it
+        FunctionDecl* fakeVirtualDestructionFunction;
 
         Decl* deepCopy() const override {
             // TODO: Currently this doesn't properly copy `vtable`, `dataMembers`, `virtualFunctions`, etc.
@@ -113,6 +125,7 @@ namespace gulc {
 
         ~StructDecl() override {
             delete destructor;
+            delete fakeVirtualDestructionFunction;
 
             for (Type* baseType : baseTypes) {
                 delete baseType;

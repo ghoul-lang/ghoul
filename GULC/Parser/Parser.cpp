@@ -611,7 +611,17 @@ qualifierFound:
 
             CompoundStmt* compoundStmt = parseCompoundStmt();
 
-            return new DestructorDecl(verifyName, _filePath, startPosition, endPosition, compoundStmt);
+            FunctionModifiers modifier = FunctionModifiers::None;
+
+            if (isVirtual) {
+                modifier = FunctionModifiers::Virtual;
+            } else if (isAbstract) {
+                modifier = FunctionModifiers::Abstract;
+            } else if (isOverride) {
+                modifier = FunctionModifiers::Override;
+            }
+
+            return new DestructorDecl(verifyName, _filePath, startPosition, endPosition, modifier, compoundStmt);
         }
         case TokenType::CONST:
         case TokenType::MUT:

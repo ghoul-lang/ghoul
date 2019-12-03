@@ -184,7 +184,6 @@ void ItaniumMangler::mangleDestructor(DestructorDecl *destructorDecl, const std:
     // All mangled names start with "_Z"...
     std::string mangledName = "_Z" + prefix;
 
-    // TODO: Once we support virtual destructors we will also have to support `D1`
     mangledName += "D2";
 
     mangledName += nameSuffix;
