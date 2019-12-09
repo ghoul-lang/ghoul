@@ -386,6 +386,8 @@ llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
             return nullptr;
         case gulc::Expr::Kind::RefBase:
             return generateRefBaseExpr(llvm::dyn_cast<RefBaseExpr>(expr));
+        case gulc::Expr::Kind::Reconstruct:
+            return generateReconstructExpr(llvm::dyn_cast<ReconstructExpr>(expr));
         default:
             printError("unexpected expression type in code generator!",
                        expr->startPosition(), expr->endPosition());
@@ -1121,8 +1123,17 @@ void gulc::CodeGen::generateConstructStructMemberVariableStmt(const gulc::Constr
         memberConstructor = module->getFunction(constructStructMemberVariableStmt->constructorDecl->mangledNameVTable());
     }
 
+    std::vector<llvm::Value*> llvmArguments = {
+            memberRef
+    };
+
+    // Compile the required arguments if there are any
+    for (Expr* argument : constructStructMemberVariableStmt->arguments) {
+        llvmArguments.push_back(generateExpr(argument));
+    }
+
     // Call the constructor
-    irBuilder->CreateCall(memberConstructor, llvm::ArrayRef<llvm::Value*>(&memberRef, 1));
+    irBuilder->CreateCall(memberConstructor, llvmArguments);
 }
 
 // Exprs
@@ -1682,7 +1693,10 @@ llvm::Value *gulc::CodeGen::generateRefFunctionExpr(const gulc::Expr *expr) {
     }
 }
 
-llvm::Value *gulc::CodeGen::getDestructorFunctionPointer(llvm::Value *objectRef, gulc::DestructorDecl *destructor) {
+void gulc::CodeGen::destructStruct(llvm::Value *structRef, gulc::DestructorDecl *destructor) {
+    llvm::Value* destructorFunc;
+
+    // Grab the destructor whether it is a virtual destructor or a normal destructor
     if (destructor->parentStruct->hasVirtualDestructor) {
         // Destructors DO NOT support parameters except for the single `this` parameter
         std::vector<llvm::Type*> paramTypes = generateParamTypes({}, destructor->parentStruct);
@@ -1691,27 +1705,28 @@ llvm::Value *gulc::CodeGen::getDestructorFunctionPointer(llvm::Value *objectRef,
         llvm::Type* returnType = llvm::Type::getVoidTy(*llvmContext);
         llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
 
-        return getVTableFunctionPointer(destructor->parentStruct, objectRef,
-                                        destructor->parentStruct->virtualDestructorIndex, functionType);
+        destructorFunc = getVTableFunctionPointer(destructor->parentStruct, structRef,
+                                                  destructor->parentStruct->virtualDestructorIndex, functionType);
     } else {
-        return module->getFunction(destructor->mangledName());
+        destructorFunc = module->getFunction(destructor->mangledName());
     }
+
+    std::vector<llvm::Value*> llvmArgs {
+            // We pass the struct reference as the first argument of the destructor
+            // the destructor doesn't return anything. It modifies the `this` variable that we pass here
+            structRef
+    };
+
+    // Call the destructor...
+    // We don't bother giving the result a name since destructors return void
+    irBuilder->CreateCall(destructorFunc, llvmArgs);
 }
 
 llvm::Value *gulc::CodeGen::generateDestructLocalVariableExpr(const gulc::DestructLocalVariableExpr *destructLocalVariableExpr) {
     llvm::AllocaInst* variableRef = getLocalVariableOrNull(destructLocalVariableExpr->localVariable->name());
 
-    llvm::Value* destructorFunc = getDestructorFunctionPointer(variableRef, destructLocalVariableExpr->destructor);
-
-    std::vector<llvm::Value*> llvmArgs{};
-    llvmArgs.reserve(1);
-    // We pass a reference to the local variable as the first argument of the destructor
-    // the destructor doesn't return anything. It modifies the `this` variable that we pass here
-    llvmArgs.push_back(variableRef);
-
-    // Call the destructor...
-    // We don't bother giving the result a name since destructors return void
-    irBuilder->CreateCall(destructorFunc, llvmArgs);
+    // Destruct the local variable
+    destructStruct(variableRef, destructLocalVariableExpr->destructor);
 
     // We technically just return null...
     return variableRef;
@@ -1720,17 +1735,8 @@ llvm::Value *gulc::CodeGen::generateDestructLocalVariableExpr(const gulc::Destru
 llvm::Value *gulc::CodeGen::generateDestructParameterExpr(const gulc::DestructParameterExpr *destructParameterExpr) {
     llvm::Value* parameterRef = generateRefParameterExpr(destructParameterExpr->parameter);
 
-    llvm::Value* destructorFunc = getDestructorFunctionPointer(parameterRef, destructParameterExpr->destructor);
-
-    std::vector<llvm::Value*> llvmArgs{};
-    llvmArgs.reserve(1);
-    // We pass a reference to the local variable as the first argument of the destructor
-    // the destructor doesn't return anything. It modifies the `this` variable that we pass here
-    llvmArgs.push_back(parameterRef);
-
-    // Call the destructor...
-    // We don't bother giving the result a name since destructors return void
-    irBuilder->CreateCall(destructorFunc, llvmArgs);
+    // Destruct the parameter
+    destructStruct(parameterRef, destructParameterExpr->destructor);
 
     // We technically just return null...
     return parameterRef;
@@ -1739,17 +1745,8 @@ llvm::Value *gulc::CodeGen::generateDestructParameterExpr(const gulc::DestructPa
 llvm::Value *gulc::CodeGen::generateDestructMemberVariableExpr(const gulc::DestructMemberVariableExpr *destructMemberVariableExpr) {
     llvm::Value* memberVariableRef = generateRefStructMemberVariableExpr(destructMemberVariableExpr->memberVariable);
 
-    llvm::Value* destructorFunc = getDestructorFunctionPointer(memberVariableRef, destructMemberVariableExpr->destructor);
-
-    std::vector<llvm::Value*> llvmArgs{};
-    llvmArgs.reserve(1);
-    // We pass a reference to the local variable as the first argument of the destructor
-    // the destructor doesn't return anything. It modifies the `this` variable that we pass here
-    llvmArgs.push_back(memberVariableRef);
-
-    // Call the destructor...
-    // We don't bother giving the result a name since destructors return void
-    irBuilder->CreateCall(destructorFunc, llvmArgs);
+    // Destruct the member variable reference
+    destructStruct(memberVariableRef, destructMemberVariableExpr->destructor);
 
     // We technically just return null...
     return memberVariableRef;
@@ -1761,6 +1758,42 @@ llvm::Value *gulc::CodeGen::generateRefBaseExpr(const gulc::RefBaseExpr *refBase
     // in the AST it is not a pointer. There might be a bug here.
     return irBuilder->CreateBitCast(refThis,
                                     llvm::PointerType::getUnqual(generateLlvmType(refBaseExpr->resultType)));
+}
+
+llvm::Value *gulc::CodeGen::generateReconstructExpr(const gulc::ReconstructExpr *reconstructExpr) {
+    llvm::Value* thisResult = generateExpr(reconstructExpr->thisRef);
+
+    // Before we reconstruct `this` we have to destruct it (only when we're instructed to)
+    if (reconstructExpr->destructThisRef) {
+        // Grab the destructor using the constructors parent struct...
+        auto destructor = reconstructExpr->constructor->parentStruct->destructor;
+
+        destructStruct(thisResult, destructor);
+    }
+
+    std::vector<llvm::Value*> llvmArguments;
+    llvmArguments.reserve(reconstructExpr->arguments.size() + 1);
+    llvmArguments.push_back(thisResult);
+
+    for (Expr* argument : reconstructExpr->arguments) {
+        llvmArguments.push_back(generateExpr(argument));
+    }
+
+    llvm::Function* constructorFunc;
+
+    // If there is a vtable we call the vtable constructor
+    if (reconstructExpr->constructor->parentStruct->vtable.empty()) {
+        constructorFunc = module->getFunction(reconstructExpr->constructor->mangledName());
+    } else {
+        constructorFunc = module->getFunction(reconstructExpr->constructor->mangledNameVTable());
+    }
+
+    // Call the constructor...
+    // We don't bother giving the result a name since constructors return void
+    irBuilder->CreateCall(constructorFunc, llvmArguments);
+
+    // Return the `this` reference
+    return thisResult;
 }
 
 void gulc::CodeGen::generateBaseConstructorCallExpr(const gulc::BaseConstructorCallExpr *baseConstructorCallExpr) {

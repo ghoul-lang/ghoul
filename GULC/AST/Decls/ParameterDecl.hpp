@@ -25,10 +25,10 @@ namespace gulc {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Parameter; }
 
-        ParameterDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                      Type* type, Expr* defaultArgument = nullptr)
-                : Decl(Kind::Parameter, std::move(name), std::move(sourceFile), startPosition, endPosition,
-                       Visibility::Unspecified),
+        ParameterDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                      TextPosition startPosition, TextPosition endPosition, Type* type, Expr* defaultArgument = nullptr)
+                : Decl(Kind::Parameter, std::move(attributes), std::move(name), std::move(sourceFile),
+                       startPosition, endPosition, Visibility::Unspecified),
                   type(type), typeTemplateParamNumber(0), _defaultArgument(defaultArgument) {}
 
         // TODO: Support 'Modifiers' and default modifiers like 'in' and 'out'
@@ -37,7 +37,13 @@ namespace gulc {
         bool hasDefaultArgument() const { return _defaultArgument != nullptr; }
 
         Decl* deepCopy() const override {
-            auto result = new ParameterDecl(name(), sourceFile(),
+            std::vector<Attr*> copiedAttributes;
+
+            for (Attr* attribute : _attributes) {
+                copiedAttributes.push_back(attribute->deepCopy());
+            }
+
+            auto result = new ParameterDecl(copiedAttributes, name(), sourceFile(),
                                             startPosition(), endPosition(),
                                             type->deepCopy(),
                                             _defaultArgument ? _defaultArgument->deepCopy() : nullptr);

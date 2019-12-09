@@ -111,6 +111,8 @@ namespace gulc {
         bool processStmt(Stmt*& stmt);
         void processExpr(Expr*& expr);
 
+        // When `isMoveConstructor` is `false` then it will process as a copy constructor
+        void processCopyOrMoveConstructorDecl(ConstructorDecl* constructorDecl, bool isMoveConstructor);
         void processConstructorDecl(ConstructorDecl* constructorDecl);
         void processDestructorDecl(DestructorDecl* destructorDecl);
         void processEnumDecl(EnumDecl* enumDecl);

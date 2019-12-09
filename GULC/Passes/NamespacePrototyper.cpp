@@ -48,7 +48,7 @@ NamespaceDecl *NamespacePrototyper::getNamespacePrototype(std::vector<NamespaceD
         }
     }
 
-    auto newNamespace = new NamespaceDecl(name, "[prototype]", {}, {});
+    auto newNamespace = new NamespaceDecl({}, name, "[prototype]", {}, {});
     newNamespace->makePrototype();
 
     if (currentNamespace == nullptr) {

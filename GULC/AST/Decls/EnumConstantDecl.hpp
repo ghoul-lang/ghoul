@@ -24,10 +24,10 @@ namespace gulc {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::EnumConstant; }
 
-        EnumConstantDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                         Expr* constantValue)
-                : Decl(Kind::EnumConstant, std::move(name), std::move(sourceFile), startPosition, endPosition,
-                       Visibility::Unspecified),
+        EnumConstantDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                         TextPosition startPosition, TextPosition endPosition, Expr* constantValue)
+                : Decl(Kind::EnumConstant, std::move(attributes), std::move(name), std::move(sourceFile),
+                       startPosition, endPosition, Visibility::Unspecified),
                   constantValue(constantValue) {}
 
         Expr* constantValue;
@@ -35,7 +35,13 @@ namespace gulc {
         bool hasConstantValue() const { return constantValue != nullptr; }
 
         Decl* deepCopy() const override {
-            auto result = new EnumConstantDecl(name(), sourceFile(),
+            std::vector<Attr*> copiedAttributes;
+
+            for (Attr* attribute : _attributes) {
+                copiedAttributes.push_back(attribute->deepCopy());
+            }
+
+            auto result = new EnumConstantDecl(copiedAttributes, name(), sourceFile(),
                                                startPosition(), endPosition(),
                                                constantValue->deepCopy());
             result->parentNamespace = parentNamespace;

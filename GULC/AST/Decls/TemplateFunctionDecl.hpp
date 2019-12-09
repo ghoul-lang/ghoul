@@ -35,21 +35,24 @@ namespace gulc {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::TemplateFunction; }
 
-        TemplateFunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
+        TemplateFunctionDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                             TextPosition startPosition, TextPosition endPosition,
                              Visibility visibility, FunctionModifiers modifier, Type* resultType,
                              std::vector<TemplateParameterDecl*> templateParameters,
                              std::vector<ParameterDecl*> parameters, CompoundStmt* body)
-                : TemplateFunctionDecl(std::move(name), std::move(sourceFile), startPosition, endPosition, visibility,
+                : TemplateFunctionDecl(std::move(attributes), std::move(name), std::move(sourceFile),
+                                       startPosition, endPosition, visibility,
                                        modifier, resultType, std::move(templateParameters), std::move(parameters),
                                        body, {}) {}
 
-        TemplateFunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
+        TemplateFunctionDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                             TextPosition startPosition, TextPosition endPosition,
                              Visibility visibility, FunctionModifiers modifier, Type* resultType,
                              std::vector<TemplateParameterDecl*> templateParameters,
                              std::vector<ParameterDecl*> parameters, CompoundStmt* body,
                              std::vector<FunctionDecl*> implementedFunctions)
-                : Decl(Kind::TemplateFunction, std::move(name), std::move(sourceFile), startPosition, endPosition,
-                       visibility),
+                : Decl(Kind::TemplateFunction, std::move(attributes), std::move(name), std::move(sourceFile),
+                       startPosition, endPosition, visibility),
                   resultType(resultType), templateParameters(std::move(templateParameters)),
                   parameters(std::move(parameters)), _body(body),
                   _implementedFunctions(std::move(implementedFunctions)), _modifier(modifier) {}
@@ -64,6 +67,8 @@ namespace gulc {
         bool hasTemplateParameters() const { return !templateParameters.empty(); }
         bool hasParameters() const { return !parameters.empty(); }
 
+        // TODO: We need to move function generation to its own compiler pass or something. I don't think it should
+        //       be here?
         FunctionDecl* getOrCreateFunction(std::vector<Expr*> templateArguments, bool* isNewFunction) {
             *isNewFunction = false;
 
@@ -162,7 +167,12 @@ namespace gulc {
                 continue;
             }
 
+            std::vector<Attr*> copiedAttributes;
             std::vector<ParameterDecl*> copiedParameters;
+
+            for (Attr* attribute : _attributes) {
+                copiedAttributes.push_back(attribute->deepCopy());
+            }
 
             for (ParameterDecl* parameter : parameters) {
                 copiedParameters.push_back(static_cast<ParameterDecl*>(parameter->deepCopy()));
@@ -170,7 +180,7 @@ namespace gulc {
 
             *isNewFunction = true;
 
-            auto newFunction = new FunctionDecl(name(), sourceFile(),
+            auto newFunction = new FunctionDecl(copiedAttributes, name(), sourceFile(),
                                                 startPosition(), endPosition(),
                                                 visibility(), _modifier,
                                                 resultType->deepCopy(), copiedParameters,
@@ -183,9 +193,14 @@ namespace gulc {
         }
 
         Decl* deepCopy() const override {
+            std::vector<Attr*> copiedAttributes;
             std::vector<TemplateParameterDecl*> copiedTemplateParameters;
             std::vector<ParameterDecl*> copiedParameters;
             std::vector<FunctionDecl*> copiedImplementedFunctions;
+
+            for (Attr* attribute : _attributes) {
+                copiedAttributes.push_back(attribute->deepCopy());
+            }
 
             for (TemplateParameterDecl* templateParameter : templateParameters) {
                 copiedTemplateParameters.push_back(static_cast<TemplateParameterDecl*>(templateParameter->deepCopy()));
@@ -195,7 +210,7 @@ namespace gulc {
                 copiedParameters.push_back(static_cast<ParameterDecl*>(parameter->deepCopy()));
             }
 
-            auto result = new FunctionDecl(name(), sourceFile(),
+            auto result = new FunctionDecl(copiedAttributes, name(), sourceFile(),
                                            startPosition(), endPosition(),
                                            visibility(), _modifier,
                                            resultType->deepCopy(),

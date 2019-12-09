@@ -18,7 +18,9 @@
 
 #include <string>
 #include <MetaData/TextPosition.hpp>
+#include <vector>
 #include "llvm/Support/Casting.h"
+#include "Attr.hpp"
 
 namespace gulc {
     class NamespaceDecl;
@@ -57,10 +59,14 @@ namespace gulc {
             Interface,
 
             Constructor,
-            Destructor
+            Destructor,
+
+            Attribute
         };
 
         Kind getDeclKind() const { return _kind; }
+        std::vector<Attr*>& attributes() { return _attributes; }
+        std::vector<Attr*> const& attributes() const { return _attributes; }
         std::string name() const { return _name; }
         std::string sourceFile() const { return _sourceFile; }
         TextPosition startPosition() const { return _startPosition; }
@@ -79,15 +85,43 @@ namespace gulc {
         Visibility visibility() const { return _visibility; }
         void setVisibility(Visibility visibility) { _visibility = visibility; }
 
+        bool hasAttributes() const { return !_attributes.empty(); }
+
+        void addAttributes(std::vector<Attr*> const& newAttributes) {
+            for (Attr* newAttribute : newAttributes) {
+                _attributes.push_back(newAttribute->deepCopy());
+            }
+        }
+
+        void setAttributes(std::vector<Attr*>& newAttributes) {
+            _attributes = newAttributes;
+        }
+
+        template<typename T>
+        bool hasAttribute() {
+            for (Attr* attr : _attributes) {
+                if (llvm::isa<T>(attr)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
     protected:
-        Decl(Kind kind, std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-             Visibility visibility)
-                : parentNamespace(nullptr), parentStruct(nullptr), _kind(kind), _name(std::move(name)),
-                  _sourceFile(std::move(sourceFile)), _startPosition(startPosition), _endPosition(endPosition),
-                  _mangledName(), _visibility(visibility) {}
+        Decl(Kind kind, std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+             TextPosition startPosition, TextPosition endPosition, Visibility visibility)
+                : parentNamespace(nullptr), parentStruct(nullptr), _kind(kind), _attributes(std::move(attributes)),
+                  _name(std::move(name)), _sourceFile(std::move(sourceFile)), _startPosition(startPosition),
+                  _endPosition(endPosition), _mangledName(), _visibility(visibility) {}
 
     private:
         const Kind _kind;
+
+    protected:
+        std::vector<Attr*> _attributes;
+
+    private:
         const std::string _name;
         const std::string _sourceFile;
         const TextPosition _startPosition;

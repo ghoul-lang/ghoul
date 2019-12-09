@@ -193,7 +193,7 @@ void Inheriter::processStructDecl(StructDecl *structDecl) {
                     structDecl->hasVirtualDestructor = true;
                     structDecl->virtualDestructorIndex = structDecl->vtable.size();
 
-                    structDecl->fakeVirtualDestructionFunction = new FunctionDecl(".~dest",
+                    structDecl->fakeVirtualDestructionFunction = new FunctionDecl({}, ".~dest",
                                                                                   structDecl->sourceFile(),
                                                                                   {}, {},
                                                                                   Decl::Visibility::Public,
@@ -287,7 +287,7 @@ void Inheriter::processStructDecl(StructDecl *structDecl) {
         // Since the current `structDecl` might be the vtable owner we have to check for that...
         if (structDecl->vtableOwner == structDecl) {
             // We just add it to the beginning of our data members. We'll let the loop below handle the size normally
-            auto vtableMember = new GlobalVariableDecl("", "", {}, {}, Decl::Visibility::Private,
+            auto vtableMember = new GlobalVariableDecl({}, "", "", {}, {}, Decl::Visibility::Private,
                                                        new VTableType({}, {}));
             structDecl->dataMembers.insert(structDecl->dataMembers.begin(), vtableMember);
         }
@@ -349,7 +349,7 @@ void Inheriter::processStructDecl(StructDecl *structDecl) {
 
                 // Add padding before the current data member
                 structDecl->dataMembers.insert(structDecl->dataMembers.begin() + i,
-                                               new GlobalVariableDecl("", structDecl->sourceFile(), {}, {},
+                                               new GlobalVariableDecl({}, "", structDecl->sourceFile(), {}, {},
                                                                       Decl::Visibility::Private, paddingType));
                 // Increment `i` by one so we reset ourselves back to the original data member
                 ++i;

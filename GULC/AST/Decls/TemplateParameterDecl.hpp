@@ -25,10 +25,11 @@ namespace gulc {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::TemplateParameter; }
 
-        TemplateParameterDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
+        TemplateParameterDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                              TextPosition startPosition, TextPosition endPosition,
                               Type* type, Expr* defaultArgument = nullptr)
-                : Decl(Kind::TemplateParameter, std::move(name), std::move(sourceFile), startPosition, endPosition,
-                       Visibility::Unspecified),
+                : Decl(Kind::TemplateParameter, std::move(attributes), std::move(name), std::move(sourceFile),
+                       startPosition, endPosition, Visibility::Unspecified),
                   type(type), _defaultArgument(defaultArgument) {}
 
         Type* type;
@@ -36,7 +37,13 @@ namespace gulc {
         bool hasDefaultArgument() const { return _defaultArgument != nullptr; }
 
         Decl* deepCopy() const override {
-            auto result = new TemplateParameterDecl(name(), sourceFile(),
+            std::vector<Attr*> copiedAttributes;
+
+            for (Attr* attribute : _attributes) {
+                copiedAttributes.push_back(attribute->deepCopy());
+            }
+
+            auto result = new TemplateParameterDecl(copiedAttributes, name(), sourceFile(),
                                                     startPosition(), endPosition(),
                                                     type->deepCopy(),
                                                     _defaultArgument ? _defaultArgument->deepCopy() : nullptr);

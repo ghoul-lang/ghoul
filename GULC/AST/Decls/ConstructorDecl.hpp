@@ -26,13 +26,14 @@ namespace gulc {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Constructor; }
 
-        ConstructorDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
+        ConstructorDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                        TextPosition startPosition, TextPosition endPosition,
                         Visibility visibility, std::vector<ParameterDecl*> parameters,
                         BaseConstructorCallExpr* baseConstructorCall, CompoundStmt* body)
-                : Decl(Kind::Constructor, std::move(name), std::move(sourceFile), startPosition, endPosition,
-                       visibility),
+                : Decl(Kind::Constructor, std::move(attributes), std::move(name), std::move(sourceFile),
+                       startPosition, endPosition, visibility),
                   parameters(std::move(parameters)), baseConstructor(nullptr),
-                  baseConstructorCall(baseConstructorCall), _body(body) {}
+                  baseConstructorCall(baseConstructorCall), _body(body), isUserSpecified(true) {}
 
         std::vector<ParameterDecl*> parameters;
         bool hasParameters() const { return !parameters.empty(); }
@@ -47,9 +48,18 @@ namespace gulc {
         // This is the actual call to the base constructor. We DO own this and MUST free it
         BaseConstructorCallExpr* baseConstructorCall;
 
+        // This tells us if this is a constructor made by the programmer in the source code or if it is a compiler
+        // generated constructor
+        bool isUserSpecified;
+
         Decl* deepCopy() const override {
+            std::vector<Attr*> copiedAttributes;
             std::vector<ParameterDecl*> copiedParameters;
             BaseConstructorCallExpr* copiedBaseConstructorCall = nullptr;
+
+            for (Attr* attribute : _attributes) {
+                copiedAttributes.push_back(attribute->deepCopy());
+            }
 
             for (ParameterDecl* parameter : parameters) {
                 copiedParameters.push_back(static_cast<ParameterDecl*>(parameter->deepCopy()));
@@ -59,7 +69,7 @@ namespace gulc {
                 copiedBaseConstructorCall = llvm::dyn_cast<BaseConstructorCallExpr>(baseConstructorCall->deepCopy());
             }
 
-            auto result = new ConstructorDecl(name(), sourceFile(),
+            auto result = new ConstructorDecl(copiedAttributes, name(), sourceFile(),
                                               startPosition(), endPosition(),
                                               visibility(),
                                               std::move(copiedParameters),
@@ -69,6 +79,7 @@ namespace gulc {
             result->parentStruct = parentStruct;
             result->baseConstructor = baseConstructor;
             result->_mangledNameVTable = _mangledNameVTable;
+            result->isUserSpecified = isUserSpecified;
 
             return result;
         }

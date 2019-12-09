@@ -28,15 +28,16 @@ namespace gulc {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Struct; }
 
-        StructDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
+        StructDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                   TextPosition startPosition, TextPosition endPosition,
                    Visibility visibility, std::vector<Type*> baseTypes, std::vector<ConstructorDecl*> constructors,
                    std::vector<Decl*> members, DestructorDecl* destructor)
-                : Decl(Kind::Struct, std::move(name), std::move(sourceFile), startPosition, endPosition,
-                       visibility),
+                : Decl(Kind::Struct, std::move(attributes), std::move(name), std::move(sourceFile),
+                       startPosition, endPosition, visibility),
                   baseTypes(std::move(baseTypes)), baseStruct(nullptr), constructors(std::move(constructors)),
                   members(std::move(members)), destructor(destructor), inheritedMembers(), completeSizeWithoutPad(0),
-                  vtable(), vtableOwner(nullptr), vtableName(), hasVirtualDestructor(false), virtualDestructorIndex(0)
-                {}
+                  vtable(), vtableOwner(nullptr), vtableName(), hasVirtualDestructor(false), virtualDestructorIndex(0),
+                  fakeVirtualDestructionFunction(nullptr) {}
 
         // These are just sorted references to already existing members within the `members` list, we do NOT free these as that would cause a double free issue.
         std::vector<GlobalVariableDecl*> dataMembers;
@@ -83,13 +84,23 @@ namespace gulc {
         // We own this and delete it
         FunctionDecl* fakeVirtualDestructionFunction;
 
+        // These are references to the copy and move constructors so we don't have to search for them and validate
+        // for them
+        ConstructorDecl* copyConstructor;
+        ConstructorDecl* moveConstructor;
+
         Decl* deepCopy() const override {
             // TODO: Currently this doesn't properly copy `vtable`, `dataMembers`, `virtualFunctions`, etc.
             throw std::runtime_error("`StructDecl::deepCopy` is broken.");
+            std::vector<Attr*> copiedAttributes;
             std::vector<Type*> copiedBaseTypes{};
             std::vector<ConstructorDecl*> copiedConstructors{};
             std::vector<Decl*> copiedMembers{};
             DestructorDecl* copiedDestructor = nullptr;
+
+            for (Attr* attribute : _attributes) {
+                copiedAttributes.push_back(attribute->deepCopy());
+            }
 
             for (Type* baseType : baseTypes) {
                 copiedBaseTypes.push_back(baseType->deepCopy());
@@ -107,7 +118,7 @@ namespace gulc {
                 copiedDestructor = llvm::dyn_cast<DestructorDecl>(destructor->deepCopy());
             }
 
-            auto result = new StructDecl(name(), sourceFile(),
+            auto result = new StructDecl(copiedAttributes, name(), sourceFile(),
                                          startPosition(), endPosition(),
                                          visibility(), std::move(copiedBaseTypes),
                                          std::move(copiedConstructors), std::move(copiedMembers), copiedDestructor);
@@ -119,6 +130,8 @@ namespace gulc {
             result->vtable = vtable;
             result->vtableOwner = vtableOwner;
             result->vtableName = vtableName;
+            result->copyConstructor = copyConstructor;
+            result->moveConstructor = moveConstructor;
 
             return result;
         }

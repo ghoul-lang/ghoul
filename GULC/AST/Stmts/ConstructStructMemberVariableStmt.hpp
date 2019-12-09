@@ -17,6 +17,8 @@
 #define GULC_CONSTRUCTSTRUCTMEMBERVARIABLESTMT_HPP
 
 #include <AST/Stmt.hpp>
+#include <vector>
+#include <AST/Expr.hpp>
 
 namespace gulc {
     class ConstructorDecl;
@@ -27,19 +29,29 @@ namespace gulc {
         static bool classof(const Stmt *stmt) { return stmt->getStmtKind() == Kind::ConstructStructMemberVariable; }
 
         ConstructStructMemberVariableStmt(TextPosition startPosition, TextPosition endPosition,
-                                          GlobalVariableDecl* refMemberVariable, ConstructorDecl* constructorDecl)
+                                          GlobalVariableDecl* refMemberVariable, ConstructorDecl* constructorDecl,
+                                          std::vector<Expr*> arguments)
                 : Stmt(Kind::ConstructStructMemberVariable, startPosition, endPosition),
-                  refMemberVariable(refMemberVariable), constructorDecl(constructorDecl) {}
+                  refMemberVariable(refMemberVariable), constructorDecl(constructorDecl),
+                  arguments(std::move(arguments)) {}
 
         // We don't own this so we don't free it
         GlobalVariableDecl* refMemberVariable;
         // We don't own this so we don't free it
         ConstructorDecl* constructorDecl;
+        std::vector<Expr*> arguments;
 
         Stmt* deepCopy() const override {
+            std::vector<Expr*> copiedArguments;
+
+            for (Expr* argument : arguments) {
+                copiedArguments.push_back(argument->deepCopy());
+            }
+
             auto result = new ConstructStructMemberVariableStmt(startPosition(), endPosition(),
                                                                 refMemberVariable,
-                                                                constructorDecl);
+                                                                constructorDecl,
+                                                                copiedArguments);
             return result;
         }
 

@@ -25,11 +25,11 @@ namespace gulc {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::GlobalVariable; }
 
-        GlobalVariableDecl(std::string name, std::string sourceFile, TextPosition startPosition,
-                           TextPosition endPosition, Visibility visibility,
+        GlobalVariableDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                           TextPosition startPosition, TextPosition endPosition, Visibility visibility,
                            Type* type, Expr* initialValue = nullptr)
-                : Decl(Kind::GlobalVariable, std::move(name), std::move(sourceFile), startPosition, endPosition,
-                       visibility),
+                : Decl(Kind::GlobalVariable, std::move(attributes), std::move(name), std::move(sourceFile),
+                       startPosition, endPosition, visibility),
                   type(type), initialValue(initialValue) {}
 
         Type* type;
@@ -38,7 +38,13 @@ namespace gulc {
         bool hasInitialValue() const { return initialValue != nullptr; }
 
         Decl* deepCopy() const override {
-            auto result = new GlobalVariableDecl(name(), sourceFile(),
+            std::vector<Attr*> copiedAttributes;
+
+            for (Attr* attribute : _attributes) {
+                copiedAttributes.push_back(attribute->deepCopy());
+            }
+
+            auto result = new GlobalVariableDecl(copiedAttributes, name(), sourceFile(),
                                                  startPosition(), endPosition(),
                                                  visibility(),
                                                  type->deepCopy(),

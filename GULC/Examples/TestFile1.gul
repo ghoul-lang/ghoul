@@ -1,5 +1,4 @@
-import std;
-
+[POD]
 struct vec2i
 {
     public int x;
@@ -37,7 +36,7 @@ struct BaseStruct
         this.l = i + j;
     }
 
-    public virtual void setI()
+    public virtual void SetI()
     {
         i = 4;
     }
@@ -64,12 +63,12 @@ struct ChildStruct : BaseStruct
         this.k = k;
     }
 
-    public override void setI()
+    public override void SetI()
     {
         i = 12;
     }
 
-    public int getBaseI()
+    public int GetBaseI()
     {
         return base.i;
     }
@@ -78,9 +77,12 @@ struct ChildStruct : BaseStruct
 int main()
 {
     BaseStruct bs;
-    ChildStruct cs(44, 12, 69);
+    ChildStruct test(44, 12, 69);
+    ChildStruct cs;
 
-    cs.setI();
+    //cs.SetI();
+    // This will trigger a copy reconstruction
+    cs = test;
 
     return cs.i;
 }

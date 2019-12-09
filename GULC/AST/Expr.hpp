@@ -73,6 +73,7 @@ namespace gulc {
 
             BaseConstructorCall,
             BaseDestructorCall,
+            Reconstruct,
 
             RefBase
         };

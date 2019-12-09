@@ -60,6 +60,7 @@
 #include <Targets/Target.hpp>
 #include <ASTHelpers/SizeofHelper.hpp>
 #include <AST/Stmts/ConstructStructMemberVariableStmt.hpp>
+#include <AST/Exprs/ReconstructExpr.hpp>
 #include "Module.hpp"
 
 namespace gulc {
@@ -144,11 +145,12 @@ namespace gulc {
         llvm::Value* getVTableFunctionPointer(gulc::StructDecl* structDecl, llvm::Value* objectRef,
                                               std::size_t vtableIndex, llvm::FunctionType* functionType);
         llvm::Value* generateRefFunctionExpr(const Expr* expr);
-        llvm::Value* getDestructorFunctionPointer(llvm::Value* objectRef, DestructorDecl* destructor);
+        void destructStruct(llvm::Value* structRef, DestructorDecl* destructor);
         llvm::Value* generateDestructLocalVariableExpr(const DestructLocalVariableExpr* destructLocalVariableExpr);
         llvm::Value* generateDestructParameterExpr(const DestructParameterExpr* destructParameterExpr);
         llvm::Value* generateDestructMemberVariableExpr(const DestructMemberVariableExpr* destructMemberVariableExpr);
         llvm::Value* generateRefBaseExpr(const RefBaseExpr* refBaseExpr);
+        llvm::Value* generateReconstructExpr(const ReconstructExpr* reconstructExpr);
 
         void generateBaseConstructorCallExpr(const BaseConstructorCallExpr* baseConstructorCallExpr);
         void generateBaseDestructorCallExpr(const BaseDestructorCallExpr* baseDestructorCallExpr);

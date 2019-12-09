@@ -1,3 +1,18 @@
+// Copyright (C) 2019 Michael Brandon Huddle
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #include <AST/Exprs/BinaryOperatorExpr.hpp>
 #include <AST/Decls/StructDecl.hpp>
 #include <AST/Types/StructType.hpp>
@@ -5,6 +20,8 @@
 #include <AST/Types/ReferenceType.hpp>
 #include <ASTHelpers/VisibilityChecker.hpp>
 #include <AST/Exprs/BaseDestructorCallExpr.hpp>
+#include <AST/Exprs/ReconstructExpr.hpp>
+#include <AST/Exprs/LValueToRValueExpr.hpp>
 #include "Lifetimes.hpp"
 
 using namespace gulc;
@@ -462,60 +479,89 @@ void Lifetimes::processBinaryOperatorExpr(Expr *&expr) {
     processExpr(binaryOperatorExpr->leftValue);
     processExpr(binaryOperatorExpr->rightValue);
 
-    // TODO: Once we support copy and move constructors we will have to support replacing assignments with
-    //  either a copy or move constructor
-    // Replace any assignments with constructor calls if we can...
-//    if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
-//        auto localVariableDeclExpr = llvm::dyn_cast<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue);
-//
-//        if (localVariableDeclExpr->hasInitializer()) {
-//            printError("use of initializer with an assignment operator `=` is not allowed!",
-//                       expr->startPosition(), expr->endPosition());
-//        }
-//
-//        if (llvm::isa<ResolvedTypeRefExpr>(localVariableDeclExpr->type)) {
-//            auto localVariableTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(localVariableDeclExpr->type);
-//
-//            if (TypeComparer::getTypesAreSame(localVariableTypeRef->resolvedType,
-//                                              binaryOperatorExpr->rightValue->resultType)) {
-//                Type* initializerType = binaryOperatorExpr->rightValue->resultType;
-//                localVariableDeclExpr->initializerArgs.push_back(binaryOperatorExpr->rightValue);
-//
-//                // Remove any reference to the local variable declaration and the initial argument
-//                // Then delete the no longer needed binary operator expression
-//                binaryOperatorExpr->leftValue = nullptr;
-//                binaryOperatorExpr->rightValue = nullptr;
-//                delete binaryOperatorExpr;
-//                // Make the local variable declaration the new expression where the binary operator once was
-//                expr = localVariableDeclExpr;
-//
-//                // If the resolved type of the local variable is a struct then we search for a constructor
-//                if (llvm::isa<StructType>(localVariableTypeRef->resolvedType)) {
-//                    auto checkStructType = llvm::dyn_cast<StructType>(localVariableTypeRef->resolvedType);
-//
-//                    for (ConstructorDecl* checkConstructor : checkStructType->decl()->constructors) {
-//                        // Skip any constructors not visible to us
-//                        if (!VisibilityChecker::canAccessStructMember(checkStructType, currentStruct,
-//                                                                      checkConstructor)) {
-//                            continue;
-//                        }
-//
-//                        // TODO: Once we support `copy` and `move` constructors this will have to change...
-//                        if (checkConstructor->parameters.size() == 1) {
-//                            // If the types are the same we set the local variable's constructor reference and break from the loop
-//                            if (TypeComparer::getTypesAreSame(checkConstructor->parameters[0]->type, initializerType)) {
-//                                localVariableDeclExpr->foundConstructor = checkConstructor;
-//                                break;
-//                            }
-//                        }
-//                    }
-//                }
-//            }
-//        }
-//
-//        // We still pass the local variable declaration to be processed so we keep track of it for destruction
-//        processLocalVariableDeclExpr(localVariableDeclExpr);
-//    }
+    if (binaryOperatorExpr->operatorName() == "=") {
+        // If the binary operator is an assignment operator and the left value is a struct
+        // then we have to call the destructor on the left value and perform either a copy
+        // or a move on the right value
+        if (llvm::isa<StructType>(binaryOperatorExpr->leftValue->resultType)) {
+            auto structType = llvm::dyn_cast<StructType>(binaryOperatorExpr->leftValue->resultType);
+            // TODO: Detect if we should move or copy
+            auto useConstructor = structType->decl()->copyConstructor;
+
+            if (useConstructor == nullptr) {
+                // We CANNOT assign a struct if it doesn't have the required constructor
+                printError("struct type `" + structType->decl()->name() + "` has deleted copy constructor!",
+                           binaryOperatorExpr->leftValue->startPosition(),
+                           binaryOperatorExpr->leftValue->endPosition());
+            }
+
+            if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
+                // If the left value is a local variable declaration then we can easily replace `expr` with the
+                // local variable declaration that will have the right value be its initializer, setting the
+                // found constructor to the copy/move constructor
+                auto localVariableDecl = llvm::dyn_cast<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue);
+
+                if (localVariableDecl->hasInitializer()) {
+                    // I believe we already check for this somewhere else but it doesn't hurt to verify here
+                    // This prevents `StructType ex(2, 33) = otherStructVar;` which just doesn't look right.
+                    printError("local variables cannot have both initializer arguments and an initial assignment!",
+                               localVariableDecl->startPosition(), localVariableDecl->endPosition());
+                }
+
+                // TODO: Is the right value an rvalue? Is that okay? I believe it will always be an rvalue at this point
+                localVariableDecl->initializerArgs = {
+                        binaryOperatorExpr->rightValue
+                };
+
+                localVariableDecl->foundConstructor = useConstructor;
+
+                // Safely delete `binaryOperatorExpr` and remove references to the left and right values since we steal
+                // them.
+                binaryOperatorExpr->leftValue = nullptr;
+                binaryOperatorExpr->rightValue = nullptr;
+                delete binaryOperatorExpr;
+
+                // Replace the old binary operator with our local variable declaration that now has a copy or move
+                expr = localVariableDecl;
+            } else {
+                // `rightValue` is most likely an `LValueToRValueExpr` at this point. If it is we remove that to
+                // prevent issues as it is supposed to be an lvalue.
+                if (llvm::isa<LValueToRValueExpr>(binaryOperatorExpr->rightValue)) {
+                    LValueToRValueExpr* lvalueToRValue = llvm::dyn_cast<LValueToRValueExpr>(binaryOperatorExpr->rightValue);
+
+                    // Make the right value a proper lvalue again
+                    binaryOperatorExpr->rightValue = lvalueToRValue->lvalue;
+
+                    // Delete the unused lvalue to rvalue conversion expression
+                    lvalueToRValue->lvalue = nullptr;
+                    delete lvalueToRValue;
+                }
+
+                // If the left value is NOT a local variable declaration then we will replace `expr` with a
+                // constructor call with `this` being set to the left value and `other` being set to the right value
+                std::vector<Expr*> arguments = {
+                        binaryOperatorExpr->rightValue
+                };
+
+                // Create a reconstruction expression. This will call the constructor we provide and call the
+                // constructor on the already constructed value `this` with the `other` argument. We do this instead
+                // of having copy/move assignment operators
+                auto reconstructExpr = new ReconstructExpr(binaryOperatorExpr->startPosition(),
+                                                           binaryOperatorExpr->endPosition(),
+                                                           useConstructor, binaryOperatorExpr->leftValue,
+                                                           arguments, true);
+
+                // Safely delete `binaryOperatorExpr` and remove references to the left and right values since we steal
+                // them.
+                binaryOperatorExpr->leftValue = nullptr;
+                binaryOperatorExpr->rightValue = nullptr;
+                delete binaryOperatorExpr;
+
+                // Replace the old binary operator with our reconstruct expression
+                expr = reconstructExpr;
+            }
+        }
+    }
 }
 
 void Lifetimes::processCharacterLiteralExpr(CharacterLiteralExpr *characterLiteralExpr) {

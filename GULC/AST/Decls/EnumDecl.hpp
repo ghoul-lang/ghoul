@@ -26,10 +26,11 @@ namespace gulc {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Enum; }
 
-        EnumDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                 Visibility visibility, Type* baseType, std::vector<EnumConstantDecl*> enumConstants)
-                : Decl(Kind::Enum, std::move(name), std::move(sourceFile), startPosition, endPosition,
-                       visibility),
+        EnumDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                 TextPosition startPosition, TextPosition endPosition, Visibility visibility, Type* baseType,
+                 std::vector<EnumConstantDecl*> enumConstants)
+                : Decl(Kind::Enum, std::move(attributes), std::move(name), std::move(sourceFile),
+                       startPosition, endPosition, visibility),
                   baseType(baseType), _enumConstants(std::move(enumConstants)) {}
 
         Type* baseType;
@@ -39,15 +40,20 @@ namespace gulc {
         bool hasConstants() const { return !_enumConstants.empty(); }
 
         Decl* deepCopy() const override {
+            std::vector<Attr*> copiedAttributes;
             std::vector<EnumConstantDecl*> copiedConstants{};
             copiedConstants.reserve(_enumConstants.size());
+
+            for (Attr* attribute : _attributes) {
+                copiedAttributes.push_back(attribute->deepCopy());
+            }
 
             for (EnumConstantDecl* enumConstantDecl : _enumConstants) {;
                 // `deepCopy` for `EnumConstantDecl` is guaranteed to return `EnumConstantDecl*`
                 copiedConstants.push_back(static_cast<EnumConstantDecl*>(enumConstantDecl->deepCopy()));
             }
 
-            auto result = new EnumDecl(name(), sourceFile(),
+            auto result = new EnumDecl(copiedAttributes, name(), sourceFile(),
                                        startPosition(), endPosition(),
                                        visibility(),
                                        baseType->deepCopy(), std::move(copiedConstants));

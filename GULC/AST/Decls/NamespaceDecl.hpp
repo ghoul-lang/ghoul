@@ -24,9 +24,10 @@ namespace gulc {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Namespace; }
 
-        NamespaceDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition)
-                : Decl(Kind::Namespace, std::move(name), std::move(sourceFile), startPosition, endPosition,
-                       Visibility::Unspecified),
+        NamespaceDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                      TextPosition startPosition, TextPosition endPosition)
+                : Decl(Kind::Namespace, std::move(attributes), std::move(name), std::move(sourceFile),
+                       startPosition, endPosition, Visibility::Unspecified),
                   _nestedDecls(), _isPrototype(false) {}
 
         void makePrototype() { _isPrototype = true; }
@@ -37,7 +38,13 @@ namespace gulc {
         void addNestedDecl(Decl* decl) { _nestedDecls.push_back(decl); }
 
         Decl* deepCopy() const override {
-            NamespaceDecl* result = new NamespaceDecl(name(), sourceFile(),
+            std::vector<Attr*> copiedAttributes;
+
+            for (Attr* attribute : _attributes) {
+                copiedAttributes.push_back(attribute->deepCopy());
+            }
+
+            NamespaceDecl* result = new NamespaceDecl(copiedAttributes, name(), sourceFile(),
                                                       startPosition(), endPosition());
 
             if (_isPrototype) {

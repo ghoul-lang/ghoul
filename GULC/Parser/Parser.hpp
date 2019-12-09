@@ -35,6 +35,7 @@
 #include <AST/Stmts/GotoStmt.hpp>
 #include <AST/Stmts/TryStmt.hpp>
 #include <AST/FileAST.hpp>
+#include <AST/Attr.hpp>
 
 namespace gulc {
     class Parser {
@@ -49,6 +50,9 @@ namespace gulc {
 
         void printError(const std::string& errorMessage, TextPosition startPosition, TextPosition endPosition);
         void printWarning(const std::string& warningMessage, TextPosition startPosition, TextPosition endPosition);
+
+        Attr* parseAttribute();
+        std::vector<Attr*> parseAttributes();
 
         Decl* parseTopLevelDecl();
         std::vector<TemplateParameterDecl*> parseTemplateParameterDecls(TextPosition startPosition);

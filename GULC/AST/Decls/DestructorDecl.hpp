@@ -25,10 +25,11 @@ namespace gulc {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Destructor; }
 
-        DestructorDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
-                       FunctionModifiers modifier, CompoundStmt *body)
-                : Decl(Kind::Destructor, std::move(name), std::move(sourceFile), startPosition, endPosition,
-                       Visibility::Unspecified),
+        DestructorDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                       TextPosition startPosition, TextPosition endPosition, FunctionModifiers modifier,
+                       CompoundStmt *body)
+                : Decl(Kind::Destructor, std::move(attributes), std::move(name), std::move(sourceFile),
+                       startPosition, endPosition, Visibility::Unspecified),
                   baseDestructor(nullptr), _body(body), _modifier(modifier) {}
 
         CompoundStmt *body() const { return _body; }
@@ -46,10 +47,16 @@ namespace gulc {
         DestructorDecl* baseDestructor;
 
         Decl *deepCopy() const override {
-            auto result = new DestructorDecl(name(), sourceFile(),
-                                              startPosition(), endPosition(),
-                                              _modifier,
-                                              static_cast<CompoundStmt*>(_body->deepCopy()));
+            std::vector<Attr*> copiedAttributes;
+
+            for (Attr* attribute : _attributes) {
+                copiedAttributes.push_back(attribute->deepCopy());
+            }
+
+            auto result = new DestructorDecl(copiedAttributes, name(), sourceFile(),
+                                             startPosition(), endPosition(),
+                                             _modifier,
+                                             static_cast<CompoundStmt*>(_body->deepCopy()));
             result->parentNamespace = parentNamespace;
             result->parentStruct = parentStruct;
             result->baseDestructor = baseDestructor;

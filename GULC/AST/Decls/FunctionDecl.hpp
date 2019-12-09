@@ -38,17 +38,20 @@ namespace gulc {
     public:
         static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Function; }
 
-        FunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
+        FunctionDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                     TextPosition startPosition, TextPosition endPosition,
                      Visibility visibility, FunctionModifiers modifier, Type* resultType,
                      std::vector<ParameterDecl*> parameters, CompoundStmt* body)
-                : FunctionDecl(std::move(name), std::move(sourceFile), startPosition, endPosition, visibility,
+                : FunctionDecl(std::move(attributes), std::move(name), std::move(sourceFile),
+                               startPosition, endPosition, visibility,
                                modifier, resultType, std::move(parameters), body, {}) {}
 
-        FunctionDecl(std::string name, std::string sourceFile, TextPosition startPosition, TextPosition endPosition,
+        FunctionDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                     TextPosition startPosition, TextPosition endPosition,
                      Visibility visibility, FunctionModifiers modifier, Type* resultType,
                      std::vector<ParameterDecl*> parameters, CompoundStmt* body, std::vector<Expr*> templateArguments)
-                : Decl(Kind::Function, std::move(name), std::move(sourceFile), startPosition, endPosition,
-                       visibility),
+                : Decl(Kind::Function, std::move(attributes), std::move(name), std::move(sourceFile),
+                       startPosition, endPosition, visibility),
                   templateArguments(std::move(templateArguments)), resultType(resultType),
                   parameters(std::move(parameters)), _body(body), _isMain(false), _modifier(modifier) {
             if (this->name() == "main") {
@@ -74,8 +77,13 @@ namespace gulc {
         }
 
         Decl* deepCopy() const override {
+            std::vector<Attr*> copiedAttributes;
             std::vector<Expr*> copiedTemplateArguments;
             std::vector<ParameterDecl*> copiedParameters;
+
+            for (Attr* attribute : _attributes) {
+                copiedAttributes.push_back(attribute->deepCopy());
+            }
 
             for (Expr* templateArgument : templateArguments) {
                 copiedTemplateArguments.push_back(templateArgument->deepCopy());
@@ -85,7 +93,7 @@ namespace gulc {
                 copiedParameters.push_back(static_cast<ParameterDecl*>(parameter->deepCopy()));
             }
 
-            auto result = new FunctionDecl(name(), sourceFile(),
+            auto result = new FunctionDecl(copiedAttributes, name(), sourceFile(),
                                            startPosition(), endPosition(),
                                            visibility(), _modifier,
                                            resultType->deepCopy(),

@@ -25,6 +25,10 @@
 #include <AST/Exprs/RefEnumConstantExpr.hpp>
 #include <AST/Exprs/TempNamespaceRefExpr.hpp>
 #include <AST/Types/StructType.hpp>
+#include <AST/Attrs/UnresolvedAttr.hpp>
+#include <AST/Attrs/PodAttr.hpp>
+#include <AST/Attrs/MoveAttr.hpp>
+#include <AST/Attrs/CopyAttr.hpp>
 #include "TypeResolver.hpp"
 
 using namespace gulc;
@@ -193,6 +197,8 @@ bool TypeResolver::resolveType(Type *&type) {
                 }
             }
         }
+
+        return false;
     } else if (type->getTypeKind() == Type::Kind::Pointer) {
         auto pointerType = llvm::dyn_cast<PointerType>(type);
         return resolveType(pointerType->pointToType);
@@ -203,7 +209,51 @@ bool TypeResolver::resolveType(Type *&type) {
         return true;
     }
 
-    return false;
+    // If we reach this point then the type is assumed to already be resolved
+    return true;
+}
+
+void TypeResolver::resolveBuiltInAttribute(Attr *&attribute) {
+    if (llvm::isa<UnresolvedAttr>(attribute)) {
+        auto unresolvedAttribute = llvm::dyn_cast<UnresolvedAttr>(attribute);
+
+        if (unresolvedAttribute->name() == "Copy") {
+            // TODO: We need to parse the arguments. `Copy` supports a single boolean that defaults to true
+            if (!unresolvedAttribute->arguments.empty()) {
+                printError("attribute [Copy] does not take any arguments!",
+                           attribute->startPosition(), attribute->endPosition());
+            }
+
+            auto copyAttr = new CopyAttr(attribute->startPosition(), attribute->endPosition());
+
+            // Replace the old `attribute` if the new `copyAttr`
+            delete attribute;
+            attribute = copyAttr;
+        } else if (unresolvedAttribute->name() == "Move") {
+            // TODO: We need to parse the arguments. `Move` supports a single boolean that defaults to true
+            if (!unresolvedAttribute->arguments.empty()) {
+                printError("attribute [Move] does not take any arguments!",
+                           attribute->startPosition(), attribute->endPosition());
+            }
+
+            auto moveAttr = new MoveAttr(attribute->startPosition(), attribute->endPosition());
+
+            // Replace the old `attribute` if the new `moveAttr`
+            delete attribute;
+            attribute = moveAttr;
+        } else if (unresolvedAttribute->name() == "POD") {
+            if (!unresolvedAttribute->arguments.empty()) {
+                printError("attribute [POD] does not take any arguments!",
+                           attribute->startPosition(), attribute->endPosition());
+            }
+
+            auto podAttr = new PodAttr(attribute->startPosition(), attribute->endPosition());
+
+            // Replace the old `attribute` if the new `podAttr`
+            delete attribute;
+            attribute = podAttr;
+        }
+    }
 }
 
 void TypeResolver::processImports(std::vector<Import*>* imports) {
@@ -426,6 +476,12 @@ void TypeResolver::processExpr(Expr *&expr) {
 
 // Decls
 void TypeResolver::processConstructorDecl(ConstructorDecl *constructorDecl) {
+    if (constructorDecl->hasAttributes()) {
+        for (Attr*& processAttribute : constructorDecl->attributes()) {
+            resolveBuiltInAttribute(processAttribute);
+        }
+    }
+
     if (constructorDecl->hasParameters()) {
         bool shouldHaveDefaultArgument = false;
 
@@ -457,10 +513,22 @@ void TypeResolver::processConstructorDecl(ConstructorDecl *constructorDecl) {
 }
 
 void TypeResolver::processDestructorDecl(DestructorDecl *destructorDecl) {
+    if (destructorDecl->hasAttributes()) {
+        for (Attr*& processAttribute : destructorDecl->attributes()) {
+            resolveBuiltInAttribute(processAttribute);
+        }
+    }
+
     processCompoundStmt(destructorDecl->body());
 }
 
 void TypeResolver::processEnumDecl(EnumDecl *enumDecl) {
+    if (enumDecl->hasAttributes()) {
+        for (Attr*& processAttribute : enumDecl->attributes()) {
+            resolveBuiltInAttribute(processAttribute);
+        }
+    }
+
     if (!enumDecl->hasBaseType()) {
         // If the enum doesn't have a base type we default to an unsigned 32-bit integer
         enumDecl->baseType = new BuiltInType(enumDecl->startPosition(), enumDecl->endPosition(),
@@ -473,6 +541,12 @@ void TypeResolver::processEnumDecl(EnumDecl *enumDecl) {
 
     if (enumDecl->hasConstants()) {
         for (EnumConstantDecl* enumConstant : enumDecl->enumConstants()) {
+            if (enumConstant->hasAttributes()) {
+                for (Attr*& processAttribute : enumConstant->attributes()) {
+                    resolveBuiltInAttribute(processAttribute);
+                }
+            }
+
             if (enumConstant->hasConstantValue()) {
                 processExpr(enumConstant->constantValue);
             }
@@ -481,6 +555,12 @@ void TypeResolver::processEnumDecl(EnumDecl *enumDecl) {
 }
 
 void TypeResolver::processFunctionDecl(FunctionDecl *functionDecl) {
+    if (functionDecl->hasAttributes()) {
+        for (Attr*& processAttribute : functionDecl->attributes()) {
+            resolveBuiltInAttribute(processAttribute);
+        }
+    }
+
     // Resolve function return type...
     if (!resolveType(functionDecl->resultType)) {
         printError("could not find function return type `" + functionDecl->resultType->getString() + "`!",
@@ -512,6 +592,12 @@ void TypeResolver::processFunctionDecl(FunctionDecl *functionDecl) {
 }
 
 void TypeResolver::processGlobalVariableDecl(GlobalVariableDecl *globalVariableDecl) {
+    if (globalVariableDecl->hasAttributes()) {
+        for (Attr*& processAttribute : globalVariableDecl->attributes()) {
+            resolveBuiltInAttribute(processAttribute);
+        }
+    }
+
     // Resolve global variable type...
     if (!resolveType(globalVariableDecl->type)) {
         printError("could not find variable type `" + globalVariableDecl->type->getString() + "`!",
@@ -524,6 +610,12 @@ void TypeResolver::processGlobalVariableDecl(GlobalVariableDecl *globalVariableD
 }
 
 void TypeResolver::processNamespaceDecl(NamespaceDecl *namespaceDecl) {
+    if (namespaceDecl->hasAttributes()) {
+        for (Attr*& processAttribute : namespaceDecl->attributes()) {
+            resolveBuiltInAttribute(processAttribute);
+        }
+    }
+
     NamespaceDecl* oldNamespace = currentNamespace;
     currentNamespace = namespaceDecl;
 
@@ -536,6 +628,12 @@ void TypeResolver::processNamespaceDecl(NamespaceDecl *namespaceDecl) {
 }
 
 void TypeResolver::processStructDecl(StructDecl *structDecl) {
+    if (structDecl->hasAttributes()) {
+        for (Attr*& processAttribute : structDecl->attributes()) {
+            resolveBuiltInAttribute(processAttribute);
+        }
+    }
+
     StructDecl* oldStruct = currentStruct;
     currentStruct = structDecl;
 
@@ -573,12 +671,159 @@ void TypeResolver::processStructDecl(StructDecl *structDecl) {
         if (constructor->visibility() == Decl::Visibility::Unspecified) {
             constructor->setVisibility(Decl::Visibility::Public);
         }
+
+        if (constructor->hasAttribute<CopyAttr>()) {
+            if (structDecl->copyConstructor != nullptr) {
+                printError("duplicate copy constructor found, there can only be one copy constructor!",
+                           constructor->startPosition(), constructor->endPosition());
+            }
+
+            structDecl->copyConstructor = constructor;
+
+            // Copy constructors MUST have a type of `StructDecl const&`, GUL doesn't allow copy constructors to
+            // modify the other struct
+            if (constructor->parameters.size() != 1) {
+                printError("copy constructor MUST have only a single parameter with a type of `" +
+                           structDecl->name() + " const&`!",
+                           constructor->startPosition(), constructor->endPosition());
+            }
+
+            ParameterDecl* checkParameter = constructor->parameters[0];
+            Type* checkType = checkParameter->type;
+
+            // Check that the parameter is a reference
+            if (!llvm::isa<ReferenceType>(checkType)) {
+                printError("copy constructor's parameter should be of type `" + structDecl->name() +
+                           " const&`, missing reference!",
+                           checkParameter->startPosition(), checkParameter->endPosition());
+            }
+
+            Type* checkReferencedType = llvm::dyn_cast<ReferenceType>(checkType)->referenceToType;
+
+            // Verify the reference is a const reference
+            if (checkReferencedType->qualifier() != TypeQualifier::Const) {
+                printError("copy constructor's parameter must be a const reference!",
+                           checkParameter->startPosition(), checkParameter->endPosition());
+            }
+
+            // Verify that the referenced type is a struct and the struct is the same as the container struct
+            if (!llvm::isa<StructType>(checkReferencedType) ||
+                    llvm::dyn_cast<StructType>(checkReferencedType)->decl() != structDecl) {
+                printError("copy constructor's parameter must be the same type as the container struct, cannot be any other type!",
+                           checkParameter->startPosition(), checkParameter->endPosition());
+            }
+        } else if (constructor->hasAttribute<MoveAttr>()) {
+            if (structDecl->copyConstructor != nullptr) {
+                printError("duplicate move constructor found, there can only be one move constructor!",
+                           constructor->startPosition(), constructor->endPosition());
+            }
+
+            structDecl->moveConstructor = constructor;
+
+            // Move constructors MUST have a type of `StructDecl&`, GUL doesn't have rvalue references
+            if (constructor->parameters.size() != 1) {
+                printError("move constructor MUST have only a single parameter with a type of `" +
+                           structDecl->name() + "&`!",
+                           constructor->startPosition(), constructor->endPosition());
+            }
+
+            ParameterDecl* checkParameter = constructor->parameters[0];
+            Type* checkType = checkParameter->type;
+
+            // Check that the parameter is a reference
+            if (!llvm::isa<ReferenceType>(checkType)) {
+                printError("move constructor's parameter should be of type `" + structDecl->name() +
+                           "&`, missing reference!",
+                           checkParameter->startPosition(), checkParameter->endPosition());
+            }
+
+            Type* checkReferencedType = llvm::dyn_cast<ReferenceType>(checkType)->referenceToType;
+
+            // Verify the reference is NOT a const reference
+            if (checkReferencedType->qualifier() == TypeQualifier::Const) {
+                printError("move constructor's parameter cannot be a const reference!",
+                           checkParameter->startPosition(), checkParameter->endPosition());
+            }
+
+            // Verify that the referenced type is a struct and the struct is the same as the container struct
+            if (!llvm::isa<StructType>(checkReferencedType) ||
+                llvm::dyn_cast<StructType>(checkReferencedType)->decl() != structDecl) {
+                printError("move constructor's parameter must be the same type as the container struct, cannot be any other type!",
+                           checkParameter->startPosition(), checkParameter->endPosition());
+            }
+        }
+    }
+
+    // If we didn't find an explicit move constructor we create one
+    if (structDecl->moveConstructor == nullptr) {
+        // Create the type for `StructDecl&`
+        Type* moveParamType = new StructType({}, {}, TypeQualifier::None, structDecl->name(), structDecl);
+        moveParamType = new ReferenceType({}, {}, TypeQualifier::None, moveParamType);
+
+        // The move constructor MUST have the [Move] attribute
+        std::vector<Attr*> attributes = {
+                new MoveAttr({}, {})
+        };
+
+        // We default the name for the other struct `other`
+        std::vector<ParameterDecl*> parameters = {
+                new ParameterDecl({}, "other", structDecl->sourceFile(), {}, {}, moveParamType)
+        };
+
+        // Set the move constructor to an empty constructor
+        structDecl->moveConstructor = new ConstructorDecl(attributes, structDecl->name(), structDecl->sourceFile(),
+                                                          {}, {}, Decl::Visibility::Public, parameters,
+                                                          nullptr, new CompoundStmt({}, {}, {}));
+        // We set `isUserSpecified` to false. `DeclResolver` will see this and auto fill this move constructor
+        // with the default moves/copies
+        structDecl->moveConstructor->isUserSpecified = false;
+        // Set the move constructor's parent struct to the current struct
+        structDecl->moveConstructor->parentStruct = structDecl;
+
+        // Add the new move constructor to the constructors list
+        structDecl->constructors.push_back(structDecl->moveConstructor);
+
+        // We then process the created constructor normally
+        processConstructorDecl(structDecl->moveConstructor);
+    }
+
+    // If we didn't find an explicit copy constructor we create one
+    if (structDecl->copyConstructor == nullptr) {
+        // Create the type for `StructDecl const&`
+        Type* copyParamType = new StructType({}, {}, TypeQualifier::Const, structDecl->name(), structDecl);
+        copyParamType = new ReferenceType({}, {}, TypeQualifier::None, copyParamType);
+
+        // The copy constructor MUST have the [Copy] attribute
+        std::vector<Attr*> attributes = {
+                new CopyAttr({}, {})
+        };
+
+        // We default the name for the other struct `other`
+        std::vector<ParameterDecl*> parameters = {
+                new ParameterDecl({}, "other", structDecl->sourceFile(), {}, {}, copyParamType)
+        };
+
+        // Set the copy constructor to an empty constructor
+        structDecl->copyConstructor = new ConstructorDecl(attributes, structDecl->name(), structDecl->sourceFile(),
+                                                          {}, {}, Decl::Visibility::Public, parameters,
+                                                          nullptr, new CompoundStmt({}, {}, {}));
+        // We set `isUserSpecified` to false. `DeclResolver` will see this and auto fill this copy constructor
+        // with the default copies
+        structDecl->copyConstructor->isUserSpecified = false;
+        // Set the copy constructor's parent struct to the current struct
+        structDecl->copyConstructor->parentStruct = structDecl;
+
+        // Add the new copy constructor to the constructors list
+        structDecl->constructors.push_back(structDecl->copyConstructor);
+
+        // We then process the created constructor normally
+        processConstructorDecl(structDecl->copyConstructor);
     }
 
     // If the struct doesn't declare any default constructor then we define a default, empty constructor
     // We will handle checking if the base struct's default constructor is callable in `DeclResolver`
     if (!hasDefaultConstructor) {
-        ConstructorDecl* defaultConstructor = new ConstructorDecl(structDecl->name(), structDecl->sourceFile(),
+        ConstructorDecl* defaultConstructor = new ConstructorDecl({}, structDecl->name(), structDecl->sourceFile(),
                                                                   structDecl->startPosition(), structDecl->endPosition(),
                                                                   Decl::Visibility::Public, {},
                                                                   nullptr,
@@ -609,7 +854,7 @@ void TypeResolver::processStructDecl(StructDecl *structDecl) {
         // destructors to the default destructor
         defaultDestructorBody->statements().push_back(new ReturnStmt({}, {}, nullptr));
 
-        structDecl->destructor = new DestructorDecl(structDecl->name(), structDecl->sourceFile(), {}, {},
+        structDecl->destructor = new DestructorDecl({}, structDecl->name(), structDecl->sourceFile(), {}, {},
                                                     FunctionModifiers::None,
                                                     defaultDestructorBody);
     }
@@ -621,6 +866,12 @@ void TypeResolver::processStructDecl(StructDecl *structDecl) {
 }
 
 void TypeResolver::processTemplateFunctionDecl(TemplateFunctionDecl *templateFunctionDecl) {
+    if (templateFunctionDecl->hasAttributes()) {
+        for (Attr*& processAttribute : templateFunctionDecl->attributes()) {
+            resolveBuiltInAttribute(processAttribute);
+        }
+    }
+
     if (templateFunctionDecl->hasTemplateParameters()) {
         bool shouldHaveDefaultArgument = false;
 

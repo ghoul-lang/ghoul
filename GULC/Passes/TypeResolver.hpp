@@ -77,6 +77,10 @@ namespace gulc {
         bool declResolvesToType(Decl* decl, UnresolvedType* unresolvedType, Type** resolvedType);
         bool resolveType(Type*& type);
 
+        // Attempts to resolve the attribute to a built in (if possible) if we can't resolve it here then it isn't
+        // built in and will be resolved in our `AttributeResolver` pass
+        void resolveBuiltInAttribute(Attr*& attribute);
+
         void processImports(std::vector<Import*>* imports);
         NamespaceDecl* validateImportPath(NamespaceDecl* checkNamespace, const std::vector<std::string>& checkPath,
                                           std::size_t currentPathIndex);

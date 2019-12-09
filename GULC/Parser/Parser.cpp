@@ -45,6 +45,7 @@
 #include <AST/Decls/TemplateFunctionDecl.hpp>
 #include <AST/Decls/StructDecl.hpp>
 #include <AST/Decls/ConstructorDecl.hpp>
+#include <AST/Attrs/UnresolvedAttr.hpp>
 #include "Parser.hpp"
 
 using namespace gulc;
@@ -159,6 +160,85 @@ void Parser::printWarning(const std::string &warningMessage, TextPosition startP
               << std::endl;
 }
 
+Attr *Parser::parseAttribute() {
+    TextPosition startPosition = _lexer.peekToken().startPosition;
+    TextPosition endPosition = _lexer.peekToken().endPosition;
+    std::vector<std::string> namespacePath;
+    std::string attributeName = _lexer.peekToken().currentSymbol;
+    std::vector<Expr*> arguments;
+
+    // We immediately set `attributeName` to the current symbol then try to consume a `SYMBOL` type,
+    // if that fails then there was something wrong with our current syntax
+    if (!_lexer.consumeType(TokenType::SYMBOL)) {
+        printError("expected attribute name, found `" + attributeName + "`!",
+                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+    }
+
+    while (_lexer.peekType() == TokenType::PERIOD) {
+        _lexer.consumeType(TokenType::PERIOD);
+        namespacePath.push_back(attributeName);
+
+        attributeName = _lexer.peekToken().currentSymbol;
+        endPosition = _lexer.peekToken().endPosition;
+
+        if (!_lexer.consumeType(TokenType::SYMBOL)) {
+            printError("expected namespace or attribute name after `.`, found '" + attributeName + "'!",
+                       _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+            return nullptr;
+        }
+    }
+
+    // If the next token is an `(` we immediately consume it and then parse the arguments
+    // NOTE: Attributes can be called without parenthesis. `[attribute]`, `[move]`, `[move()]`, etc. are all allowed
+    if (_lexer.consumeType(TokenType::LPAREN)) {
+        while (_lexer.peekType() != TokenType::RPAREN && _lexer.peekType() != TokenType::ENDOFFILE) {
+            // TODO: Should we allow template typing?
+            arguments.push_back(parseExpr(false, false));
+
+            // If the next token isn't a comma we break from the loop
+            if (!_lexer.consumeType(TokenType::COMMA)) {
+                break;
+            }
+        }
+
+        endPosition = _lexer.peekToken().endPosition;
+
+        if (!_lexer.consumeType(TokenType::RPAREN)) {
+            printError("expected ending `)` after attribute arguments! (found '" + _lexer.peekToken().currentSymbol + "')",
+                       _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+        }
+    }
+
+    return new UnresolvedAttr(attributeName, startPosition, endPosition, namespacePath, arguments);
+}
+
+std::vector<Attr*> Parser::parseAttributes() {
+    std::vector<Attr*> result;
+
+    // Parse attributes
+    while (_lexer.peekType() == TokenType::LSQUARE) {
+        _lexer.consumeType(TokenType::LSQUARE);
+
+        // Parse the first and potentially only attribute
+        result.push_back(parseAttribute());
+
+        // If there is a comma then that means they're specifying multiple attributes in the same `[...]` which is
+        // allowed
+        while (_lexer.peekType() == TokenType::COMMA) {
+            _lexer.consumeType(TokenType::COMMA);
+
+            result.push_back(parseAttribute());
+        }
+
+        if (!_lexer.consumeType(TokenType::RSQUARE)) {
+            printError("expected ending `]` for attribute! (found `" + _lexer.peekToken().currentSymbol + "`)",
+                       _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+        }
+    }
+
+    return result;
+}
+
 /**
  * This parses a 'top-level' declaration which is a non-member function, non-member variable, namespace,
  * class, struct, enum, interface, union, etc.
@@ -175,9 +255,14 @@ void Parser::printWarning(const std::string &warningMessage, TextPosition startP
  * }
  */
 Decl *Parser::parseTopLevelDecl() {
-    Token peekedToken = _lexer.peekToken();
-    TextPosition startPosition = peekedToken.startPosition;
-    TextPosition endPosition = peekedToken.endPosition;
+    TextPosition startPosition = _lexer.peekToken().startPosition;
+    TextPosition endPosition = _lexer.peekToken().endPosition;
+
+    std::vector<Attr*> attributes;
+
+    if (_lexer.peekType() == TokenType::LSQUARE) {
+        attributes = parseAttributes();
+    }
 
     bool isExtern = false;
     bool isVolatile = false;
@@ -192,8 +277,8 @@ Decl *Parser::parseTopLevelDecl() {
      */
     Decl::Visibility visibility = Decl::Visibility::Unspecified;
 
-    while (peekedToken.metaType == TokenMetaType::MODIFIER) {
-        switch (peekedToken.tokenType) {
+    while (_lexer.peekToken().metaType == TokenMetaType::MODIFIER) {
+        switch (_lexer.peekToken().tokenType) {
             case TokenType::PUBLIC:
                 switch (visibility) {
                     case Decl::Visibility::Unspecified:
@@ -201,23 +286,23 @@ Decl *Parser::parseTopLevelDecl() {
                         break;
                     case Decl::Visibility::Public:
                         printWarning("duplicate `public` specifier!",
-                                     peekedToken.startPosition, peekedToken.endPosition);
+                                     _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::Private:
                         printError("cannot specify both `private` and `public` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::Protected:
                         printError("cannot specify both `protected` and `public` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::Internal:
                         printError("cannot specify both `internal` and `public` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::ProtectedInternal:
                         printError("cannot specify both `protected internal` and `public` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                 }
                 _lexer.consumeType(TokenType::PUBLIC);
@@ -229,23 +314,23 @@ Decl *Parser::parseTopLevelDecl() {
                         break;
                     case Decl::Visibility::Public:
                         printError("cannot specify both `public` and `private` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::Private:
                         printWarning("duplicate `private` specifier!",
-                                     peekedToken.startPosition, peekedToken.endPosition);
+                                     _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::Protected:
                         printError("cannot specify both `protected` and `private` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::Internal:
                         printError("cannot specify both `internal` and `private` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::ProtectedInternal:
                         printError("cannot specify both `protected internal` and `private` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                 }
                 _lexer.consumeType(TokenType::PRIVATE);
@@ -257,24 +342,24 @@ Decl *Parser::parseTopLevelDecl() {
                         break;
                     case Decl::Visibility::Public:
                         printError("cannot specify both `public` and `protected` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::Private:
                         printError("cannot specify both `private` and `protected` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::Protected:
                         printWarning("duplicate `protected` specifier!",
-                                     peekedToken.startPosition, peekedToken.endPosition);
+                                     _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::Internal:
                         printWarning("`internal protected` is out of order, replace with `protected internal`!",
-                                     peekedToken.startPosition, peekedToken.endPosition);
+                                     _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         visibility = Decl::Visibility::ProtectedInternal;
                         break;
                     case Decl::Visibility::ProtectedInternal:
                         printError("cannot specify both `protected internal` and `protected` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                 }
                 _lexer.consumeType(TokenType::PROTECTED);
@@ -286,60 +371,60 @@ Decl *Parser::parseTopLevelDecl() {
                         break;
                     case Decl::Visibility::Public:
                         printError("cannot specify both `public` and `internal` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::Private:
                         printError("cannot specify both `private` and `internal` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::Protected:
                         visibility = Decl::Visibility::ProtectedInternal;
                         break;
                     case Decl::Visibility::Internal:
                         printWarning("duplicate `internal` specifier!",
-                                     peekedToken.startPosition, peekedToken.endPosition);
+                                     _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                     case Decl::Visibility::ProtectedInternal:
                         printError("cannot specify both `protected internal` and `internal` at the same time!",
-                                   peekedToken.startPosition, peekedToken.endPosition);
+                                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                         break;
                 }
                 _lexer.consumeType(TokenType::INTERNAL);
                 break;
             case TokenType::STATIC:
-                printError("'static' cannot be applied to top-level declarations!", peekedToken.startPosition, peekedToken.endPosition);
+                printError("'static' cannot be applied to top-level declarations!", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                 return nullptr;
             case TokenType::VIRTUAL:
                 if (isVirtual) {
-                    printWarning("duplicate 'virtual' specifier", peekedToken.startPosition, peekedToken.endPosition);
+                    printWarning("duplicate 'virtual' specifier", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                 }
 
-                if (isAbstract) printError("'virtual' and 'abstract' cannot be used at the same time!", peekedToken.startPosition, peekedToken.endPosition);
-                if (isOverride) printError("'virtual' and 'override' cannot be used at the same time!", peekedToken.startPosition, peekedToken.endPosition);
+                if (isAbstract) printError("'virtual' and 'abstract' cannot be used at the same time!", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                if (isOverride) printError("'virtual' and 'override' cannot be used at the same time!", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
 
                 _lexer.consumeType(TokenType::VIRTUAL);
                 isVirtual = true;
                 break;
             case TokenType::OVERRIDE:
                 if (isOverride) {
-                    printWarning("duplicate 'override' specifier", peekedToken.startPosition, peekedToken.endPosition);
+                    printWarning("duplicate 'override' specifier", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                 }
 
-                if (isAbstract) printError("'override' and 'abstract' cannot be used at the same time!", peekedToken.startPosition, peekedToken.endPosition);
-                if (isVirtual) printError("'override' and 'virtual' cannot be used at the same time!", peekedToken.startPosition, peekedToken.endPosition);
+                if (isAbstract) printError("'override' and 'abstract' cannot be used at the same time!", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                if (isVirtual) printError("'override' and 'virtual' cannot be used at the same time!", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
 
                 _lexer.consumeType(TokenType::OVERRIDE);
                 isOverride = true;
                 break;
             case TokenType::EXTERN:
-                if (isExtern) printWarning("duplicate 'extern' specifier", peekedToken.startPosition, peekedToken.endPosition);
+                if (isExtern) printWarning("duplicate 'extern' specifier", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
 
                 _lexer.consumeType(TokenType::EXTERN);
                 isExtern = true;
                 break;
             case TokenType::VOLATILE:
                 if (isVolatile) {
-                    printWarning("duplicate 'volatile' specifier", peekedToken.startPosition, peekedToken.endPosition);
+                    printWarning("duplicate 'volatile' specifier", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                 }
 
                 _lexer.consumeType(TokenType::VOLATILE);
@@ -347,17 +432,17 @@ Decl *Parser::parseTopLevelDecl() {
                 break;
             case TokenType::ABSTRACT:
                 if (isAbstract) {
-                    printWarning("duplicate 'abstract' specifier", peekedToken.startPosition, peekedToken.endPosition);
+                    printWarning("duplicate 'abstract' specifier", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                 }
 
-                if (isVirtual) printError("'abstract' and 'virtual' cannot be used at the same time!", peekedToken.startPosition, peekedToken.endPosition);
-                if (isOverride) printError("'abstract' and 'override' cannot be used at the same time!", peekedToken.startPosition, peekedToken.endPosition);
+                if (isVirtual) printError("'abstract' and 'virtual' cannot be used at the same time!", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                if (isOverride) printError("'abstract' and 'override' cannot be used at the same time!", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
 
                 _lexer.consumeType(TokenType::ABSTRACT);
                 isAbstract = true;
                 break;
             case TokenType::SEALED:
-                if (isSealed) printWarning("duplicate 'sealed' specifier", peekedToken.startPosition, peekedToken.endPosition);
+                if (isSealed) printWarning("duplicate 'sealed' specifier", _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
 
                 _lexer.consumeType(TokenType::SEALED);
                 isSealed = true;
@@ -367,18 +452,17 @@ Decl *Parser::parseTopLevelDecl() {
                 // We break from the loop if the token is `const` or `mut`
                 goto qualifierFound;
             default:
-                printError("unknown qualifier '" + peekedToken.currentSymbol + "'!",
-                           peekedToken.startPosition, peekedToken.endPosition);
+                printError("unknown qualifier '" + _lexer.peekToken().currentSymbol + "'!",
+                           _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                 return nullptr;
         }
 
-        peekedToken = _lexer.peekToken();
-        endPosition = peekedToken.endPosition;
+        endPosition = _lexer.peekToken().endPosition;
     }
 
 qualifierFound:
 
-    switch (peekedToken.tokenType) {
+    switch (_lexer.peekToken().tokenType) {
         case TokenType::NAMESPACE: {
             _lexer.consumeType(TokenType::NAMESPACE);
 
@@ -397,7 +481,7 @@ qualifierFound:
                 return nullptr;
             }
 
-            auto resultNamespace = new NamespaceDecl(name, _filePath, startPosition, endPosition);
+            auto resultNamespace = new NamespaceDecl({}, name, _filePath, startPosition, endPosition);
             auto workingNamespace = resultNamespace;
 
             while (_lexer.peekType() == TokenType::PERIOD) {
@@ -414,7 +498,7 @@ qualifierFound:
                     return nullptr;
                 }
 
-                auto newWorkingNamespace = new NamespaceDecl(nestedName, _filePath,
+                auto newWorkingNamespace = new NamespaceDecl({}, nestedName, _filePath,
                                                              namespaceStartPosition, endPosition);
 
                 // We nest the new working namespace into the current one...
@@ -429,6 +513,10 @@ qualifierFound:
                            _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
                 return nullptr;
             }
+
+            // The `workingNamespace` is the final namespace in a namespace path, it is `Http` in `Std.Net.Http`
+            // This is the namespace we apply the attributes to
+            workingNamespace->setAttributes(attributes);
 
             while (_lexer.peekType() != TokenType::RCURLY &&
                    _lexer.peekType() != TokenType::ENDOFFILE) {
@@ -507,7 +595,7 @@ qualifierFound:
                 return nullptr;
             }
 
-            return new StructDecl(name, _filePath, startPosition, endPosition, visibility,
+            return new StructDecl(attributes, name, _filePath, startPosition, endPosition, visibility,
                                   std::move(baseTypes), std::move(constructors), std::move(members), destructor);
         }
         case TokenType::UNION:
@@ -543,6 +631,12 @@ qualifierFound:
             std::vector<EnumConstantDecl*> constants{};
 
             while (_lexer.peekType() != TokenType::RCURLY && _lexer.peekType() != TokenType::ENDOFFILE) {
+                std::vector<Attr*> enumConstAttributes;
+
+                if (_lexer.peekType() == TokenType::LSQUARE) {
+                    enumConstAttributes = parseAttributes();
+                }
+
                 std::string constantName = _lexer.peekToken().currentSymbol;
                 TextPosition constantStartPosition = _lexer.peekToken().startPosition;
                 TextPosition constantEndPosition = _lexer.peekToken().endPosition;
@@ -561,7 +655,7 @@ qualifierFound:
                     constantValue = parseExpr(false, false);
                 }
 
-                constants.push_back(new EnumConstantDecl(constantName, _filePath,
+                constants.push_back(new EnumConstantDecl(enumConstAttributes, constantName, _filePath,
                                                          constantStartPosition, constantEndPosition,
                                                          constantValue));
 
@@ -576,7 +670,7 @@ qualifierFound:
                 return nullptr;
             }
 
-            return new EnumDecl(name, _filePath, startPosition, endPosition, visibility, baseType, constants);
+            return new EnumDecl(attributes, name, _filePath, startPosition, endPosition, visibility, baseType, constants);
         }
         case TokenType::TILDE: {
             // Parse destructor
@@ -621,21 +715,20 @@ qualifierFound:
                 modifier = FunctionModifiers::Override;
             }
 
-            return new DestructorDecl(verifyName, _filePath, startPosition, endPosition, modifier, compoundStmt);
+            return new DestructorDecl(attributes, verifyName, _filePath, startPosition, endPosition, modifier, compoundStmt);
         }
         case TokenType::CONST:
         case TokenType::MUT:
         case TokenType::SYMBOL: {
             Type* resultType = parseType();
 
-            peekedToken = _lexer.peekToken();
-            endPosition = peekedToken.endPosition;
+            endPosition = _lexer.peekToken().endPosition;
 
             bool parseConstructor = false;
             std::string name;
 
             // Parse the rest of the type and the name of the variable or function
-            switch (peekedToken.tokenType) {
+            switch (_lexer.peekToken().tokenType) {
                 case TokenType::LPAREN:
                     parseConstructor = true;
 
@@ -652,7 +745,7 @@ qualifierFound:
                     break;
                 case TokenType::SYMBOL:
                     // This is the function or variable declaration name
-                    name = peekedToken.currentSymbol;
+                    name = _lexer.peekToken().currentSymbol;
                     _lexer.consumeType(TokenType::SYMBOL);
                     break;
                 default:
@@ -661,11 +754,10 @@ qualifierFound:
                     return nullptr;
             }
 
-            peekedToken = _lexer.peekToken();
-            endPosition = peekedToken.endPosition;
+            endPosition = _lexer.peekToken().endPosition;
 
             // Detect if it is a variable or function and parse based on the detection
-            switch (peekedToken.tokenType) {
+            switch (_lexer.peekToken().tokenType) {
                 case TokenType::LESS: { // Template Function
                     if (parseConstructor) {
                         printError("constructors cannot have template parameters! (or template function is missing a type?)",
@@ -685,7 +777,7 @@ qualifierFound:
                         printError("template functions cannot be `override`!", startPosition, endPosition);
                     }
 
-                    return new TemplateFunctionDecl(name, _filePath, startPosition, endPosition, visibility,
+                    return new TemplateFunctionDecl(attributes, name, _filePath, startPosition, endPosition, visibility,
                                                     FunctionModifiers::None, resultType, templateParameters,
                                                     parameters, compoundStmt);
                 }
@@ -747,8 +839,8 @@ qualifierFound:
                         // TODO: Should we allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
                         CompoundStmt* compoundStmt = parseCompoundStmt();
 
-                        return new ConstructorDecl(name, _filePath, startPosition, endPosition, visibility, parameters,
-                                                   baseConstructorCall, compoundStmt);
+                        return new ConstructorDecl(attributes, name, _filePath, startPosition, endPosition, visibility,
+                                                   parameters, baseConstructorCall, compoundStmt);
                     } else {
                         // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
                         CompoundStmt* compoundStmt = parseCompoundStmt();
@@ -763,7 +855,7 @@ qualifierFound:
                             modifier = FunctionModifiers::Override;
                         }
 
-                        return new FunctionDecl(name, _filePath, startPosition, endPosition, visibility,
+                        return new FunctionDecl(attributes, name, _filePath, startPosition, endPosition, visibility,
                                                 modifier, resultType, parameters, compoundStmt);
                     }
                 }
@@ -785,7 +877,8 @@ qualifierFound:
                         return nullptr;
                     }
 
-                    return new GlobalVariableDecl(name, _filePath, startPosition, endPosition, visibility, resultType, initialValue);
+                    return new GlobalVariableDecl(attributes, name, _filePath, startPosition, endPosition, visibility,
+                                                  resultType, initialValue);
                 }
                 case TokenType::SEMICOLON:
                     if (parseConstructor) {
@@ -801,7 +894,8 @@ qualifierFound:
                         return nullptr;
                     }
 
-                    return new GlobalVariableDecl(name, _filePath, startPosition, endPosition, visibility, resultType, nullptr);
+                    return new GlobalVariableDecl(attributes, name, _filePath, startPosition, endPosition, visibility,
+                                                  resultType, nullptr);
                 default:
                     printError("unexpected token in top-level declaration! (found '" + _lexer.peekToken().currentSymbol + "')", startPosition, endPosition);
                     return nullptr;
@@ -841,6 +935,12 @@ std::vector<TemplateParameterDecl *> Parser::parseTemplateParameterDecls(TextPos
     for (Token peekedToken = _lexer.peekToken();
          peekedToken.tokenType != TokenType::TEMPLATEEND && peekedToken.tokenType != TokenType::ENDOFFILE;
          peekedToken = _lexer.peekToken()) {
+        std::vector<Attr*> templateParamAttributes;
+
+        if (_lexer.peekType() == TokenType::LSQUARE) {
+            templateParamAttributes = parseAttributes();
+        }
+
         Type* paramType = parseType();
 
         peekedToken = _lexer.peekToken();
@@ -889,7 +989,8 @@ std::vector<TemplateParameterDecl *> Parser::parseTemplateParameterDecls(TextPos
         }
 
         // Add new 'ParameterDecl' to the result list
-        result.push_back(new TemplateParameterDecl(paramName, _filePath, paramType->startPosition(), endPosition,
+        result.push_back(new TemplateParameterDecl(templateParamAttributes, paramName, _filePath,
+                                                   paramType->startPosition(), endPosition,
                                                    paramType, defaultArgument));
 
         if (!_lexer.consumeType(TokenType::COMMA)) {
@@ -928,6 +1029,12 @@ std::vector<ParameterDecl*> Parser::parseParameterDecls(TextPosition startPositi
     for (Token peekedToken = _lexer.peekToken();
          peekedToken.tokenType != TokenType::RPAREN && peekedToken.tokenType != TokenType::ENDOFFILE;
          peekedToken = _lexer.peekToken()) {
+        std::vector<Attr*> paramAttributes;
+
+        if (_lexer.peekType() == TokenType::LSQUARE) {
+            paramAttributes = parseAttributes();
+        }
+
         Type* paramType = parseType();
 
         peekedToken = _lexer.peekToken();
@@ -951,8 +1058,8 @@ std::vector<ParameterDecl*> Parser::parseParameterDecls(TextPosition startPositi
         }
 
         // Add new 'ParameterDecl' to the result list
-        result.push_back(new ParameterDecl(paramName, _filePath, paramType->startPosition(), endPosition,
-                                           paramType, defaultArgument));
+        result.push_back(new ParameterDecl(paramAttributes, paramName, _filePath, paramType->startPosition(),
+                                           endPosition, paramType, defaultArgument));
 
         if (!_lexer.consumeType(TokenType::COMMA)) {
             // If there isn't a comma then we expect there to be a closing parenthesis

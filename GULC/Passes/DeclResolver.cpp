@@ -215,6 +215,163 @@ void DeclResolver::processExpr(Expr *&expr) {
 }
 
 // Decls
+void DeclResolver::processCopyOrMoveConstructorDecl(ConstructorDecl *constructorDecl, bool isMoveConstructor) {
+    // We handle copy/move constructors differently than normal constructors
+    if (constructorDecl->baseConstructorCall != nullptr) {
+        if (isMoveConstructor) {
+            printError(
+                    "specifying a base constructor for move constructors is not allowed, base move constructor is always used!",
+                    constructorDecl->baseConstructorCall->startPosition(),
+                    constructorDecl->baseConstructorCall->endPosition());
+        } else {
+            printError(
+                    "specifying a base constructor for copy constructors is not allowed, base copy constructor is always used!",
+                    constructorDecl->baseConstructorCall->startPosition(),
+                    constructorDecl->baseConstructorCall->endPosition());
+        }
+    }
+
+    constructorDecl->baseConstructor = nullptr;
+
+    if (currentStruct->baseStruct != nullptr) {
+        if (!isMoveConstructor && currentStruct->baseStruct->copyConstructor == nullptr) {
+            // If we're processing the copy constructor and the copy constructor is deleted in our base then we have
+            // to delete ours as well. There is no way around this.
+            printError("struct '" + currentStruct->name() + "' cannot have a copy constructor due to base '" +
+                       currentStruct->baseStruct->name() + "' having a deleted copy constructor, please mark struct '" +
+                       currentStruct->name() + "' [Copy(false)] to delete its copy constructor!",
+                       currentStruct->startPosition(), currentStruct->endPosition());
+        } else if (isMoveConstructor && currentStruct->baseStruct->moveConstructor == nullptr) {
+            // If we're processing the move constructor and the move constructor is deleted in our base then we have
+            // to delete ours as well
+            // TODO: Couldn't we allow using the `copy` constructor of the base to allow moving again?
+            printError("struct '" + currentStruct->name() + "' cannot have a move constructor due to base '" +
+                       currentStruct->baseStruct->name() + "' having a deleted move constructor, please mark struct '" +
+                       currentStruct->name() + "' [Move(false)] to delete its move constructor!",
+                       currentStruct->startPosition(), currentStruct->endPosition());
+        }
+
+        if (isMoveConstructor) {
+            // Set the base constructor to the base class move constructor
+            constructorDecl->baseConstructor = currentStruct->baseStruct->moveConstructor;
+        } else {
+            // Set the base constructor to the base class copy constructor
+            constructorDecl->baseConstructor = currentStruct->baseStruct->copyConstructor;
+        }
+
+        // Create the `other` parameter reference
+        Expr* refOther = new IdentifierExpr({}, {}, "other", {});
+
+        // Process the the ref into what it need to be
+        processIdentifierExpr(refOther);
+
+        std::vector<Expr*> arguments = {
+                refOther
+        };
+
+        // Set the base constructor call
+        constructorDecl->baseConstructorCall = new BaseConstructorCallExpr({}, {}, false,
+                                                                           constructorDecl->baseConstructor,
+                                                                           arguments);
+    }
+
+    // If it isn't user specified then we have to go through all data members and call their copy/move constructors...
+    if (!constructorDecl->isUserSpecified) {
+        auto& bodyStatements = constructorDecl->body()->statements();
+
+        // NOTE: We loop in reverse to make sure they're being assigned in the correct order
+        for (GlobalVariableDecl* copyOrMoveMember : gulc::reverse(currentStruct->dataMembers)) {
+            if (copyOrMoveMember->name().empty()) {
+                // Any member without a name is padding, we skip padding.
+                continue;
+            }
+
+            auto structType = new StructType({}, {}, TypeQualifier::None,
+                                             currentStruct->name(), currentStruct);
+
+            Expr* refOther = new IdentifierExpr({}, {}, "other", {});
+
+            // Process the the ref into what it need to be
+            processIdentifierExpr(refOther);
+
+            // Create references to both of their members
+            Expr* refOtherMember = new RefStructMemberVariableExpr({}, {}, refOther,
+                                                                   llvm::dyn_cast<StructType>(structType->deepCopy()),
+                                                                   copyOrMoveMember);
+
+            refOtherMember->resultType = copyOrMoveMember->type->deepCopy();
+
+            // Delete the struct type (since we only make copies of it)
+            delete structType;
+
+            if (llvm::isa<StructType>(copyOrMoveMember->type)) {
+                // If the member is a struct we will grab the struct type's copy/move constructor and call it
+                auto memberStructType = llvm::dyn_cast<StructType>(copyOrMoveMember->type);
+
+                if (!isMoveConstructor && memberStructType->decl()->copyConstructor == nullptr) {
+                    // If the copy constructor of the member variable is deleted we cannot define a default copy
+                    // constructor. Notify the programmer of this and how to fix it
+                    printError("member '" + copyOrMoveMember->name() + "' in struct '" + structType->decl()->name() +
+                               "' has a deleted copy constructor, cannot create default copy constructor for struct '" +
+                               structType->decl()->name() + "', either mark the current struct as [Copy(false)] or "
+                                                            "define a custom copy constructor!",
+                               copyOrMoveMember->startPosition(), copyOrMoveMember->endPosition());
+                } else if (isMoveConstructor && memberStructType->decl()->moveConstructor == nullptr) {
+                    // If the move constructor of the member variable is deleted we cannot define a default move
+                    // constructor. Notify the programmer of this and how to fix it
+                    // TODO: Couldn't we just use the copy constructor here? Not everything HAS to be moved in the move
+                    //       constructor, right? Or should these be guaranteed moves unless explicitly stated otherwise?
+                    printError("member '" + copyOrMoveMember->name() + "' in struct '" + structType->decl()->name() +
+                               "' has a deleted move constructor, cannot create default move constructor for struct '" +
+                               structType->decl()->name() + "', either mark the current struct as [Move(false)] or "
+                                                            "define a custom move constructor!",
+                               copyOrMoveMember->startPosition(), copyOrMoveMember->endPosition());
+                }
+
+                std::vector<Expr*> arguments = {
+                        refOtherMember
+                };
+
+                // Grab the proper constructor for what we're doing
+                ConstructorDecl* copyOrMoveConstructor;
+
+                if (isMoveConstructor) {
+                    copyOrMoveConstructor = memberStructType->decl()->moveConstructor;
+                } else {
+                    copyOrMoveConstructor = memberStructType->decl()->copyConstructor;
+                }
+
+                // Call the copy constructor for the member variable
+                auto constructMemberVariable = new ConstructStructMemberVariableStmt({}, {}, copyOrMoveMember,
+                                                                                     copyOrMoveConstructor,
+                                                                                     arguments);
+
+                bodyStatements.insert(bodyStatements.begin(), constructMemberVariable);
+            } else {
+                // If the member is not a struct we will just use a value assignment from the other value
+                Expr* refThis = new IdentifierExpr({}, {}, "this", {});
+
+                processIdentifierExpr(refThis);
+
+                Expr* refThisMember = new RefStructMemberVariableExpr({}, {}, refThis,
+                                                                      llvm::dyn_cast<StructType>(structType->deepCopy()),
+                                                                      copyOrMoveMember);
+
+                refThisMember->resultType = copyOrMoveMember->type->deepCopy();
+
+                // TODO: We don't have to dereference or anything here, right?
+                //       If the `this` member is a reference the `other` member is too...
+                refOtherMember->resultType->setIsLValue(true);
+                convertLValueToRValue(refOtherMember);
+
+                Expr* assignment = new BinaryOperatorExpr({}, {}, "=", refThisMember, refOtherMember);
+
+                bodyStatements.insert(bodyStatements.begin(), assignment);
+            }
+        }
+    }
+}
+
 void DeclResolver::processConstructorDecl(ConstructorDecl* constructorDecl) {
     // We back up the old values since we will be
     auto oldFunctionParams = functionParams;
@@ -237,7 +394,14 @@ void DeclResolver::processConstructorDecl(ConstructorDecl* constructorDecl) {
     // We reset to zero just in case.
     functionLocalVariablesCount = 0;
 
-    if (constructorDecl->baseConstructorCall != nullptr) {
+    bool isMoveConstructor = constructorDecl == currentStruct->moveConstructor;
+    bool isCopyConstructor = constructorDecl == currentStruct->copyConstructor;
+
+    if (isCopyConstructor) {
+        processCopyOrMoveConstructorDecl(constructorDecl, false);
+    } else if (isMoveConstructor) {
+        processCopyOrMoveConstructorDecl(constructorDecl, true);
+    } else if (constructorDecl->baseConstructorCall != nullptr) {
         // If the call isn't null here it means it was specified in code, we will have to search for a valid base
         // constructor
 
@@ -343,8 +507,9 @@ void DeclResolver::processConstructorDecl(ConstructorDecl* constructorDecl) {
     //       construct variables and remove any destructor calls that will be placed once we add `move` and `copy`
     //       constructors...
     // If the base constructor is null or isn't a `this` call...
-    if (constructorDecl->baseConstructor == nullptr ||
-            constructorDecl->baseConstructor->parentStruct != constructorDecl->parentStruct) {
+    // We also don't perform this operation when the constructor is a move or copy constructor
+    if (!isMoveConstructor && !isCopyConstructor && (constructorDecl->baseConstructor == nullptr ||
+            constructorDecl->baseConstructor->parentStruct != constructorDecl->parentStruct)) {
         // Construct any members or error if a member doesn't have a default constructor
         // NOTE: We loop backwards so the variables are constructed in the body in the order they're declared
         //       (since we always insert at the beginning we have to loop backwards or they will be backwards)
@@ -384,7 +549,8 @@ void DeclResolver::processConstructorDecl(ConstructorDecl* constructorDecl) {
 
                 auto constructStructMemberVariable = new ConstructStructMemberVariableStmt({}, {},
                                                                                            dataMember,
-                                                                                           foundConstructor);
+                                                                                           foundConstructor,
+                                                                                           {});
 
                 std::vector<Stmt *> &bodyStmts = constructorDecl->body()->statements();
                 bodyStmts.insert(bodyStmts.begin(), constructStructMemberVariable);
@@ -562,7 +728,6 @@ void DeclResolver::processStructDecl(StructDecl *structDecl) {
         currentFileAst->addImportExtern(foundBaseDefaultConstructor);
     }
 
-    // TODO: Process base constructor calls
     for (ConstructorDecl* constructor : structDecl->constructors) {
         // We HAVE to add the base constructor call BEFORE processing the constructor so that `processConstructorDecl`
         // can handle creating a proper call to the base constructor (i.e. creating implicit casts, etc.)
