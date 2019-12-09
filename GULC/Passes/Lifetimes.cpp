@@ -488,6 +488,18 @@ void Lifetimes::processBinaryOperatorExpr(Expr *&expr) {
             // TODO: Detect if we should move or copy
             auto useConstructor = structType->decl()->copyConstructor;
 
+            if (structType->qualifier() == TypeQualifier::Const) {
+                printError("illegal assignment, left side is `const`!",
+                           binaryOperatorExpr->leftValue->startPosition(),
+                           binaryOperatorExpr->leftValue->endPosition());
+            }
+
+            if (!structType->isLValue()) {
+                printError("illegal assignment, left side is not assignable!",
+                           binaryOperatorExpr->leftValue->startPosition(),
+                           binaryOperatorExpr->leftValue->endPosition());
+            }
+
             if (useConstructor == nullptr) {
                 // We CANNOT assign a struct if it doesn't have the required constructor
                 printError("struct type `" + structType->decl()->name() + "` has deleted copy constructor!",

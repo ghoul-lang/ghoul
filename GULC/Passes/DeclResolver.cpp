@@ -1801,15 +1801,19 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         Expr* refParam = new RefParameterExpr(identifierExpr->startPosition(),
                                               identifierExpr->endPosition(),
                                               0);
-        refParam->resultType = new ReferenceType({}, {}, TypeQualifier::None, new StructType({}, {},
-                                                                                             TypeQualifier::None,
-                                                                                             currentStruct->name(),
-                                                                                             currentStruct));
+        refParam->resultType = new ReferenceType({}, {}, TypeQualifier::None,
+                                                 new StructType({}, {},
+                                                                TypeQualifier::None,
+                                                                currentStruct->name(),
+                                                                currentStruct));
         // A parameter reference is an lvalue.
         refParam->resultType->setIsLValue(true);
         // NOTE: We still make it a `ReferenceType` above then immediately dereference it here so we create the correct
         //  expressions for dereferencing the `this` parameter in our `CodeGen`
         dereferenceReferences(refParam);
+
+        // `this` and `base` are not assignable so we make them rvalues
+        refParam->resultType->setIsLValue(false);
 
         delete identifierExpr;
 
