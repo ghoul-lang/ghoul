@@ -78,11 +78,7 @@ int main()
 {
     BaseStruct bs;
     ChildStruct test(44, 12, 69);
-    ChildStruct cs;
+    ChildStruct* cs = &test;
 
-    //cs.SetI();
-    // This will trigger a copy reconstruction
-    cs = test;
-
-    return cs.i;
+    return cs->i;
 }

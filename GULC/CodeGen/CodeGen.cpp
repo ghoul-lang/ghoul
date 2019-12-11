@@ -1446,28 +1446,33 @@ llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperato
         auto builtInType = llvm::dyn_cast<gulc::BuiltInType>(exprResultType);
 
         llvm::Value* lvalue = generateExpr(prefixOperatorExpr->expr);
-        llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
 
         if (prefixOperatorExpr->operatorName() == "++") {
             if (builtInType->isFloating()) {
+                llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
                 llvm::Value* newValue = irBuilder->CreateFAdd(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)));
                 irBuilder->CreateStore(newValue, lvalue);
             } else {
+                llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
                 llvm::Value* newValue = irBuilder->CreateAdd(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)));
                 irBuilder->CreateStore(newValue, lvalue);
             }
         } else if (prefixOperatorExpr->operatorName() == "--") {
             if (builtInType->isFloating()) {
+                llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
                 llvm::Value* newValue = irBuilder->CreateFSub(rvalue, llvm::ConstantFP::get(*llvmContext, llvm::APFloat(1.0f)));
                 irBuilder->CreateStore(newValue, lvalue);
             } else {
+                llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
                 llvm::Value* newValue = irBuilder->CreateSub(rvalue, llvm::ConstantInt::get(*llvmContext, llvm::APInt(builtInType->size() * 8, 1)));
                 irBuilder->CreateStore(newValue, lvalue);
             }
         } else if (prefixOperatorExpr->operatorName() == "-") {
             if (builtInType->isFloating()) {
+                llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
                 return irBuilder->CreateFNeg(rvalue);
             } else {
+                llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
                 return irBuilder->CreateNeg(rvalue);
             }
         } else if (prefixOperatorExpr->operatorName() == "&" || prefixOperatorExpr->operatorName() == ".ref") {
@@ -1484,14 +1489,24 @@ llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperato
 
         if (prefixOperatorExpr->operatorName() == "*") {
             return irBuilder->CreateLoad(lvalue);
-        } else if (prefixOperatorExpr->operatorName() == "++" || prefixOperatorExpr->operatorName() == "--") {
-            // TODO: We need to know the size of a pointer to support this...
-            printError("increment and decrement operators not yet supported on pointer types!",
-                       prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+        } else if (prefixOperatorExpr->operatorName() == "++") {
+            // TODO: Do we need to convert to an rvalue here? I don't think so...
+            llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
+            llvm::Value* newValue = irBuilder->CreateAdd(rvalue, llvm::ConstantInt::get(*llvmContext,
+                                                                                        llvm::APInt(genTarget->sizeofPtr() * 8, 1)));
+            irBuilder->CreateStore(newValue, lvalue);
+        } else if (prefixOperatorExpr->operatorName() == "--") {
+            // TODO: Do we need to convert to an rvalue here? I don't think so...
+            llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
+            llvm::Value* newValue = irBuilder->CreateSub(rvalue, llvm::ConstantInt::get(*llvmContext,
+                                                                                        llvm::APInt(genTarget->sizeofPtr() * 8, 1)));
+            irBuilder->CreateStore(newValue, lvalue);
         } else {
             printError("unknown prefix operator '" + prefixOperatorExpr->operatorName() + "' used on pointer type!",
                        prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
         }
+
+        return lvalue;
     } else if (llvm::isa<ReferenceType>(exprResultType)) {
         llvm::Value *lvalue = generateExpr(prefixOperatorExpr->expr);
 
@@ -1499,12 +1514,20 @@ llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperato
             return irBuilder->CreateLoad(lvalue);
             //return lvalue;
         } else if (prefixOperatorExpr->operatorName() == "++" || prefixOperatorExpr->operatorName() == "--") {
-            // TODO: We need to know the size of a pointer to support this...
+            // TODO: It shouldn't reach this point, another pass should dereference the reference implicitly
+            //       and we'll perform the `++` and `--` on the underlying type, NOT the reference
             printError("increment and decrement operators not yet supported on reference types!",
                        prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
         } else {
             printError("unknown prefix operator '" + prefixOperatorExpr->operatorName() + "' used on reference type!",
                        prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+        }
+    } else if (llvm::isa<StructType>(exprResultType)) {
+        llvm::Value* lvalue = generateExpr(prefixOperatorExpr->expr);
+
+        if (prefixOperatorExpr->operatorName() == "&" || prefixOperatorExpr->operatorName() == ".ref") {
+            // NOTE: All error checking for this should be performed in a pass before the code generator
+            return lvalue;
         }
     } else {
         printError("built in prefix operator called on unsupported type!",

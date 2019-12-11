@@ -1051,7 +1051,7 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr, bool isNestedBinaryOpe
 
     // TODO: Support operator overloading type resolution
     if (llvm::isa<BinaryOperatorExpr>(binaryOperatorExpr->leftValue)) {
-        processBinaryOperatorExpr(binaryOperatorExpr->leftValue, isNestedBinaryOperator);
+        processBinaryOperatorExpr(binaryOperatorExpr->leftValue, true);
 
         // If the left value after processing isn't a local variable declaration then we continue like normal
         // else we send the local variable decl into the `processLocalVariableDecl` since it wasn't performed in
@@ -1060,6 +1060,8 @@ void DeclResolver::processBinaryOperatorExpr(Expr*& expr, bool isNestedBinaryOpe
             processExpr(binaryOperatorExpr->rightValue);
 
             processLocalVariableDeclExpr(llvm::dyn_cast<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue), true);
+
+            binaryOperatorExpr->resultType = binaryOperatorExpr->leftValue->resultType->deepCopy();
 
             // We don't do further processing
             return;
@@ -2482,6 +2484,16 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
             return;
         }
     } else {
+        if (memberAccessCallExpr->isArrowCall()) {
+            // Make `objectRef` a dereference then `.`
+            auto prefixOperatorCall = new PrefixOperatorExpr(memberAccessCallExpr->objectRef->startPosition(),
+                                                             memberAccessCallExpr->objectRef->endPosition(),
+                                                             "*",
+                                                             memberAccessCallExpr->objectRef);
+            processPrefixOperatorExpr(prefixOperatorCall);
+            memberAccessCallExpr->objectRef = prefixOperatorCall;
+        }
+
         processExpr(memberAccessCallExpr->objectRef);
 
         if (memberAccessCallExpr->objectRef->resultType != nullptr) {
@@ -2556,8 +2568,15 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
                 printError("member '" + memberAccessCallExpr->member->name() + "' was not found in type '" + structType->getString() + "' or is not public!",
                            memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
             } else {
-                printError("type '" + memberAccessCallExpr->objectRef->resultType->getString() + "' not supported in member access call!",
-                           memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+                if (llvm::isa<PointerType>(memberAccessCallExpr->objectRef->resultType)) {
+                    printError("type '" + memberAccessCallExpr->objectRef->resultType->getString() +
+                               "' not supported using `.` operator, did you mean `->`?!",
+                               memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+                } else {
+                    printError("type '" + memberAccessCallExpr->objectRef->resultType->getString() +
+                               "' not supported in member access call!",
+                               memberAccessCallExpr->startPosition(), memberAccessCallExpr->endPosition());
+                }
             }
         }
     }
