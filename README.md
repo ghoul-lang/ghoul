@@ -110,3 +110,45 @@ Constracts will handle both setting template type requirements and any normal co
         }
     }
     
+Exceptions:
+    
+    public extension int
+    {
+        // Functions that throw exceptions MUST be marked throws
+        public static int Parse(string const& s) throws
+        {
+            throw Exception("error message");
+        }
+    }
+    
+    namespace std.io
+    {
+        public struct File
+        {
+            // NOTE: You can optionally say what the exception that is thrown is, this is not required though.
+            public File Open(string const& filePath) 
+                // NOTE: Marking a function as `throws` requires you to either catch or pass ALL exceptions
+                //       if you mark only `throws` with no type you MUST `catch {}` with a blank,
+                //       if you mark with `throws ExceptionType` you MUST `catch (ExceptionType et) {}`
+                throws FileNotFoundException,
+                       InvalidFilePermissionsException
+            {
+                // ...
+            }
+        }
+    }
+    
+    int Main(string[] args)
+    {
+        // You don't have to be marked `throws` if you catch ALL exceptions
+        try
+        {
+            return int.Parse(args[1]);
+        }
+        catch
+        {
+            std.io.Console.WriteLine("Could not parse input!");
+            return 1;
+        }
+    }
+    
