@@ -75,10 +75,10 @@ Custom Operators:
         // `foreach!` is a standard library created macro, macro syntax not yet finalized.
         foreach! (string arg in args)
         {
-            // Call the new `append` custom operator, requires the custom operator to end with `!`
-            argsList append! arg;
-            // NOTE: The below syntax is illegal, the `!` CANNOT have a space before it as this can lead to confusion.
-            //argsList append !arg;
+            // Call the new `append` custom operator, requires the custom infix operator to end with `~`
+            argsList append~ arg;
+            // NOTE: The below syntax is illegal, the `~` CANNOT have a space before it as this can lead to confusion.
+            //argsList append ~arg;
         }
     }
     
