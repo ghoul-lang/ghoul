@@ -42,6 +42,17 @@ struct vec2i
     {
         return abs! this;
     }
+
+    public vec2i operator postfix --()
+    {
+        int oldX = x;
+        int oldY = y;
+
+        x -= 1;
+        y -= 1;
+
+        return vec2i(oldX, oldY);
+    }
 }
 
 struct vec3i
@@ -85,6 +96,8 @@ int main()
     vec3i test3d(12, 12, 12);
     vec2i test = (vec2i)test3d;
     vec2i hmm = test add~ test;
+
+    hmm--;
 
     return test3d(hmm.x, 3, 2);
 }

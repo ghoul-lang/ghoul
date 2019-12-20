@@ -421,6 +421,8 @@ llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
             return generateCustomIndexOperatorCallExpr(llvm::dyn_cast<CustomIndexOperatorCallExpr>(expr));
         case gulc::Expr::Kind::CustomCallOperatorCall:
             return generateCustomCallOperatorCallExpr(llvm::dyn_cast<CustomCallOperatorCallExpr>(expr));
+        case gulc::Expr::Kind::CustomPostfixOperatorCall:
+            return generateCustomPostfixOperatorCallExpr(llvm::dyn_cast<CustomPostfixOperatorCallExpr>(expr));
         default:
             printError("unexpected expression type in code generator!",
                        expr->startPosition(), expr->endPosition());
@@ -2073,6 +2075,25 @@ llvm::Value *gulc::CodeGen::generateCustomCallOperatorCallExpr(const gulc::Custo
     }
 
     return makeTemporaryValue(customCallOperatorCallExpr->resultType,
+                              irBuilder->CreateCall(operatorRef, operatorArgs));
+}
+
+llvm::Value *gulc::CodeGen::generateCustomPostfixOperatorCallExpr(const gulc::CustomPostfixOperatorCallExpr *customPostfixOperatorCallExpr) {
+    // An operator call is basically just syntactic sugar for a function call, we do it basically the same as a
+    // function call except operators can ONLY exist within a `struct/class`, `trait`, or `extension`
+    llvm::Value* expr = generateExpr(customPostfixOperatorCallExpr->expr);
+
+    llvm::Value* operatorRef = generateRefOperatorExpr(customPostfixOperatorCallExpr->isVTableCall,
+                                                       customPostfixOperatorCallExpr->operatorDecl,
+                                                       expr,
+                                                       customPostfixOperatorCallExpr->startPosition(),
+                                                       customPostfixOperatorCallExpr->endPosition());
+
+    std::vector<llvm::Value*> operatorArgs {
+            expr
+    };
+
+    return makeTemporaryValue(customPostfixOperatorCallExpr->resultType,
                               irBuilder->CreateCall(operatorRef, operatorArgs));
 }
 

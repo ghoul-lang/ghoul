@@ -34,6 +34,7 @@ namespace gulc {
             CustomCastOperatorCall,
             CustomIndexOperatorCall,
             CustomCallOperatorCall,
+            CustomPostfixOperatorCall,
 
             Ternary,
 

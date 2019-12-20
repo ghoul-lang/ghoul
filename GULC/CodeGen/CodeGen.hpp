@@ -68,6 +68,7 @@
 #include <AST/Exprs/CustomCastOperatorCallExpr.hpp>
 #include <AST/Exprs/CustomIndexOperatorCallExpr.hpp>
 #include <AST/Exprs/CustomCallOperatorCallExpr.hpp>
+#include <AST/Exprs/CustomPostfixOperatorCallExpr.hpp>
 #include "Module.hpp"
 
 namespace gulc {
@@ -186,6 +187,7 @@ namespace gulc {
         llvm::Value* generateCustomCastOperatorCallExpr(const CustomCastOperatorCallExpr* customCastOperatorCallExpr);
         llvm::Value* generateCustomIndexOperatorCallExpr(const CustomIndexOperatorCallExpr* customIndexOperatorCallExpr);
         llvm::Value* generateCustomCallOperatorCallExpr(const CustomCallOperatorCallExpr* customCallOperatorCallExpr);
+        llvm::Value* generateCustomPostfixOperatorCallExpr(const CustomPostfixOperatorCallExpr* customPostfixOperatorCallExpr);
 
         void generateBaseConstructorCallExpr(const BaseConstructorCallExpr* baseConstructorCallExpr);
         void generateBaseDestructorCallExpr(const BaseDestructorCallExpr* baseDestructorCallExpr);

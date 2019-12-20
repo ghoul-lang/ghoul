@@ -167,7 +167,7 @@ namespace gulc {
         void processLocalVariableDeclOrPrefixOperatorCallExpr(Expr*& expr);
         void processMemberAccessCallExpr(Expr*& expr);
         void processParenExpr(ParenExpr* parenExpr);
-        void processPostfixOperatorExpr(PostfixOperatorExpr* postfixOperatorExpr);
+        void processPostfixOperatorExpr(Expr*& expr);
         void processPotentialExplicitCastExpr(Expr*& expr);
         void processPrefixMacroCallExpr(Expr*& expr);
         void processPrefixOperatorExpr(Expr*& expr);

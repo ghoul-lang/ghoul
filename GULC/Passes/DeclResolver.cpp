@@ -45,6 +45,7 @@
 #include <AST/Exprs/CustomIndexOperatorCallExpr.hpp>
 #include <AST/Decls/CallOperatorDecl.hpp>
 #include <AST/Exprs/CustomCallOperatorCallExpr.hpp>
+#include <AST/Exprs/CustomPostfixOperatorCallExpr.hpp>
 #include "DeclResolver.hpp"
 #include "TypeResolver.hpp"
 
@@ -210,7 +211,7 @@ void DeclResolver::processExpr(Expr *&expr) {
             processParenExpr(llvm::dyn_cast<ParenExpr>(expr));
             break;
         case Expr::Kind::PostfixOperator:
-            processPostfixOperatorExpr(llvm::dyn_cast<PostfixOperatorExpr>(expr));
+            processPostfixOperatorExpr(expr);
             break;
         case Expr::Kind::PotentialExplicitCast:
             processPotentialExplicitCastExpr(expr);
@@ -3368,11 +3369,76 @@ void DeclResolver::processParenExpr(ParenExpr *parenExpr) {
     parenExpr->resultType = parenExpr->containedExpr->resultType->deepCopy();
 }
 
-void DeclResolver::processPostfixOperatorExpr(PostfixOperatorExpr *postfixOperatorExpr) {
+void DeclResolver::processPostfixOperatorExpr(Expr*& expr) {
+    auto postfixOperatorExpr = llvm::dyn_cast<PostfixOperatorExpr>(expr);
+
     // TODO: Support operator overloading type resolution
     processExpr(postfixOperatorExpr->expr);
 
-    postfixOperatorExpr->resultType = postfixOperatorExpr->expr->resultType->deepCopy();
+    gulc::Type* checkType = postfixOperatorExpr->expr->resultType;
+
+    if (llvm::isa<StructType>(checkType)) {
+        auto structType = llvm::dyn_cast<StructType>(checkType);
+        auto structDecl = structType->decl();
+
+        OperatorDecl* foundOperator = nullptr;
+
+        for (Decl* checkMember : structDecl->members) {
+            if (llvm::isa<OperatorDecl>(checkMember)) {
+                auto checkOperator = llvm::dyn_cast<OperatorDecl>(checkMember);
+
+                if (checkOperator->operatorType() == OperatorType::Postfix) {
+                    if (checkOperator->operatorName() == postfixOperatorExpr->operatorName()) {
+                        // TODO: Once we allow `const` function modifiers we need to check for the const modifier on the
+                        //       function
+                        foundOperator = checkOperator;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // TODO: Should we allow inheriting postfix operators? I haven't fully decided, it doesn't make very much sense
+        if (!foundOperator) {
+            for (Decl *checkMember : structDecl->inheritedMembers) {
+                if (llvm::isa<OperatorDecl>(checkMember)) {
+                    auto checkOperator = llvm::dyn_cast<OperatorDecl>(checkMember);
+
+                    if (checkOperator->operatorType() == OperatorType::Postfix) {
+                        if (checkOperator->operatorName() == postfixOperatorExpr->operatorName()) {
+                            // TODO: Once we allow `const` function modifiers we need to check for the const modifier
+                            //       on the function
+                            foundOperator = checkOperator;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!foundOperator) {
+            printError("postfix operator `" + postfixOperatorExpr->operatorName() + "` was not found for struct `" +
+                       structDecl->name() + "`!",
+                       postfixOperatorExpr->startPosition(), postfixOperatorExpr->endPosition());
+            return;
+        }
+
+        auto customPostfixOperatorCall = new CustomPostfixOperatorCallExpr(expr->startPosition(), expr->endPosition(),
+                                                                           structType->doVTableCalls() && foundOperator->isVirtual(),
+                                                                           foundOperator,
+                                                                           postfixOperatorExpr->expr);
+        customPostfixOperatorCall->resultType = foundOperator->resultType->deepCopy();
+        customPostfixOperatorCall->resultType->setIsLValue(true);
+        // We steal this pointer
+        postfixOperatorExpr->expr = nullptr;
+        delete postfixOperatorExpr;
+
+        expr = customPostfixOperatorCall;
+    } else {
+        // NOTE: The only postfix operators that are supported are `++` and `--` so we just set the type to the same
+        //       as the type being used.
+        postfixOperatorExpr->resultType = postfixOperatorExpr->expr->resultType->deepCopy();
+    }
 }
 
 void DeclResolver::processPotentialExplicitCastExpr(Expr*& expr) {

@@ -509,6 +509,8 @@ void CodeVerifier::verifyOperatorDecl(OperatorDecl *operatorDecl) {
         return;
     }
 
+    std::string opName = operatorDecl->operatorName();
+
     switch (operatorDecl->operatorType()) {
         case OperatorType::Prefix:
             if (!operatorDecl->parameters.empty()) {
@@ -525,6 +527,11 @@ void CodeVerifier::verifyOperatorDecl(OperatorDecl *operatorDecl) {
         case OperatorType::Postfix:
             if (!operatorDecl->parameters.empty()) {
                 printError("postfix operator '" + operatorDecl->operatorName() + "' cannot have parameters!",
+                           operatorDecl->startPosition(), operatorDecl->endPosition());
+            }
+
+            if (operatorDecl->operatorName() != "++" && operatorDecl->operatorName() != "--") {
+                printError("only postfix operators `++` and `--` are allowed, custom postfix operators are not supported!",
                            operatorDecl->startPosition(), operatorDecl->endPosition());
             }
             break;
