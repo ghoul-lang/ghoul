@@ -603,23 +603,11 @@ Token Lexer::parseToken(std::string &tokenText, TextPosition startPosition) {
         result.metaType = TokenMetaType::MODIFIER;
         result.tokenType = TokenType::OVERRIDE;
         result.currentSymbol = "override";
-    } else if (tokenText == "in") {
-        result.metaType = TokenMetaType::MODIFIER;
-        result.tokenType = TokenType::IN;
-        result.currentSymbol = "in";
-    } else if (tokenText == "out") {
-        result.metaType = TokenMetaType::MODIFIER;
-        result.tokenType = TokenType::OUT;
-        result.currentSymbol = "out";
-    } else if (tokenText == "ref") {
-        result.metaType = TokenMetaType::MODIFIER;
-        result.tokenType = TokenType::REF;
-        result.currentSymbol = "ref";
         // Known Keywords ---------------------------------------------------------------------------------------------
-    } else if (tokenText == "interface") {
+    } else if (tokenText == "trait") {
         result.metaType = TokenMetaType::KEYWORD;
-        result.tokenType = TokenType::INTERFACE;
-        result.currentSymbol = "interface";
+        result.tokenType = TokenType::TRAIT;
+        result.currentSymbol = "trait";
     } else if (tokenText == "class") {
         result.metaType = TokenMetaType::KEYWORD;
         result.tokenType = TokenType::CLASS;
@@ -640,14 +628,18 @@ Token Lexer::parseToken(std::string &tokenText, TextPosition startPosition) {
         result.metaType = TokenMetaType::KEYWORD;
         result.tokenType = TokenType::OPERATOR;
         result.currentSymbol = "operator";
-    } else if (tokenText == "infix") {
-        result.metaType = TokenMetaType::KEYWORD;
-        result.tokenType = TokenType::INFIX;
-        result.currentSymbol = "infix";
     } else if (tokenText == "prefix") {
         result.metaType = TokenMetaType::KEYWORD;
         result.tokenType = TokenType::PREFIX;
         result.currentSymbol = "prefix";
+    } else if (tokenText == "infix") {
+        result.metaType = TokenMetaType::KEYWORD;
+        result.tokenType = TokenType::INFIX;
+        result.currentSymbol = "infix";
+    } else if (tokenText == "postfix") {
+        result.metaType = TokenMetaType::KEYWORD;
+        result.tokenType = TokenType::POSTFIX;
+        result.currentSymbol = "postfix";
     } else if (tokenText == "explicit") {
         result.metaType = TokenMetaType::KEYWORD;
         result.tokenType = TokenType::EXPLICIT;
@@ -736,14 +728,6 @@ Token Lexer::parseToken(std::string &tokenText, TextPosition startPosition) {
         result.metaType = TokenMetaType::KEYWORD;
         result.tokenType = TokenType::AS;
         result.currentSymbol = "as";
-    } else if (tokenText == "keyword") {
-        result.metaType = TokenMetaType::KEYWORD;
-        result.tokenType = TokenType::KEYWORD;
-        result.currentSymbol = "keyword";
-    } else if (tokenText == "check") {
-        result.metaType = TokenMetaType::KEYWORD;
-        result.tokenType = TokenType::CHECK;
-        result.currentSymbol = "check";
     } else if (tokenText == "try") {
         result.metaType = TokenMetaType::KEYWORD;
         result.tokenType = TokenType::TRY;
@@ -756,10 +740,6 @@ Token Lexer::parseToken(std::string &tokenText, TextPosition startPosition) {
         result.metaType = TokenMetaType::KEYWORD;
         result.tokenType = TokenType::FINALLY;
         result.currentSymbol = "finally";
-//    } else if (tokenText == "modifier") {
-//        result.metaType = TokenMetaType::KEYWORD;
-//        result.tokenType = TokenType::MODIFIER;
-//        result.currentSymbol = "modifier";
     } else {
         result.metaType = TokenMetaType::VALUE;
         result.tokenType = TokenType::SYMBOL;

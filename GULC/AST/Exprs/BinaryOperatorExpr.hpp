@@ -27,27 +27,14 @@ namespace gulc {
         BinaryOperatorExpr(TextPosition startPosition, TextPosition endPosition,
                            std::string operatorName, Expr* leftValue, Expr* rightValue)
                 : Expr(Kind::BinaryOperator, startPosition, endPosition),
-			      leftValue(leftValue), rightValue(rightValue), _operatorName(std::move(operatorName)),
-                  _isBuiltInAssignmentOperator(false) {
-            if (_operatorName == "=" || _operatorName == ">>=" || _operatorName == "<<=" || _operatorName == "+=" ||
-                _operatorName == "-=" || _operatorName == "*=" || _operatorName == "/=" || _operatorName == "%=" ||
-                _operatorName == "&=" || _operatorName == "|=" || _operatorName == "^=") {
-                _isBuiltInAssignmentOperator = true;
-            }
-        }
+			      leftValue(leftValue), rightValue(rightValue), _operatorName(std::move(operatorName)) {}
 
         std::string operatorName() const { return _operatorName; }
         Expr* leftValue;
         Expr* rightValue;
-        bool isBuiltInAssignmentOperator() const { return _isBuiltInAssignmentOperator; }
 
         void setOperatorName(const std::string& operatorName) {
             _operatorName = operatorName;
-
-            _isBuiltInAssignmentOperator =
-                    _operatorName == "=" || _operatorName == ">>=" || _operatorName == "<<=" || _operatorName == "+=" ||
-                    _operatorName == "-=" || _operatorName == "*=" || _operatorName == "/=" || _operatorName == "%=" ||
-                    _operatorName == "&=" || _operatorName == "|=" || _operatorName == "^=";
         }
 
         Expr* deepCopy() const override {
@@ -68,7 +55,6 @@ namespace gulc {
 
     private:
         std::string _operatorName;
-        bool _isBuiltInAssignmentOperator;
 
     };
 }

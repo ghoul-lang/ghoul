@@ -23,6 +23,10 @@
 #include <AST/Decls/TemplateFunctionDecl.hpp>
 #include <AST/Decls/StructDecl.hpp>
 #include <AST/Decls/EnumDecl.hpp>
+#include <AST/Decls/OperatorDecl.hpp>
+#include <AST/Decls/CastOperatorDecl.hpp>
+#include <AST/Decls/CallOperatorDecl.hpp>
+#include <AST/Decls/IndexOperatorDecl.hpp>
 
 namespace gulc {
     class ManglerBase {
@@ -38,6 +42,10 @@ namespace gulc {
         virtual void mangle(NamespaceDecl* namespaceDecl) = 0;
         virtual void mangle(StructDecl* structDecl) = 0;
         virtual void mangle(TemplateFunctionDecl* templateFunctionDecl) = 0;
+        virtual void mangle(OperatorDecl* operatorDecl) = 0;
+        virtual void mangle(CastOperatorDecl* castOperatorDecl) = 0;
+        virtual void mangle(CallOperatorDecl* callOperatorDecl) = 0;
+        virtual void mangle(IndexOperatorDecl* indexOperatorDecl) = 0;
 
         virtual ~ManglerBase() = default;
     };

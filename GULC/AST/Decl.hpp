@@ -42,10 +42,12 @@ namespace gulc {
             Function,
             // TODO: Create 'Property'
             Property,
-            MemberFunction,
-            MemberProperty,
             Parameter,
             TemplateParameter,
+            Operator,
+            CastOperator,
+            CallOperator,
+            IndexOperator,
 
             GlobalVariable,
 
@@ -56,7 +58,7 @@ namespace gulc {
 
             Struct,
             Class,
-            Interface,
+            Trait,
 
             Constructor,
             Destructor,

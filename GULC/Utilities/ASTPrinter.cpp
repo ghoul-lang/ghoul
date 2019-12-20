@@ -117,8 +117,8 @@ void ASTPrinter::printExpr(const Expr *expr, const std::string& prefix) {
         case Expr::Kind::PotentialExplicitCast:
             printPotentialExplicitCastExpr(llvm::dyn_cast<PotentialExplicitCastExpr>(expr), prefix);
             break;
-        case Expr::Kind::LocalVariableDeclOrPrefixOperatorCallExpr:
-            printLocalVariableDeclOrPrefixOperatorCallExpr(llvm::dyn_cast<LocalVariableDeclOrPrefixOperatorCallExpr>(expr), prefix);
+        case Expr::Kind::PotentialLocalVariableDecl:
+            printLocalVariableDeclOrPrefixOperatorCallExpr(llvm::dyn_cast<PotentialLocalVariableDeclExpr>(expr), prefix);
             break;
         case Expr::Kind::IndexerCall:
             printIndexerCallExpr(llvm::dyn_cast<IndexerCallExpr>(expr), prefix);
@@ -457,12 +457,11 @@ void ASTPrinter::printPotentialExplicitCastExpr(const PotentialExplicitCastExpr 
     printExpr(potentialExplicitCastExpr->castee, prefix + "  ");
 }
 
-void ASTPrinter::printLocalVariableDeclOrPrefixOperatorCallExpr(const LocalVariableDeclOrPrefixOperatorCallExpr *localVariableDeclOrPrefixOperatorCallExpr, const std::string &prefix) {
-    std::cout << prefix << "| LocalVariableDeclOrPrefixOperatorCallExpr " << std::endl;
-    std::cout << prefix << "\\ Type or Prefix Operator: " << std::endl;
-    printExpr(localVariableDeclOrPrefixOperatorCallExpr->typeOrPrefixOperator, prefix + "  ");
-    std::cout << prefix << "\\ Name or Expr: " << std::endl;
-    printExpr(localVariableDeclOrPrefixOperatorCallExpr->nameOrExpr, prefix + "  ");
+void ASTPrinter::printLocalVariableDeclOrPrefixOperatorCallExpr(const PotentialLocalVariableDeclExpr *localVariableDeclOrPrefixOperatorCallExpr, const std::string &prefix) {
+    std::cout << prefix << "| PotentialLocalVariableDecl " << std::endl;
+    std::cout << prefix << "\\ Type: " << std::endl;
+    printExpr(localVariableDeclOrPrefixOperatorCallExpr->type, prefix + "  ");
+    std::cout << prefix << "\\ Name: \"" << localVariableDeclOrPrefixOperatorCallExpr->name << "\"" << std::endl;
 }
 
 void ASTPrinter::printIndexerCallExpr(const IndexerCallExpr *indexerCallExpr, const std::string &prefix) {
@@ -470,7 +469,7 @@ void ASTPrinter::printIndexerCallExpr(const IndexerCallExpr *indexerCallExpr, co
     printExpr(indexerCallExpr->indexerReference, prefix + "  ");
 
     if (indexerCallExpr->hasArguments()) {
-        for (Expr const* argument : indexerCallExpr->arguments()) {
+        for (Expr const* argument : indexerCallExpr->arguments) {
             printExpr(argument, prefix + "  ");
         }
     }

@@ -148,6 +148,12 @@ void CodeVerifier::printDebugWarning(const std::string &message) {
 
 void CodeVerifier::verifyDecl(Decl *decl) {
     switch (decl->getDeclKind()) {
+        case Decl::Kind::CallOperator:
+            verifyCallOperatorDecl(llvm::dyn_cast<CallOperatorDecl>(decl));
+            break;
+        case Decl::Kind::CastOperator:
+            verifyCastOperatorDecl(llvm::dyn_cast<CastOperatorDecl>(decl));
+            break;
         case Decl::Kind::Enum:
             // I don't think we currently have anything to verify here
             break;
@@ -157,8 +163,14 @@ void CodeVerifier::verifyDecl(Decl *decl) {
         case Decl::Kind::GlobalVariable:
             verifyGlobalVariableDecl(llvm::dyn_cast<GlobalVariableDecl>(decl));
             break;
+        case Decl::Kind::IndexOperator:
+            verifyIndexOperatorDecl(llvm::dyn_cast<IndexOperatorDecl>(decl));
+            break;
         case Decl::Kind::Namespace:
             verifyNamespaceDecl(llvm::dyn_cast<NamespaceDecl>(decl));
+            break;
+        case Decl::Kind::Operator:
+            verifyOperatorDecl(llvm::dyn_cast<OperatorDecl>(decl));
             break;
         case Decl::Kind::Struct:
             verifyStructDecl(llvm::dyn_cast<StructDecl>(decl));
@@ -229,15 +241,14 @@ void CodeVerifier::verifyStmt(Stmt*& stmt) {
 
 void CodeVerifier::verifyExpr(Expr*& expr) {
     switch (expr->getExprKind()) {
+        case Expr::Kind::AssignmentBinaryOperator:
+            verifyAssignmentBinaryOperatorExpr(llvm::dyn_cast<AssignmentBinaryOperatorExpr>(expr));
+            break;
         case Expr::Kind::BinaryOperator:
             verifyBinaryOperatorExpr(expr);
             break;
         case Expr::Kind::CharacterLiteral:
             verifyCharacterLiteralExpr(llvm::dyn_cast<CharacterLiteralExpr>(expr));
-            break;
-        case Expr::Kind::CustomPrefixOperator:
-            printError("custom prefix operators not yet supported!",
-                       expr->startPosition(), expr->endPosition());
             break;
         case Expr::Kind::ExplicitCast:
             verifyExplicitCastExpr(llvm::dyn_cast<ExplicitCastExpr>(expr));
@@ -263,7 +274,7 @@ void CodeVerifier::verifyExpr(Expr*& expr) {
         case Expr::Kind::LocalVariableDecl:
             verifyLocalVariableDeclExpr(llvm::dyn_cast<LocalVariableDeclExpr>(expr));
             break;
-        case Expr::Kind::LocalVariableDeclOrPrefixOperatorCallExpr:
+        case Expr::Kind::PotentialLocalVariableDecl:
             // Casting isn't required for this function. It will handle the casting for us since this is a type we will be completely removing from the AST in this function
             verifyLocalVariableDeclOrPrefixOperatorCallExpr(expr);
             break;
@@ -301,6 +312,90 @@ void CodeVerifier::verifyExpr(Expr*& expr) {
 }
 
 // Decls
+void CodeVerifier::verifyCallOperatorDecl(CallOperatorDecl *callOperatorDecl) {
+    for (Decl* checkDecl : callOperatorDecl->parentStruct->members) {
+        if (checkDecl == callOperatorDecl) {
+            continue;
+        }
+
+        if (llvm::isa<CallOperatorDecl>(checkDecl)) {
+            auto checkCallOperatorDecl = llvm::dyn_cast<CallOperatorDecl>(checkDecl);
+
+            if (FunctionComparer::compareParams(callOperatorDecl->parameters, checkCallOperatorDecl->parameters) ==
+                FunctionComparer::CompareResult::Identical) {
+                printError("`operator ()` with the provided arguments already exists!",
+                           callOperatorDecl->startPosition(), callOperatorDecl->endPosition());
+            }
+        }
+    }
+
+    currentFunctionReturnType = callOperatorDecl->resultType;
+    currentFunctionParameters = &callOperatorDecl->parameters;
+
+    currentFunctionLocalVariablesCount = 0;
+
+    validateGotoVariables.clear();
+
+    verifyCompoundStmt(callOperatorDecl->body());
+
+    currentFunctionLocalVariablesCount = 0;
+
+    currentFunctionReturnType = nullptr;
+    currentFunctionParameters = nullptr;
+}
+
+void CodeVerifier::verifyCastOperatorDecl(CastOperatorDecl *castOperatorDecl) {
+    for (Decl* checkDecl : castOperatorDecl->parentStruct->members) {
+        if (checkDecl == castOperatorDecl) {
+            continue;
+        }
+
+        if (llvm::isa<CastOperatorDecl>(checkDecl)) {
+            auto checkCastOperatorDecl = llvm::dyn_cast<CastOperatorDecl>(checkDecl);
+
+            auto thisType = castOperatorDecl->resultType;
+            auto checkType = checkCastOperatorDecl->resultType;
+
+            // We ignore if it is a reference or not
+            if (llvm::isa<ReferenceType>(thisType)) {
+                thisType = llvm::dyn_cast<ReferenceType>(thisType)->referenceToType;
+            }
+
+            if (llvm::isa<ReferenceType>(checkType)) {
+                checkType = llvm::dyn_cast<ReferenceType>(checkType)->referenceToType;
+            }
+
+            // If the return types aren't the same then we continue looking, this is different than every other function
+            if (!TypeComparer::getTypesAreSame(thisType, checkType, false)) {
+                continue;
+            }
+
+            if (castOperatorDecl->castOperatorType() != checkCastOperatorDecl->castOperatorType()) {
+                printError("defining both `explicit` and `implicit` cast operators for the same type is not allowed!",
+                           castOperatorDecl->startPosition(), castOperatorDecl->endPosition());
+            } else {
+                printError("cast operator for the type `" + castOperatorDecl->resultType->getString() +
+                           "` already exists!",
+                           castOperatorDecl->startPosition(), castOperatorDecl->endPosition());
+            }
+        }
+    }
+
+    currentFunctionReturnType = castOperatorDecl->resultType;
+    currentFunctionParameters = &castOperatorDecl->parameters;
+
+    currentFunctionLocalVariablesCount = 0;
+
+    validateGotoVariables.clear();
+
+    verifyCompoundStmt(castOperatorDecl->body());
+
+    currentFunctionLocalVariablesCount = 0;
+
+    currentFunctionReturnType = nullptr;
+    currentFunctionParameters = nullptr;
+}
+
 void CodeVerifier::verifyConstructorDecl(ConstructorDecl *constructorDecl) {
     // Verify a constructor with the same signature doesn't already exist...
     for (ConstructorDecl* checkConstructor : currentStruct->constructors) {
@@ -363,6 +458,38 @@ void CodeVerifier::verifyGlobalVariableDecl(GlobalVariableDecl *globalVariableDe
     }
 }
 
+void CodeVerifier::verifyIndexOperatorDecl(IndexOperatorDecl *indexOperatorDecl) {
+    for (Decl* checkDecl : indexOperatorDecl->parentStruct->members) {
+        if (checkDecl == indexOperatorDecl) {
+            continue;
+        }
+
+        if (llvm::isa<IndexOperatorDecl>(checkDecl)) {
+            auto checkIndexOperatorDecl = llvm::dyn_cast<IndexOperatorDecl>(checkDecl);
+
+            if (FunctionComparer::compareParams(indexOperatorDecl->parameters, checkIndexOperatorDecl->parameters) ==
+                    FunctionComparer::CompareResult::Identical) {
+                printError("indexer with the provided arguments already exists!",
+                           indexOperatorDecl->startPosition(), indexOperatorDecl->endPosition());
+            }
+        }
+    }
+
+    currentFunctionReturnType = indexOperatorDecl->resultType;
+    currentFunctionParameters = &indexOperatorDecl->parameters;
+
+    currentFunctionLocalVariablesCount = 0;
+
+    validateGotoVariables.clear();
+
+    verifyCompoundStmt(indexOperatorDecl->body());
+
+    currentFunctionLocalVariablesCount = 0;
+
+    currentFunctionReturnType = nullptr;
+    currentFunctionParameters = nullptr;
+}
+
 void CodeVerifier::verifyNamespaceDecl(NamespaceDecl *namespaceDecl) {
     NamespaceDecl* oldNamespace = currentNamespace;
     currentNamespace = namespaceDecl;
@@ -372,6 +499,53 @@ void CodeVerifier::verifyNamespaceDecl(NamespaceDecl *namespaceDecl) {
     }
 
     currentNamespace = oldNamespace;
+}
+
+void CodeVerifier::verifyOperatorDecl(OperatorDecl *operatorDecl) {
+    if (checkOperatorExists(operatorDecl)) {
+        printError("operator '" + operatorDecl->operatorName() + "' is ambiguous for type `" +
+                   operatorDecl->parentStruct->name() + "` with the current parameter types!",
+                   operatorDecl->startPosition(), operatorDecl->endPosition());
+        return;
+    }
+
+    switch (operatorDecl->operatorType()) {
+        case OperatorType::Prefix:
+            if (!operatorDecl->parameters.empty()) {
+                printError("prefix operator '" + operatorDecl->operatorName() + "' cannot have parameters!",
+                           operatorDecl->startPosition(), operatorDecl->endPosition());
+            }
+            break;
+        case OperatorType::Infix:
+            if (operatorDecl->parameters.size() > 1) {
+                printError("infix operator '" + operatorDecl->operatorName() + "' cannot have more than 1 parameter!",
+                           operatorDecl->startPosition(), operatorDecl->endPosition());
+            }
+            break;
+        case OperatorType::Postfix:
+            if (!operatorDecl->parameters.empty()) {
+                printError("postfix operator '" + operatorDecl->operatorName() + "' cannot have parameters!",
+                           operatorDecl->startPosition(), operatorDecl->endPosition());
+            }
+            break;
+        default:
+            printError("unknown operator type!", operatorDecl->startPosition(), operatorDecl->endPosition());
+            break;
+    }
+
+    currentFunctionReturnType = operatorDecl->resultType;
+    currentFunctionParameters = &operatorDecl->parameters;
+
+    currentFunctionLocalVariablesCount = 0;
+
+    validateGotoVariables.clear();
+
+    verifyCompoundStmt(operatorDecl->body());
+
+    currentFunctionLocalVariablesCount = 0;
+
+    currentFunctionReturnType = nullptr;
+    currentFunctionParameters = nullptr;
 }
 
 void CodeVerifier::verifyStructDecl(StructDecl *structDecl) {
@@ -550,44 +724,47 @@ void CodeVerifier::verifyWhileStmt(WhileStmt *whileStmt) {
 }
 
 // Exprs
+void CodeVerifier::verifyAssignmentBinaryOperatorExpr(AssignmentBinaryOperatorExpr *assignmentBinaryOperatorExpr) {
+    verifyExpr(assignmentBinaryOperatorExpr->leftValue);
+    verifyExpr(assignmentBinaryOperatorExpr->rightValue);
+
+    // If the left value of the assignment is a local variable we check that the local variable declaration doesn't
+    // have an initializer (this is to prevent doing `Example i(12) = 33;` which can look weird to new developers)
+    if (llvm::isa<LocalVariableDeclExpr>(assignmentBinaryOperatorExpr->leftValue)) {
+        auto localVariableDecl = llvm::dyn_cast<LocalVariableDeclExpr>(assignmentBinaryOperatorExpr->leftValue);
+
+        if (assignmentBinaryOperatorExpr->hasNestedOperator()) {
+            printError("local variable declarations cannot be used in any other binary operator expressions besides '='!",
+                       assignmentBinaryOperatorExpr->startPosition(), assignmentBinaryOperatorExpr->endPosition());
+        }
+
+        if (localVariableDecl->hasInitializer()) {
+            printError("having both an intializer and an initial assignment with `=` is not allowed!",
+                       assignmentBinaryOperatorExpr->startPosition(), assignmentBinaryOperatorExpr->endPosition());
+        }
+    // If the left value of the assignment isn't a local variable declaration then we check for assignability...
+    // NOTE: The assignment operator is NEVER overloadable so we don't have to worry about someone making an overloaded
+    //       const-qualified operator.
+    } else if (!typeIsAssignable(assignmentBinaryOperatorExpr->leftValue->resultType)) {
+        if (assignmentBinaryOperatorExpr->leftValue->resultType->qualifier() == TypeQualifier::Const) {
+            printError("cannot assign to const-qualified left value!",
+                       assignmentBinaryOperatorExpr->leftValue->startPosition(),
+                       assignmentBinaryOperatorExpr->leftValue->endPosition());
+            return;
+        }
+
+        printError("cannot assign to an rvalue!",
+                   assignmentBinaryOperatorExpr->leftValue->startPosition(),
+                   assignmentBinaryOperatorExpr->leftValue->endPosition());
+        return;
+    }
+}
+
 void CodeVerifier::verifyBinaryOperatorExpr(Expr *&expr) {
     auto binaryOperatorExpr = llvm::dyn_cast<BinaryOperatorExpr>(expr);
 
     verifyExpr(binaryOperatorExpr->leftValue);
     verifyExpr(binaryOperatorExpr->rightValue);
-
-    if (binaryOperatorExpr->isBuiltInAssignmentOperator()) {
-        // If the left value of the assignment is a local variable we check that the local variable declaration doesn't
-        // have an initializer
-        if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
-            auto localVariableDecl = llvm::dyn_cast<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue);
-
-            if (binaryOperatorExpr->operatorName() != "=") {
-                printError("local variable declarations cannot be used in any other binary operator expressions besides '='!",
-                           binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
-            }
-
-            if (localVariableDecl->hasInitializer()) {
-                printError("having both an intializer and an initial assignment with `=` is not allowed!",
-                           expr->startPosition(), expr->endPosition());
-            }
-        } else {
-            // If the left value of the assignment isn't a local variable declaration then we check for assignability...
-            if (!typeIsAssignable(binaryOperatorExpr->leftValue->resultType)) {
-                if (binaryOperatorExpr->leftValue->resultType->qualifier() == TypeQualifier::Const) {
-                    printError("cannot assign to const-qualified left value!",
-                               binaryOperatorExpr->leftValue->startPosition(),
-                               binaryOperatorExpr->leftValue->endPosition());
-                    return;
-                }
-
-                printError("cannot assign to an rvalue!",
-                           binaryOperatorExpr->leftValue->startPosition(),
-                           binaryOperatorExpr->leftValue->endPosition());
-                return;
-            }
-        }
-    }
 }
 
 void CodeVerifier::verifyCharacterLiteralExpr(CharacterLiteralExpr *characterLiteralExpr) {
@@ -682,7 +859,7 @@ void CodeVerifier::verifyLocalVariableDeclExpr(LocalVariableDeclExpr *localVaria
 }
 
 void CodeVerifier::verifyLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr) {
-    printError("[INTERNAL] found `LocalVariableDeclOrPrefixOperatorCallExpr` in verifier, this is not supported!",
+    printError("[INTERNAL] found `PotentialLocalVariableDecl` in verifier, this is not supported!",
                expr->startPosition(), expr->endPosition());
 }
 
@@ -892,4 +1069,26 @@ bool CodeVerifier::checkParamsAreSame(std::vector<ParameterDecl *> &params1, std
 
     // If we reach this point then the parameter lists are the same in terms of callability...
     return true;
+}
+
+bool CodeVerifier::checkOperatorExists(OperatorDecl *operatorDecl) {
+    // Operators can only exist in `StructDecl` and `TraitDecl`
+    for (Decl* checkDecl : currentStruct->members) {
+        if (operatorDecl == checkDecl) continue;
+
+        if (llvm::isa<OperatorDecl>(checkDecl)) {
+            auto checkOperatorDecl = llvm::dyn_cast<OperatorDecl>(checkDecl);
+
+            if (checkOperatorDecl->operatorName() == operatorDecl->operatorName()) {
+                // If the parameters are the same then we return saying the operator exists...
+                if (FunctionComparer::compareParams(checkOperatorDecl->parameters, operatorDecl->parameters) ==
+                        FunctionComparer::CompareResult::Identical) {
+                    return true;
+                }
+                // Else we keep searching...
+            }
+        }
+    }
+
+    return false;
 }

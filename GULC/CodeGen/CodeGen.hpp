@@ -61,22 +61,41 @@
 #include <ASTHelpers/SizeofHelper.hpp>
 #include <AST/Stmts/ConstructStructMemberVariableStmt.hpp>
 #include <AST/Exprs/ReconstructExpr.hpp>
+#include <AST/Exprs/AssignmentBinaryOperatorExpr.hpp>
+#include <AST/Exprs/CustomInfixOperatorCallExpr.hpp>
+#include <AST/Exprs/ConstructTemporaryValueExpr.hpp>
+#include <AST/Exprs/CustomPrefixOperatorCallExpr.hpp>
+#include <AST/Exprs/CustomCastOperatorCallExpr.hpp>
+#include <AST/Exprs/CustomIndexOperatorCallExpr.hpp>
+#include <AST/Exprs/CustomCallOperatorCallExpr.hpp>
 #include "Module.hpp"
 
 namespace gulc {
+    // This is a storage container for any temporary value that might require destruction at the end of a statement
+    // E.g. this will hold function results, temporary constructor results, etc.
+    struct TemporaryValue {
+        gulc::Type* gulType;
+        llvm::AllocaInst* llvmReference;
+
+        TemporaryValue(gulc::Type* gulType, llvm::AllocaInst* llvmReference)
+                : gulType(gulType), llvmReference(llvmReference) {}
+
+    };
+
     class CodeGen {
     private:
         Target* genTarget;
 
     public:
-        CodeGen(Target* genTarget)
+        explicit CodeGen(Target* genTarget)
                 : genTarget(genTarget), currentFileAst(nullptr), currentStruct(nullptr), currentNamespace(nullptr),
                   llvmContext(nullptr), irBuilder(nullptr), module(nullptr), funcPass(nullptr),
                   loopNameNumber(0),
                   currentFunction(nullptr), currentFunctionParameters(), entryBlockBuilder(nullptr),
                   currentFunctionLabels(), currentFunctionLocalVariablesCount(0),  currentFunctionLocalVariables(),
                   currentLoopBlockContinue(nullptr), currentLoopBlockBreak(nullptr),
-                  nestedLoopCount(0), nestedLoopContinues(), nestedLoopBreaks(), llvmStructTypes() {}
+                  nestedLoopCount(0), nestedLoopContinues(), nestedLoopBreaks(), llvmStructTypes(),
+                  temporaryValues() {}
 
         gulc::Module generate(FileAST* file);
 
@@ -128,6 +147,10 @@ namespace gulc {
         llvm::Constant* generateConstant(const Expr* expr);
         llvm::Constant* generateRefEnumConstant(const RefEnumConstantExpr* expr);
 
+        llvm::Value* generateAssignmentBinaryOperatorExpr(const AssignmentBinaryOperatorExpr* assignmentBinaryOperatorExpr);
+        llvm::Value* generateBuiltInBinaryOperation(gulc::Type* type, std::string const& operatorName,
+                                                    llvm::Value* leftValue, llvm::Value* rightValue,
+                                                    TextPosition const& startPosition, TextPosition const& endPosition);
         llvm::Value* generateBinaryOperatorExpr(const BinaryOperatorExpr* binaryOperatorExpr);
         llvm::Value* generateIntegerLiteralExpr(const IntegerLiteralExpr* integerLiteralExpr);
         llvm::Value* generateFloatLiteralExpr(const FloatLiteralExpr* floatLiteralExpr);
@@ -151,11 +174,24 @@ namespace gulc {
         llvm::Value* generateDestructMemberVariableExpr(const DestructMemberVariableExpr* destructMemberVariableExpr);
         llvm::Value* generateRefBaseExpr(const RefBaseExpr* refBaseExpr);
         llvm::Value* generateReconstructExpr(const ReconstructExpr* reconstructExpr);
+        // Gets either the vtable reference or the operator function pointer, NOTE: This accepts a function decl
+        // as we use this for both `CastOperatorDecl` and `OperatorDecl`
+        llvm::Value* generateRefOperatorExpr(bool isVTableCall, FunctionDecl* functionDecl,
+                                             llvm::Value* objectRef,
+                                             TextPosition const& startPosition,
+                                             TextPosition const& endPosition);
+        llvm::Value* generateCustomInfixOperatorCallExpr(const CustomInfixOperatorCallExpr* customOperatorCallExpr);
+        llvm::Value* generateConstructTemporaryValueExpr(const ConstructTemporaryValueExpr* constructTemporaryValueExpr);
+        llvm::Value* generateCustomPrefixOperatorCallExpr(const CustomPrefixOperatorCallExpr* customPrefixOperatorCallExpr);
+        llvm::Value* generateCustomCastOperatorCallExpr(const CustomCastOperatorCallExpr* customCastOperatorCallExpr);
+        llvm::Value* generateCustomIndexOperatorCallExpr(const CustomIndexOperatorCallExpr* customIndexOperatorCallExpr);
+        llvm::Value* generateCustomCallOperatorCallExpr(const CustomCallOperatorCallExpr* customCallOperatorCallExpr);
 
         void generateBaseConstructorCallExpr(const BaseConstructorCallExpr* baseConstructorCallExpr);
         void generateBaseDestructorCallExpr(const BaseDestructorCallExpr* baseDestructorCallExpr);
 
-        void castValue(gulc::Type* to, gulc::Type* from, llvm::Value*& value);
+        void castValue(gulc::Type* to, gulc::Type* from, llvm::Value*& value,
+                       TextPosition const& startPosition, TextPosition const& endPosition);
 
         // Context info
         FileAST* currentFileAst;
@@ -182,6 +218,9 @@ namespace gulc {
         std::vector<llvm::BasicBlock*> nestedLoopBreaks;
 
         std::map<std::string, llvm::StructType*> llvmStructTypes;
+
+        // These are the results of any function calls or related. These need to be checked for if they need destructed
+        std::vector<TemporaryValue> temporaryValues;
 
         bool currentFunctionLabelsContains(const std::string& labelName) {
             return currentFunctionLabels.find(labelName) != currentFunctionLabels.end();
@@ -358,6 +397,46 @@ namespace gulc {
 
             // TODO: Why does this return `llvm::Constant*` instead of `llvm::Function*`?
             return llvm::dyn_cast<llvm::Function>(module->getOrInsertFunction(functionDecl->mangledName(), functionType));
+        }
+
+        /// Takes an `llvm::Value` and stores it in an `Alloca`, making it a temporary value.
+        llvm::AllocaInst* makeTemporaryValue(gulc::Type* type, llvm::Value* value) {
+            llvm::AllocaInst* allocaInst = this->irBuilder->CreateAlloca(generateLlvmType(type));
+
+            // TODO: I'm adding `isVolatile` here because one of the IR passes is changing our single store
+            //       into an individual store for every single member of the struct. Not sure if this is correct or not
+//            irBuilder->CreateStore(value, allocaInst, true);
+            irBuilder->CreateStore(value, allocaInst);
+
+            temporaryValues.emplace_back(TemporaryValue(type, allocaInst));
+
+            return allocaInst;
+        }
+
+        /// Loop the temporary values, destruct them if needed, and clear the list
+        void cleanupTemporaryValues() {
+            for (TemporaryValue& temporaryValue : temporaryValues) {
+                if (llvm::isa<StructType>(temporaryValue.gulType)) {
+                    auto structDecl = llvm::dyn_cast<StructType>(temporaryValue.gulType)->decl();
+
+                    // Because we only work on by value structs we don't have to deal with the vtable, we can know the
+                    // struct is the correct type.
+                    // TODO: Is this a correct assumption?
+                    auto destructorFunc = module->getFunction(structDecl->destructor->mangledName());
+
+                    std::vector<llvm::Value*> llvmArgs {
+                            // We pass the struct reference as the first argument of the destructor
+                            // the destructor doesn't return anything. It modifies the `this` variable that we pass here
+                            temporaryValue.llvmReference
+                    };
+
+                    // Call the destructor...
+                    // We don't bother giving the result a name since destructors return void
+                    irBuilder->CreateCall(destructorFunc, llvmArgs);
+                }
+            }
+
+            temporaryValues.clear();
         }
 
     };

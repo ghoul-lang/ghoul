@@ -40,7 +40,7 @@ namespace gulc {
         bool hasTemplateArguments() const { return !_templateArguments.empty(); }
 
         std::string getString() const override {
-            std::string result = "[unresolved] ";
+            std::string result;
 
             for (const std::string& namespacePathItem : namespacePath()) {
                 result += namespacePathItem + ".";
@@ -49,7 +49,7 @@ namespace gulc {
             result += _name;
 
             if (hasTemplateArguments()) {
-                result += "<?>";
+                result += "<...>";
             }
 
             return result;

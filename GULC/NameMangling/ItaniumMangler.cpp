@@ -82,6 +82,22 @@ void ItaniumMangler::mangle(StructDecl *structDecl) {
     mangleStruct(structDecl, "");
 }
 
+void ItaniumMangler::mangle(OperatorDecl *operatorDecl) {
+    mangleOperator(operatorDecl, "", "");
+}
+
+void ItaniumMangler::mangle(CastOperatorDecl *castOperatorDecl) {
+    mangleCastOperator(castOperatorDecl, "", "");
+}
+
+void ItaniumMangler::mangle(CallOperatorDecl *callOperatorDecl) {
+    mangleCallOperator(callOperatorDecl, "", "");
+}
+
+void ItaniumMangler::mangle(IndexOperatorDecl *indexOperatorDecl) {
+    mangleIndexOperator(indexOperatorDecl, "", "");
+}
+
 void ItaniumMangler::mangleFunction(FunctionDecl *functionDecl, const std::string &prefix, const std::string &nameSuffix) {
     // All mangled names start with "_Z"...
     std::string mangledName = "_Z" + prefix + unqualifiedName(functionDecl) + nameSuffix;
@@ -89,6 +105,56 @@ void ItaniumMangler::mangleFunction(FunctionDecl *functionDecl, const std::strin
     mangledName += bareFunctionType(functionDecl->parameters);
 
     functionDecl->setMangledName(mangledName);
+}
+
+void ItaniumMangler::mangleOperator(gulc::OperatorDecl *operatorDecl, const std::string &prefix, const std::string &nameSuffix){
+    // All mangled names start with "_Z"...
+    std::string mangledName = "_Z" + prefix + operatorName(operatorDecl->operatorType(),
+                                                           operatorDecl->operatorName()) + nameSuffix;
+
+    if (operatorDecl->operatorType() == OperatorType::Postfix) {
+        // This is a bit of a hack. Because of C++ differentiating between postfix `++` and prefix `++` by using
+        // a throwaway `int` parameter, we make ALL postfix operators have `i` in the name to differentiate
+        // between prefix and postfix operators.
+        //
+        // I hate this but we're shooting to be as compatible with the Itanium spec as possible that way we can
+        // at least extern to and from C++ more easily (though our classes won't be compatible since it seems like
+        // C++ stores non-functions in the vtable... not doing that. You shouldn't pay for what you don't use.)
+        mangledName += "i";
+    } else {
+        mangledName += bareFunctionType(operatorDecl->parameters);
+    }
+
+    operatorDecl->setMangledName(mangledName);
+}
+
+void ItaniumMangler::mangleCastOperator(CastOperatorDecl *castOperatorDecl, const std::string &prefix, const std::string &nameSuffix) {
+    // NOTE: You CANNOT define both an `implicit` and `explicit` that converts to the same type, as such they are
+    //       mangled the same way
+    std::string mangledName = "_Z" + prefix + "cv" + nameSuffix;
+
+    mangledName += typeName(castOperatorDecl->resultType);
+    mangledName += bareFunctionType(castOperatorDecl->parameters);
+
+    castOperatorDecl->setMangledName(mangledName);
+}
+
+void ItaniumMangler::mangleCallOperator(CallOperatorDecl *callOperatorDecl, const std::string &prefix,
+                                        const std::string &nameSuffix) {
+    std::string mangledName = "_Z" + prefix + "cl" + nameSuffix;
+
+    mangledName += bareFunctionType(callOperatorDecl->parameters);
+
+    callOperatorDecl->setMangledName(mangledName);
+}
+
+void ItaniumMangler::mangleIndexOperator(IndexOperatorDecl *indexOperatorDecl, const std::string &prefix,
+                                         const std::string &nameSuffix) {
+    std::string mangledName = "_Z" + prefix + "ix" + nameSuffix;
+
+    mangledName += bareFunctionType(indexOperatorDecl->parameters);
+
+    indexOperatorDecl->setMangledName(mangledName);
 }
 
 void ItaniumMangler::mangleVariable(GlobalVariableDecl *variableDecl, const std::string &prefix, const std::string &nameSuffix) {
@@ -122,7 +188,15 @@ void ItaniumMangler::mangleStruct(StructDecl *structDecl, const std::string &pre
     }
 
     for (Decl* decl : structDecl->members) {
-        if (llvm::isa<FunctionDecl>(decl)) {
+        if (llvm::isa<OperatorDecl>(decl)) {
+            mangleOperator(llvm::dyn_cast<OperatorDecl>(decl), "N" + nPrefix, "E");
+        } else if (llvm::isa<CastOperatorDecl>(decl)) {
+            mangleCastOperator(llvm::dyn_cast<CastOperatorDecl>(decl), "N" + nPrefix, "E");
+        } else if (llvm::isa<CallOperatorDecl>(decl)) {
+            mangleCallOperator(llvm::dyn_cast<CallOperatorDecl>(decl), "N" + nPrefix, "E");
+        } else if (llvm::isa<IndexOperatorDecl>(decl)) {
+            mangleIndexOperator(llvm::dyn_cast<IndexOperatorDecl>(decl), "N" + nPrefix, "E");
+        } else if (llvm::isa<FunctionDecl>(decl)) {
             mangleFunction(llvm::dyn_cast<FunctionDecl>(decl), "N" + nPrefix, "E");
         } else if (llvm::isa<TemplateFunctionDecl>(decl)) {
             mangleTemplateFunction(llvm::dyn_cast<TemplateFunctionDecl>(decl), "N" + nPrefix, "E");
@@ -319,4 +393,133 @@ std::string ItaniumMangler::exprPrimary(const Expr *expr) {
         std::cerr << "[INTERNAL NAME MANGLING ERROR] expr-primary not supported!" << std::endl;
         std::exit(1);
     }
+}
+
+std::string ItaniumMangler::operatorName(OperatorType operatorType, const std::string &operatorText) {
+    if (operatorText == "+") {
+        if (operatorType == OperatorType::Prefix) {
+            return "ps";
+        } else if (operatorType == OperatorType::Infix) {
+            return "pl";
+        } // Postfix isn't supported for `+`
+    } else if (operatorText == "-") {
+        if (operatorType == OperatorType::Prefix) {
+            return "ng";
+        } else if (operatorType == OperatorType::Infix) {
+            return "mi";
+        } // Postfix isn't supported for `-`
+    } else if (operatorText == "&") {
+        if (operatorType == OperatorType::Prefix) {
+            return "ad";
+        } else if (operatorType == OperatorType::Infix) {
+            return "an";
+        } // Postfix isn't supported for `&`
+    } else if (operatorText == "*") {
+        if (operatorType == OperatorType::Prefix) {
+            return "de";
+        } else if (operatorType == OperatorType::Infix) {
+            return "ml";
+        } // Postfix isn't supported for `*`
+    } else if (operatorText == "~") {
+        if (operatorType == OperatorType::Prefix) {
+            return "co";
+        } // Postfix and infix isn't supported for `~`
+    } else if (operatorText == "/") {
+        if (operatorType == OperatorType::Infix) {
+            return "dv";
+        } // Prefix and postfix isn't supported for `/`
+    } else if (operatorText == "%") {
+        if (operatorType == OperatorType::Infix) {
+            return "rm";
+        } // Prefix and postfix isn't supported for `%`
+    } else if (operatorText == "|") {
+        if (operatorType == OperatorType::Infix) {
+            return "or";
+        } // Prefix and postfix isn't supported for `|`
+    } else if (operatorText == "^") {
+        if (operatorType == OperatorType::Infix) {
+            return "eo";
+        } // Prefix and postfix isn't supported for `^`
+    } else if (operatorText == "<<") {
+        if (operatorType == OperatorType::Infix) {
+            return "ls";
+        } // Prefix and postfix isn't supported for `<<`
+    } else if (operatorText == ">>") {
+        if (operatorType == OperatorType::Infix) {
+            return "rs";
+        } // Prefix and postfix isn't supported for `>>`
+    } else if (operatorText == "==") {
+        if (operatorType == OperatorType::Infix) {
+            return "eq";
+        } // Prefix and postfix isn't supported for `==`
+    } else if (operatorText == "!=") {
+        if (operatorType == OperatorType::Infix) {
+            return "ne";
+        } // Prefix and postfix isn't supported for `!=`
+    } else if (operatorText == "<") {
+        if (operatorType == OperatorType::Infix) {
+            return "lt";
+        } // Prefix and postfix isn't supported for `<`
+    } else if (operatorText == ">") {
+        if (operatorType == OperatorType::Infix) {
+            return "gt";
+        } // Prefix and postfix isn't supported for `>`
+    } else if (operatorText == "<=") {
+        if (operatorType == OperatorType::Infix) {
+            return "le";
+        } // Prefix and postfix isn't supported for `<=`
+    } else if (operatorText == ">=") {
+        if (operatorType == OperatorType::Infix) {
+            return "ge";
+        } // Prefix and postfix isn't supported for `>=`
+    } else if (operatorText == "<=>") {
+        if (operatorType == OperatorType::Infix) {
+            return "ss";
+        } // Prefix and postfix isn't supported for `<=>`
+    } else if (operatorText == "!") {
+        if (operatorType == OperatorType::Prefix) {
+            return "nt";
+        } // Infix and postfix isn't supported for `!`
+    } else if (operatorText == "&&") {
+        if (operatorType == OperatorType::Infix) {
+            return "aa";
+        } // Prefix and postfix isn't supported for `&&`
+    } else if (operatorText == "||") {
+        if (operatorType == OperatorType::Infix) {
+            return "oo";
+        } // Prefix and postfix isn't supported for `||`
+    } else if (operatorText == "^^") {
+        if (operatorType == OperatorType::Infix) {
+            // NOTE: This is usually defined to `std.math.Pow`
+            return "ee";
+        } // Prefix and postfix isn't supported for `^^`
+    } else if (operatorText == "++") {
+        if (operatorType == OperatorType::Prefix || operatorType == OperatorType::Postfix) {
+            return "pp";
+        } // Infix isn't supported for `++`
+    } else if (operatorText == "--") {
+        if (operatorType == OperatorType::Prefix || operatorType == OperatorType::Postfix) {
+            return "mm";
+        } // Infix isn't supported for `--`
+    } else if (operatorText == "->*") {
+        if (operatorType == OperatorType::Infix) {
+            return "pm";
+        } // Prefix and postfix isn't supported for `->*`
+    } else if (operatorText == "->") {
+        if (operatorType == OperatorType::Infix) {
+            return "pt";
+        } // Prefix and postfix isn't supported for `->`
+    } else if (operatorText == "()") {
+        if (operatorType == OperatorType::Postfix) {
+            return "cl";
+        } // Prefix and infix isn't supported for `()`
+    } else if (operatorText == "[]") {
+        if (operatorType == OperatorType::Postfix) {
+            return "ix";
+        } // Prefix and infix isn't supported for `[]`
+    }
+
+    // TODO: There are still some operators we might have missed...
+    // Anything that isn't a built in operator is passed to the "vendor extended operator" syntax
+    return "v0" + sourceName(operatorText);
 }

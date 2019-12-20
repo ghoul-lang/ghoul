@@ -13,35 +13,40 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef GULC_INDEXERCALLEXPR_HPP
-#define GULC_INDEXERCALLEXPR_HPP
+#ifndef GULC_CONSTRUCTTEMPORARYVALUEEXPR_HPP
+#define GULC_CONSTRUCTTEMPORARYVALUEEXPR_HPP
 
 #include <AST/Expr.hpp>
 #include <vector>
+#include <AST/Decls/ConstructorDecl.hpp>
 
 namespace gulc {
-    class IndexerCallExpr : public Expr {
+    /**
+     * This is used to contain explicit constructor calls (i.e. `StructName(44, 22, expr)`)
+     */
+    class ConstructTemporaryValueExpr : public Expr {
     public:
-        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::IndexerCall; }
+        static bool classof(const Expr *expr) { return expr->getExprKind() == Kind::ConstructTemporaryValue; }
 
-        IndexerCallExpr(TextPosition startPosition, TextPosition endPosition,
-                        Expr* indexerReference, std::vector<Expr*> arguments)
-                : Expr(Kind::IndexerCall, startPosition, endPosition),
-                  indexerReference(indexerReference), arguments(std::move(arguments)) {}
+        ConstructTemporaryValueExpr(TextPosition startPosition, TextPosition endPosition,
+                                    ConstructorDecl* constructorDecl, std::vector<Expr*> arguments)
+                : Expr(Kind::ConstructTemporaryValue, startPosition, endPosition),
+                  constructorDecl(constructorDecl), arguments(std::move(arguments)) {}
 
-        Expr* indexerReference;
+        ConstructorDecl* constructorDecl;
         std::vector<Expr*> arguments;
         bool hasArguments() const { return !arguments.empty(); }
 
         Expr* deepCopy() const override {
             std::vector<Expr*> copiedArguments;
 
-            for (Expr* argument : arguments) {
-                copiedArguments.push_back(argument->deepCopy());
+            for (Expr* arg : arguments) {
+                copiedArguments.push_back(arg->deepCopy());
             }
 
-            auto result = new IndexerCallExpr(startPosition(), endPosition(),
-                                              indexerReference->deepCopy(), std::move(copiedArguments));
+            auto result = new ConstructTemporaryValueExpr(startPosition(), endPosition(),
+                                                          constructorDecl,
+                                                          std::move(copiedArguments));
             if (resultType) {
                 result->resultType = resultType->deepCopy();
             }
@@ -49,9 +54,7 @@ namespace gulc {
             return result;
         }
 
-        ~IndexerCallExpr() override {
-            delete indexerReference;
-
+        ~ConstructTemporaryValueExpr() override {
             for (Expr* argument : arguments) {
                 delete argument;
             }
@@ -60,4 +63,4 @@ namespace gulc {
     };
 }
 
-#endif //GULC_INDEXERCALLEXPR_HPP
+#endif //GULC_CONSTRUCTTEMPORARYVALUEEXPR_HPP

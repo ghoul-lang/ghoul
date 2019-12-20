@@ -34,6 +34,17 @@
 #include <AST/Exprs/RefBaseExpr.hpp>
 #include <AST/Stmts/ConstructStructMemberVariableStmt.hpp>
 #include <make_reverse_iterator.hpp>
+#include <AST/Decls/OperatorDecl.hpp>
+#include <AST/Exprs/CustomInfixOperatorCallExpr.hpp>
+#include <ASTHelpers/CastHelper.hpp>
+#include <AST/Exprs/ConstructTemporaryValueExpr.hpp>
+#include <AST/Exprs/InfixMacroCallExpr.hpp>
+#include <AST/Exprs/CustomPrefixOperatorCallExpr.hpp>
+#include <AST/Decls/CastOperatorDecl.hpp>
+#include <AST/Decls/IndexOperatorDecl.hpp>
+#include <AST/Exprs/CustomIndexOperatorCallExpr.hpp>
+#include <AST/Decls/CallOperatorDecl.hpp>
+#include <AST/Exprs/CustomCallOperatorCallExpr.hpp>
 #include "DeclResolver.hpp"
 #include "TypeResolver.hpp"
 
@@ -82,6 +93,11 @@ void DeclResolver::processDecl(Decl *decl) {
         case Decl::Kind::Enum:
             processEnumDecl(llvm::dyn_cast<EnumDecl>(decl));
             break;
+        // There isn't anything special about operator vs function in this pass so we just treat it like a function
+        case Decl::Kind::Operator:
+        case Decl::Kind::CastOperator:
+        case Decl::Kind::CallOperator:
+        case Decl::Kind::IndexOperator:
         case Decl::Kind::Function:
             processFunctionDecl(llvm::dyn_cast<FunctionDecl>(decl));
             break;
@@ -150,6 +166,9 @@ bool DeclResolver::processStmt(Stmt *&stmt) {
 
 void DeclResolver::processExpr(Expr *&expr) {
     switch (expr->getExprKind()) {
+        case Expr::Kind::AssignmentBinaryOperator:
+            processAssignmentBinaryOperatorExpr(llvm::dyn_cast<AssignmentBinaryOperatorExpr>(expr));
+            break;
         case Expr::Kind::BinaryOperator:
             processBinaryOperatorExpr(expr, false);
             break;
@@ -157,13 +176,13 @@ void DeclResolver::processExpr(Expr *&expr) {
             processCharacterLiteralExpr(llvm::dyn_cast<CharacterLiteralExpr>(expr));
             break;
         case Expr::Kind::ExplicitCast:
-            processExplicitCastExpr(llvm::dyn_cast<ExplicitCastExpr>(expr));
+            processExplicitCastExpr(expr);
             break;
         case Expr::Kind::FloatLiteral:
             processFloatLiteralExpr(llvm::dyn_cast<FloatLiteralExpr>(expr));
             break;
         case Expr::Kind::FunctionCall:
-            processFunctionCallExpr(llvm::dyn_cast<FunctionCallExpr>(expr));
+            processFunctionCallExpr(expr);
             break;
         case Expr::Kind::Identifier:
             processIdentifierExpr(expr);
@@ -172,7 +191,7 @@ void DeclResolver::processExpr(Expr *&expr) {
             processImplicitCastExpr(llvm::dyn_cast<ImplicitCastExpr>(expr));
             break;
         case Expr::Kind::IndexerCall:
-            processIndexerCallExpr(llvm::dyn_cast<IndexerCallExpr>(expr));
+            processIndexerCallExpr(expr);
             break;
         case Expr::Kind::IntegerLiteral:
             processIntegerLiteralExpr(llvm::dyn_cast<IntegerLiteralExpr>(expr));
@@ -180,7 +199,7 @@ void DeclResolver::processExpr(Expr *&expr) {
         case Expr::Kind::LocalVariableDecl:
             processLocalVariableDeclExpr(llvm::dyn_cast<LocalVariableDeclExpr>(expr), false);
             break;
-        case Expr::Kind::LocalVariableDeclOrPrefixOperatorCallExpr:
+        case Expr::Kind::PotentialLocalVariableDecl:
             // Casting isn't required for this function. It will handle the casting for us since this is a type we will be completely removing from the AST in this function
             processLocalVariableDeclOrPrefixOperatorCallExpr(expr);
             break;
@@ -197,7 +216,7 @@ void DeclResolver::processExpr(Expr *&expr) {
             processPotentialExplicitCastExpr(expr);
             break;
         case Expr::Kind::PrefixOperator:
-            processPrefixOperatorExpr(llvm::dyn_cast<PrefixOperatorExpr>(expr));
+            processPrefixOperatorExpr(expr);
             break;
         case Expr::Kind::ResolvedTypeRef:
             processResolvedTypeRefExpr(llvm::dyn_cast<ResolvedTypeRefExpr>(expr));
@@ -210,6 +229,12 @@ void DeclResolver::processExpr(Expr *&expr) {
             break;
         case Expr::Kind::UnresolvedTypeRef:
             processUnresolvedTypeRefExpr(expr);
+            break;
+        case Expr::Kind::InfixMacroCall:
+            processInfixMacroCallExpr(expr);
+            break;
+        case Expr::Kind::PrefixMacroCall:
+            processPrefixMacroCallExpr(expr);
             break;
     }
 }
@@ -364,7 +389,7 @@ void DeclResolver::processCopyOrMoveConstructorDecl(ConstructorDecl *constructor
                 refOtherMember->resultType->setIsLValue(true);
                 convertLValueToRValue(refOtherMember);
 
-                Expr* assignment = new BinaryOperatorExpr({}, {}, "=", refThisMember, refOtherMember);
+                Expr* assignment = new AssignmentBinaryOperatorExpr({}, {}, refThisMember, refOtherMember);
 
                 bodyStatements.insert(bodyStatements.begin(), assignment);
             }
@@ -970,21 +995,20 @@ bool DeclResolver::processReturnStmt(ReturnStmt *returnStmt) {
             typesAreSame = TypeComparer::getTypesAreSame(returnStmt->returnValue->resultType, returnType, true);
         }
 
-        if (!getTypeIsReference(returnType)) {
+        bool typeIsReference = getTypeIsReference(returnType);
+
+        if (!typeIsReference) {
             dereferenceReferences(returnStmt->returnValue);
-            convertLValueToRValue(returnStmt->returnValue);
         }
 
         if (!typesAreSame) {
-            // We will handle this in the verifier.
-            auto implicitCastExpr = new ImplicitCastExpr(returnStmt->returnValue->startPosition(),
-                                                         returnStmt->returnValue->endPosition(),
-                                                         returnType->deepCopy(),
-                                                         returnStmt->returnValue);
+            returnStmt->returnValue = applyCast(returnStmt->returnValue->resultType, returnType,
+                                                returnStmt->returnValue,
+                                                CastOperatorType::Implicit);
+        }
 
-            processImplicitCastExpr(implicitCastExpr);
-
-            returnStmt->returnValue = implicitCastExpr;
+        if (!typeIsReference) {
+            convertLValueToRValue(returnStmt->returnValue);
         }
     }
 
@@ -1046,351 +1070,754 @@ bool DeclResolver::processWhileStmt(WhileStmt *whileStmt) {
 }
 
 // Exprs
-void DeclResolver::processBinaryOperatorExpr(Expr*& expr, bool isNestedBinaryOperator) {
-    auto binaryOperatorExpr = llvm::dyn_cast<BinaryOperatorExpr>(expr);
+OperatorDecl *DeclResolver::findInfixOperatorOrError(StructDecl *structDecl, std::vector<Expr *> *args,
+                                                     std::string const& operatorName,
+                                                     TextPosition const& startPosition,
+                                                     TextPosition const& endPosition) {
+    OperatorDecl* foundOperator = nullptr;
+    bool isExactMatch = false;
+    bool isAmbiguous = false;
 
-    // TODO: Support operator overloading type resolution
-    if (llvm::isa<BinaryOperatorExpr>(binaryOperatorExpr->leftValue)) {
-        processBinaryOperatorExpr(binaryOperatorExpr->leftValue, true);
+    // First we search the struct's direct members...
+    for (Decl* checkDecl : structDecl->members) {
+        if (llvm::isa<OperatorDecl>(checkDecl)) {
+            auto operatorDecl = llvm::dyn_cast<OperatorDecl>(checkDecl);
 
-        // If the left value after processing isn't a local variable declaration then we continue like normal
-        // else we send the local variable decl into the `processLocalVariableDecl` since it wasn't performed in
-        // `processBinaryOperatorExpr` since we told it not to
-        if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
-            processExpr(binaryOperatorExpr->rightValue);
-
-            processLocalVariableDeclExpr(llvm::dyn_cast<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue), true);
-
-            binaryOperatorExpr->resultType = binaryOperatorExpr->leftValue->resultType->deepCopy();
-
-            // We don't do further processing
-            return;
-        }
-    } else {
-        processExpr(binaryOperatorExpr->leftValue);
-    }
-
-    if (llvm::isa<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue)) {
-        // TODO: Support the other type suffixes
-        if (binaryOperatorExpr->operatorName() == "*") {
-            if (!llvm::isa<IdentifierExpr>(binaryOperatorExpr->rightValue)) {
-                printError("expected local variable name after pointer type!",
-                           binaryOperatorExpr->rightValue->startPosition(),
-                           binaryOperatorExpr->rightValue->endPosition());
-                return;
+            // If the checkDecl is an operator we need to make sure it is a binary operator...
+            if (operatorDecl->operatorType() == OperatorType::Infix) {
+                if (operatorDecl->operatorName() == operatorName) {
+                    if (!checkConstructorOrFunctionMatchesCall(foundOperator, operatorDecl,
+                                                               args, &isExactMatch, &isAmbiguous)) {
+                        printError("operator `" + operatorName + "` is ambiguous for the provided types!",
+                                   startPosition, endPosition);
+                    }
+                }
             }
-
-            auto localVarTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue);
-            auto varNameExpr = llvm::dyn_cast<IdentifierExpr>(binaryOperatorExpr->rightValue);
-
-            if (varNameExpr->hasTemplateArguments()) {
-                printError("local variable name cannot have template arguments!",
-                           varNameExpr->startPosition(),
-                           varNameExpr->endPosition());
-                return;
-            }
-
-            binaryOperatorExpr->leftValue = nullptr;
-
-            std::string varName = varNameExpr->name();
-
-            localVarTypeRef->resolvedType = new PointerType(localVarTypeRef->startPosition(),
-                                                            localVarTypeRef->endPosition(),
-                                                            TypeQualifier::None,
-                                                            localVarTypeRef->resolvedType);
-
-            auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(),
-                                                              binaryOperatorExpr->endPosition(), localVarTypeRef,
-                                                              varName);
-
-            // TODO: Process the local variable in a nested
-            // We only process the local variable here if it is not a part of a nested binary operator
-            // This is so we can support handling initial value handling within the `processLocalVariableDeclExpr`
-            // function.
-            if (!isNestedBinaryOperator) {
-                processLocalVariableDeclExpr(localVarDeclExpr, false);
-            }
-
-            // Delete the binary operator expression (this will delete the left and right expressions)
-            delete binaryOperatorExpr;
-            expr = localVarDeclExpr;
-
-            return;
-        } else if (binaryOperatorExpr->operatorName() == "&") {
-            if (!llvm::isa<IdentifierExpr>(binaryOperatorExpr->rightValue)) {
-                printError("expected local variable name after reference type!",
-                           binaryOperatorExpr->rightValue->startPosition(),
-                           binaryOperatorExpr->rightValue->endPosition());
-                return;
-            }
-
-            auto localVarTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue);
-            auto varNameExpr = llvm::dyn_cast<IdentifierExpr>(binaryOperatorExpr->rightValue);
-
-            if (varNameExpr->hasTemplateArguments()) {
-                printError("local variable name cannot have template arguments!",
-                           varNameExpr->startPosition(),
-                           varNameExpr->endPosition());
-                return;
-            }
-
-            binaryOperatorExpr->leftValue = nullptr;
-
-            std::string varName = varNameExpr->name();
-
-            localVarTypeRef->resolvedType = new ReferenceType(localVarTypeRef->startPosition(),
-                                                            localVarTypeRef->endPosition(),
-                                                            TypeQualifier::None,
-                                                            localVarTypeRef->resolvedType);
-
-            auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(),
-                                                              binaryOperatorExpr->endPosition(), localVarTypeRef,
-                                                              varName);
-
-            // TODO: Process the local variable in a nested
-            // We only process the local variable here if it is not a part of a nested binary operator
-            // This is so we can support handling initial value handling within the `processLocalVariableDeclExpr`
-            // function.
-            if (!isNestedBinaryOperator) {
-                processLocalVariableDeclExpr(localVarDeclExpr, false);
-            }
-
-            // Delete the binary operator expression (this will delete the left and right expressions)
-            delete binaryOperatorExpr;
-
-            expr = localVarDeclExpr;
-
-            return;
-        } else {
-            printError("unsupported binary operator expression with a type as an lvalue!",
-                       binaryOperatorExpr->startPosition(),
-                       binaryOperatorExpr->endPosition());
-            return;
         }
     }
 
-    processExpr(binaryOperatorExpr->rightValue);
+    // Then we search the struct's inherited members if we didn't find an exact match...
+    if (!isExactMatch) {
+        for (Decl* checkDecl : structDecl->inheritedMembers) {
+            if (llvm::isa<OperatorDecl>(checkDecl)) {
+                auto operatorDecl = llvm::dyn_cast<OperatorDecl>(checkDecl);
 
-    if (binaryOperatorExpr->isBuiltInAssignmentOperator()) {
-        Type* leftType = binaryOperatorExpr->leftValue->resultType;
-        Type* rightType = binaryOperatorExpr->rightValue->resultType;
-
-        if (getTypeIsReference(leftType)) {
-            // If the left type is a reference and the left value is a local variable declaration then we set the left variable to the reference of what is on the right...
-            // If the left value ISN'T a local variable then we deref the left value and set it equal to the right value (with the right value being converted to an rvalue)
-            if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
-                // Right value must be either lvalue or reference
-                if (!(rightType->isLValue() || getTypeIsReference(rightType))) {
-                    printError("initial value for reference variable MUST be an lvalue!",
-                               binaryOperatorExpr->rightValue->startPosition(),
-                               binaryOperatorExpr->rightValue->endPosition());
-                    return;
-                }
-
-                // If the right type isn't already a reference then make it one...
-                if (!getTypeIsReference(rightType)) {
-                    binaryOperatorExpr->rightValue = new PrefixOperatorExpr(
-                            binaryOperatorExpr->rightValue->startPosition(),
-                            binaryOperatorExpr->rightValue->endPosition(),
-                            ".ref", binaryOperatorExpr->rightValue);
-                    processExpr(binaryOperatorExpr->rightValue);
-                    rightType = binaryOperatorExpr->rightValue->resultType;
-                }
-            } else {
-                // This will dereference the left value
-                dereferenceReferences(binaryOperatorExpr->leftValue);
-                leftType = binaryOperatorExpr->leftValue->resultType;
-
-                // The right value here MUST be an rvalue...
-                convertLValueToRValue(binaryOperatorExpr->rightValue);
-                rightType = binaryOperatorExpr->rightValue->resultType;
-            }
-        } else {
-            // If the left value isn't a reference then the right value has to be an rvalue...
-            convertLValueToRValue(binaryOperatorExpr->rightValue);
-            rightType = binaryOperatorExpr->rightValue->resultType;
-        }
-
-        if (!TypeComparer::getTypesAreSame(leftType, rightType, true)) {
-            binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
-                                                                  binaryOperatorExpr->rightValue->endPosition(),
-                                                                  leftType->deepCopy(),
-                                                                  binaryOperatorExpr->rightValue);
-        }
-
-        binaryOperatorExpr->resultType = leftType->deepCopy();
-
-        if (binaryOperatorExpr->operatorName() != "=") {
-            if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
-                printError("operator '" + binaryOperatorExpr->operatorName() + "' not supported in variable declaration!",
-                           binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
-                return;
-            }
-
-            std::string rightOperatorName;
-
-            if (binaryOperatorExpr->operatorName() == ">>=") {
-                rightOperatorName = ">>";
-            } else if (binaryOperatorExpr->operatorName() == "<<=") {
-                rightOperatorName = "<<";
-            } else if (binaryOperatorExpr->operatorName() == "+=") {
-                rightOperatorName = "+";
-            } else if (binaryOperatorExpr->operatorName() == "-=") {
-                rightOperatorName = "-";
-            } else if (binaryOperatorExpr->operatorName() == "*=") {
-                rightOperatorName = "*";
-            } else if (binaryOperatorExpr->operatorName() == "/=") {
-                rightOperatorName = "/";
-            } else if (binaryOperatorExpr->operatorName() == "%=") {
-                rightOperatorName = "%";
-            } else if (binaryOperatorExpr->operatorName() == "&=") {
-                rightOperatorName = "&";
-            } else if (binaryOperatorExpr->operatorName() == "|=") {
-                rightOperatorName = "|";
-            } else if (binaryOperatorExpr->operatorName() == "^=") {
-                rightOperatorName = "^";
-            } else {
-                printError(
-                        "[INTERNAL] unknown built in assignment operator '" + binaryOperatorExpr->operatorName() + "'!",
-                        binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
-                return;
-            }
-
-            Expr* leftValue = binaryOperatorExpr->leftValue;
-            convertLValueToRValue(leftValue);
-            // We set a new right value with an `LValueToRValueExpr` that doesn't own the pointer. Making it so the left L2R expression doesn't delete the pointer since the binary operator owns it.
-            auto newRightValue = new BinaryOperatorExpr(binaryOperatorExpr->startPosition(),
-                                                        binaryOperatorExpr->endPosition(),
-                                                        rightOperatorName,
-                                                        leftValue,
-                                                        binaryOperatorExpr->rightValue);
-
-            newRightValue->resultType = leftType->deepCopy();
-
-            // Set the new right value and change the operator name to '='
-            binaryOperatorExpr->setOperatorName("=");
-            binaryOperatorExpr->rightValue = newRightValue;
-        } else {
-            // At this point the operator is an "="
-            if (currentFunctionIsConstructor &&
-                    llvm::isa<RefStructMemberVariableExpr>(binaryOperatorExpr->leftValue)) {
-                // If the left value is a struct member variable then we have to set `constructorAssignedMember` when
-                // we're in a constructor
-                auto refStructMemberVariable = llvm::dyn_cast<RefStructMemberVariableExpr>(binaryOperatorExpr->leftValue);
-
-                if (llvm::isa<StructType>(refStructMemberVariable->refVariable->type)) {
-                    // We only do this when it is a struct type...
-                    if (refStructMemberVariable->structType->decl() == currentStruct) {
-                        // We only check if the struct is the same type as our current type (we also don't set
-                        // `constructorAssignedMember` if it is a base member we're setting)
-
-                        if (std::find(constructorAssignedMember.begin(), constructorAssignedMember.end(),
-                                      refStructMemberVariable->refVariable) == constructorAssignedMember.end()) {
-                            // If the variable being set isn't in `constructorAssignedMember` then we have to add it
-                            constructorAssignedMember.push_back(refStructMemberVariable->refVariable);
-                            // TODO: We need to convert a move constructor here WITHOUT destructing the member variable
-                            //       (because the member variable is garbage right now, this will be the first construction)
-                            //       We might want a special `assign` constructor for only this scenario? Or how should we
-                            //       perform this?
+                // If the checkDecl is an operator we need to make sure it is a binary operator...
+                if (operatorDecl->operatorType() == OperatorType::Infix) {
+                    if (foundOperator->operatorName() == operatorName) {
+                        if (!checkConstructorOrFunctionMatchesCall(foundOperator, operatorDecl,
+                                                                   args, &isExactMatch, &isAmbiguous)) {
+                            printError("operator `" + operatorName + "` is ambiguous for the provided types!",
+                                       startPosition, endPosition);
                         }
                     }
                 }
             }
         }
+    }
 
-        return;
-    } else {
-        convertLValueToRValue(binaryOperatorExpr->leftValue);
-        convertLValueToRValue(binaryOperatorExpr->rightValue);
+    if (!foundOperator) {
+        printError("operator `" + operatorName + "` does not exist for the provided types!",
+                   startPosition, endPosition);
+    }
 
-        Type* leftType = binaryOperatorExpr->leftValue->resultType;
-        Type* rightType = binaryOperatorExpr->rightValue->resultType;
+    if (isAmbiguous) {
+        printError("operator `" + operatorName + "` is ambiguous for the provided types!",
+                   startPosition, endPosition);
+    }
 
-        if (llvm::isa<BuiltInType>(leftType) && llvm::isa<BuiltInType>(rightType)) {
-            auto leftBuiltInType = llvm::dyn_cast<BuiltInType>(leftType);
-            auto rightBuiltInType = llvm::dyn_cast<BuiltInType>(rightType);
+    return foundOperator;
+}
 
-            bool leftIsSigned = leftBuiltInType->isSigned();
-            bool rightIsSigned = rightBuiltInType->isSigned();
-            bool leftIsFloating = leftBuiltInType->isFloating();
-            bool rightIsFloating = rightBuiltInType->isFloating();
+OperatorDecl *DeclResolver::findPrefixOperator(StructDecl *structDecl, std::string const &operatorName) {
+    OperatorDecl* foundOperator = nullptr;
 
-            // If one side is signed and the other isn't then we cast to the signed side.
-            if (leftIsSigned) {
-                if (!rightIsSigned) {
-                    binaryOperatorExpr->leftValue = new ImplicitCastExpr(binaryOperatorExpr->leftValue->startPosition(),
-                                                                         binaryOperatorExpr->leftValue->endPosition(),
-                                                                         rightType->deepCopy(),
-                                                                         binaryOperatorExpr->leftValue);
-                    binaryOperatorExpr->resultType = rightType->deepCopy();
-                    return;
-                }
-            } else { // left is not signed...
-                if (rightIsSigned) {
-                    binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
-                                                                          binaryOperatorExpr->rightValue->endPosition(),
-                                                                          leftType->deepCopy(),
-                                                                          binaryOperatorExpr->rightValue);
-                    binaryOperatorExpr->resultType = leftType->deepCopy();
-                    return;
+    for (Decl* checkMember : structDecl->members) {
+        if (llvm::isa<OperatorDecl>(checkMember)) {
+            auto checkOperator = llvm::dyn_cast<OperatorDecl>(checkMember);
+
+            if (checkOperator->operatorType() == OperatorType::Prefix) {
+                if (checkOperator->operatorName() == operatorName) {
+                    // TODO: Once we allow `const` function modifiers we need to check for the const modifier on the
+                    //       function
+                    foundOperator = checkOperator;
+                    break;
                 }
             }
-
-            // If one side is floating and the other isn't then we cast to the floating side.
-            if (leftIsFloating) {
-                if (!rightIsFloating) {
-                    binaryOperatorExpr->leftValue = new ImplicitCastExpr(binaryOperatorExpr->leftValue->startPosition(),
-                                                                         binaryOperatorExpr->leftValue->endPosition(),
-                                                                         rightType->deepCopy(),
-                                                                         binaryOperatorExpr->leftValue);
-                    binaryOperatorExpr->resultType = rightType->deepCopy();
-                    return;
-                }
-            } else { // left is not signed...
-                if (rightIsFloating) {
-                    binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
-                                                                          binaryOperatorExpr->rightValue->endPosition(),
-                                                                          leftType->deepCopy(),
-                                                                          binaryOperatorExpr->rightValue);
-                    binaryOperatorExpr->resultType = leftType->deepCopy();
-                    return;
-                }
-            }
-
-            // If one side is bigger than the other then we casting to the bigger side.
-            if (leftBuiltInType->size() > rightBuiltInType->size()) {
-                binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
-                                                                      binaryOperatorExpr->rightValue->endPosition(),
-                                                                      leftType->deepCopy(),
-                                                                      binaryOperatorExpr->rightValue);
-                binaryOperatorExpr->resultType = leftType->deepCopy();
-                return;
-            } else if (leftBuiltInType->size() < rightBuiltInType->size()) {
-                binaryOperatorExpr->leftValue = new ImplicitCastExpr(binaryOperatorExpr->leftValue->startPosition(),
-                                                                     binaryOperatorExpr->leftValue->endPosition(),
-                                                                     rightType->deepCopy(),
-                                                                     binaryOperatorExpr->leftValue);
-                binaryOperatorExpr->resultType = rightType->deepCopy();
-                return;
-            }
-
-            // If we reach this point then both are exactly the same type in everything but name. We do nothing if there isn't a custom implicit cast operator for each type name
         }
     }
 
-    binaryOperatorExpr->resultType = binaryOperatorExpr->leftValue->resultType->deepCopy();
+    // TODO: Should we allow inheriting prefix operators? I haven't fully decided, it doesn't make very much sense
+    if (!foundOperator) {
+        for (Decl *checkMember : structDecl->inheritedMembers) {
+            if (llvm::isa<OperatorDecl>(checkMember)) {
+                auto checkOperator = llvm::dyn_cast<OperatorDecl>(checkMember);
+
+                if (checkOperator->operatorType() == OperatorType::Prefix) {
+                    if (checkOperator->operatorName() == operatorName) {
+                        // TODO: Once we allow `const` function modifiers we need to check for the const modifier on the
+                        //       function
+                        foundOperator = checkOperator;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    return foundOperator;
 }
+
+void DeclResolver::processAssignmentBinaryOperatorExpr(AssignmentBinaryOperatorExpr *assignmentBinaryOperatorExpr) {
+    processExpr(assignmentBinaryOperatorExpr->leftValue);
+    processExpr(assignmentBinaryOperatorExpr->rightValue);
+
+    Type* leftType = assignmentBinaryOperatorExpr->leftValue->resultType;
+    Type* rightType = assignmentBinaryOperatorExpr->rightValue->resultType;
+
+    if (!assignmentBinaryOperatorExpr->hasNestedOperator()) {
+        bool convertRightValueToRValue = false;
+
+        // If there isn't a nested operator then we (i.e. no `+=`, `/=`, etc.) then we convert lvalues to rvalues
+        // and dereference any references. This is a normal assignment
+        if (getTypeIsReference(leftType)) {
+            // If the left type is a reference and the left value is a local variable declaration then we set the
+            // left variable to the reference of what is on the right...
+            // If the left value ISN'T a local variable then we deref the left value and set it equal to the right
+            // value (with the right value being converted to an rvalue)
+            if (llvm::isa<LocalVariableDeclExpr>(assignmentBinaryOperatorExpr->leftValue)) {
+                // Right value must be either lvalue or reference
+                if (!(rightType->isLValue() || getTypeIsReference(rightType))) {
+                    printError("initial value for reference variable MUST be an lvalue!",
+                               assignmentBinaryOperatorExpr->rightValue->startPosition(),
+                               assignmentBinaryOperatorExpr->rightValue->endPosition());
+                    return;
+                }
+
+                // If the right type isn't already a reference then make it one...
+                if (!getTypeIsReference(rightType)) {
+                    assignmentBinaryOperatorExpr->rightValue = new PrefixOperatorExpr(
+                            assignmentBinaryOperatorExpr->rightValue->startPosition(),
+                            assignmentBinaryOperatorExpr->rightValue->endPosition(),
+                            ".ref", assignmentBinaryOperatorExpr->rightValue);
+                    processExpr(assignmentBinaryOperatorExpr->rightValue);
+                    rightType = assignmentBinaryOperatorExpr->rightValue->resultType;
+                }
+            } else {
+                // This will dereference the left value
+                dereferenceReferences(assignmentBinaryOperatorExpr->leftValue);
+                leftType = assignmentBinaryOperatorExpr->leftValue->resultType;
+
+                // The right value here MUST be an rvalue...
+                convertRightValueToRValue = true;
+                rightType = assignmentBinaryOperatorExpr->rightValue->resultType;
+            }
+        } else {
+            // If the left value isn't a reference then the right value has to be an rvalue...
+            convertRightValueToRValue = true;
+            rightType = assignmentBinaryOperatorExpr->rightValue->resultType;
+        }
+
+        if (!TypeComparer::getTypesAreSame(leftType, rightType, true)) {
+            assignmentBinaryOperatorExpr->rightValue = applyCast(rightType, leftType,
+                                                                 assignmentBinaryOperatorExpr->rightValue,
+                                                                 CastOperatorType::Implicit);
+        }
+
+        if (convertRightValueToRValue) {
+            convertLValueToRValue(assignmentBinaryOperatorExpr->rightValue);
+        }
+    } else {
+        // TODO: When we support implementing custom casting rules we need to check for ambiguity.
+        //        * If we have `a + b` and `a` has an `operator infix +` that accepts the type for `b` there is NO implicit cast
+        //        * If we have `a + b` and there is no operator that accepts `b` we have to check if we can implicit cast `b` to `a` then `a` to `b`
+        //        * If we have `a + b` and the types both have rules allowing cross implicit casting this is an ambiguity (fix by adding explicit cast)
+
+        // If there IS a nested operator we have to figure out if it is overloaded or not and handle it appropriately.
+        if (llvm::isa<BuiltInType>(leftType)) {
+            if (llvm::isa<BuiltInType>(rightType)) {
+                // NOTE: For operators like `+=`, `/=`, etc. the right side is ALWAYS casted to the left side type
+                //       the only time this differs is if the operator being used is overloaded.
+                if (!TypeComparer::getTypesAreSame(leftType, rightType, true)) {
+                    // Cast the right value to the left value's type
+                    assignmentBinaryOperatorExpr->rightValue = applyCast(rightType, leftType,
+                                                                         assignmentBinaryOperatorExpr->rightValue,
+                                                                         CastOperatorType::Implicit);
+                }
+            } else {
+                printError("built in type `" + leftType->getString() + "` currently only supports built in operators!",
+                           assignmentBinaryOperatorExpr->startPosition(), assignmentBinaryOperatorExpr->endPosition());
+            }
+        } else if (llvm::isa<StructType>(leftType)) {
+            auto structType = llvm::dyn_cast<StructType>(leftType);
+            auto structDecl = structType->decl();
+
+            std::vector<Expr*> operatorArgs {
+                    assignmentBinaryOperatorExpr->rightValue
+            };
+
+            OperatorDecl* foundOperator = findInfixOperatorOrError(structDecl, &operatorArgs,
+                                                                   assignmentBinaryOperatorExpr->nestedOperator(),
+                                                                   assignmentBinaryOperatorExpr->startPosition(),
+                                                                   assignmentBinaryOperatorExpr->endPosition());
+
+            // TODO: We need to check if `rightValue` needs referenced, dereferenced, or implicitly casted...
+
+            // TODO: We need to check if `foundOperator->resultType` is equal to `leftValue->resultType`
+            if (!TypeComparer::getTypesAreSame(assignmentBinaryOperatorExpr->leftValue->resultType,
+                                              foundOperator->resultType, true)) {
+                // TODO: At some point we should support implicit casting here.
+                printError("operator `" + assignmentBinaryOperatorExpr->nestedOperator() +
+                           "` does not return required type '" + structDecl->name() + "'!",
+                           assignmentBinaryOperatorExpr->startPosition(),
+                           assignmentBinaryOperatorExpr->endPosition());
+            }
+
+            // If the found operator is in a namespace we need to extern it (as we assume it could be in another
+            // file or not declared yet)
+            if (foundOperator->parentNamespace != nullptr) {
+                currentFileAst->addImportExtern(foundOperator);
+            }
+
+            assignmentBinaryOperatorExpr->nestedOperatorOverload = foundOperator;
+        } else {
+            printError("operator `" + assignmentBinaryOperatorExpr->nestedOperator() + "` used on unsupported type '" +
+                       assignmentBinaryOperatorExpr->leftValue->resultType->getString() + "'!",
+                       assignmentBinaryOperatorExpr->startPosition(), assignmentBinaryOperatorExpr->endPosition());
+        }
+    }
+
+    // TODO: If we're in a constructor we need to detect member sets and notify the constructor of them being set
+
+    // The result of the assignment is always the type of the left value
+    assignmentBinaryOperatorExpr->resultType = assignmentBinaryOperatorExpr->leftValue->resultType->deepCopy();
+}
+
+void DeclResolver::processBinaryOperatorExpr(Expr*& expr, bool isNestedBinaryOperator) {
+    auto binaryOperatorExpr = llvm::dyn_cast<BinaryOperatorExpr>(expr);
+
+    // TODO: We need to make it possible to set that a local variable has an initial value...
+    if (llvm::isa<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue)) {
+        // If the left value of the binary operator is a resolved type then this is an undetected local variable decl
+        if (!llvm::isa<IdentifierExpr>(binaryOperatorExpr->rightValue)) {
+            printError("expected variable name after type!",
+                       binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+        }
+
+        // We process the binary operator because types can hold expressions that need resolved in their template
+        // arguments list.
+        processExpr(binaryOperatorExpr->leftValue);
+        // NOTE: The right value is NOT processed as we only care about the string it holds.
+
+        // NOTE: We will be stealing this pointer
+        auto localVarTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue);
+        auto varNameExpr = llvm::dyn_cast<IdentifierExpr>(binaryOperatorExpr->rightValue);
+
+        if (varNameExpr->hasTemplateArguments()) {
+            printError("local variable name cannot have template arguments!",
+                       varNameExpr->startPosition(),
+                       varNameExpr->endPosition());
+            return;
+        }
+
+        // We will steal the left value pointer for our own uses...
+        binaryOperatorExpr->leftValue = nullptr;
+
+        // TODO: Support custom type suffixes
+        if (binaryOperatorExpr->operatorName() == "*") {
+            // Changed the resolved type to be a pointer since we now know it is a pointer...
+            localVarTypeRef->resolvedType = new PointerType(localVarTypeRef->startPosition(),
+                                                            localVarTypeRef->endPosition(),
+                                                            TypeQualifier::None,
+                                                            localVarTypeRef->resolvedType);
+        } else if (binaryOperatorExpr->operatorName() == "&") {
+            // Change the resolved type to be a reference
+            localVarTypeRef->resolvedType = new ReferenceType(localVarTypeRef->startPosition(),
+                                                              localVarTypeRef->endPosition(),
+                                                              TypeQualifier::None,
+                                                              localVarTypeRef->resolvedType);
+        } else {
+            printError("unknown type suffix `" + binaryOperatorExpr->operatorName() + "`!",
+                       binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+        }
+
+        // Create the new local variable declaration that replaces the binary operator in the AST
+        auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(),
+                                                          binaryOperatorExpr->endPosition(), localVarTypeRef,
+                                                          varNameExpr->name());
+
+        // We process the local variable normally so it is in the local variables list...
+        processLocalVariableDeclExpr(localVarDeclExpr, false);
+
+        // Delete the binary operator expression (this will delete the left and right expressions if they're not null)
+        delete binaryOperatorExpr;
+        expr = localVarDeclExpr;
+
+        // No futher processing is possible, we delete the old binary operator
+        return;
+    } else {
+        // If we reach this point we know the following are true:
+        // 1. The left value is NOT a type reference
+        // 2. The operator is NOT an assignment (these are changed in `TypeResolver`)
+        //
+        // So now we process the binary operator as a normal binary operator...
+        processExpr(binaryOperatorExpr->leftValue);
+        processExpr(binaryOperatorExpr->rightValue);
+
+        // We create temporary variables just to make things easier.
+        auto leftType = binaryOperatorExpr->leftValue->resultType;
+        auto rightType = binaryOperatorExpr->rightValue->resultType;
+
+        if (llvm::isa<BuiltInType>(leftType)) {
+            if (llvm::isa<BuiltInType>(rightType)) {
+                // For now, if both types are built in we use the built in operators
+                // TODO: Once we support extension types we need to support calling the overridden operator functions
+                //       for the built in types...
+                // TODO: Implement the casting rules.
+                CastSide castSide = CastHelper::getSideToCast(llvm::dyn_cast<BuiltInType>(leftType),
+                                                              llvm::dyn_cast<BuiltInType>(rightType));
+
+                switch (castSide) {
+                    case CastSide::Left:
+                        // Cast the left value to the right value's type
+                        binaryOperatorExpr->leftValue = applyCast(leftType, rightType,
+                                                                  binaryOperatorExpr->leftValue,
+                                                                  CastOperatorType::Implicit);
+                        break;
+                    case CastSide::Right:
+                        // Cast the right value to the left value's type
+                        binaryOperatorExpr->rightValue = applyCast(rightType, leftType,
+                                                                   binaryOperatorExpr->rightValue,
+                                                                   CastOperatorType::Implicit);
+                        break;
+                    default:
+                        // We don't do anything...
+                        break;
+                }
+
+                // TODO: I believe we need to also call `dereferenceReferences` here.
+                convertLValueToRValue(binaryOperatorExpr->leftValue);
+                convertLValueToRValue(binaryOperatorExpr->rightValue);
+
+                // We set the result type of the binary operator explicitly to the live value of the left value's
+                // result type. We don't reference `leftType` here as it might not be the correct type.
+                binaryOperatorExpr->resultType = binaryOperatorExpr->leftValue->resultType->deepCopy();
+
+                // We don't do further processing
+                return;
+            } else {
+                printError("built in type `" + leftType->getString() + "` currently only supports built in operators!",
+                           binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+            }
+        } else if (llvm::isa<StructType>(leftType)) {
+            auto structType = llvm::dyn_cast<StructType>(leftType);
+            auto structDecl = structType->decl();
+
+            std::vector<Expr*> operatorArgs {
+                binaryOperatorExpr->rightValue
+            };
+
+            OperatorDecl* foundOperator = findInfixOperatorOrError(structDecl, &operatorArgs,
+                                                                   binaryOperatorExpr->operatorName(),
+                                                                   binaryOperatorExpr->startPosition(),
+                                                                   binaryOperatorExpr->endPosition());
+
+            // TODO: We need to check if `rightValue` needs referenced, dereferenced, or implicitly casted...
+
+            auto resultType = foundOperator->resultType->deepCopy();
+
+            // NOTE: Currently operator calls ALWAYS support vtable calls, we can later optimize these out where
+            //       possible
+            auto newExpr = new CustomInfixOperatorCallExpr(binaryOperatorExpr->startPosition(),
+                                                           binaryOperatorExpr->endPosition(),
+                                                           structType->doVTableCalls() && foundOperator->isVirtual(),
+                                                           foundOperator,
+                                                           binaryOperatorExpr->leftValue,
+                                                           binaryOperatorExpr->rightValue);
+            newExpr->resultType = resultType;
+            // Like functions, operator results are lvalues
+            newExpr->resultType->setIsLValue(true);
+
+            // We steal these pointers
+            binaryOperatorExpr->leftValue = nullptr;
+            binaryOperatorExpr->rightValue = nullptr;
+            // Delete the old binary operator and replace it with our new expression
+            delete binaryOperatorExpr;
+            expr = newExpr;
+
+            // If the found operator is in a namespace we need to extern it (as we assume it could be in another
+            // file or not declared yet)
+            if (foundOperator->parentNamespace != nullptr) {
+                currentFileAst->addImportExtern(foundOperator);
+            }
+        } else {
+            printError("operator `" + binaryOperatorExpr->operatorName() + "` used on unsupported type '" +
+                       binaryOperatorExpr->leftValue->resultType->getString() + "'!",
+                       binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+        }
+    }
+}
+// TODO: Remove this
+//void DeclResolver::processBinaryOperatorExpr(Expr*& expr, bool isNestedBinaryOperator) {
+//    auto binaryOperatorExpr = llvm::dyn_cast<BinaryOperatorExpr>(expr);
+//
+//    // TODO: Support operator overloading type resolution
+//    if (llvm::isa<BinaryOperatorExpr>(binaryOperatorExpr->leftValue)) {
+//        processBinaryOperatorExpr(binaryOperatorExpr->leftValue, true);
+//
+//        // If the left value after processing isn't a local variable declaration then we continue like normal
+//        // else we send the local variable decl into the `processLocalVariableDecl` since it wasn't performed in
+//        // `processBinaryOperatorExpr` since we told it not to
+//        if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
+//            processExpr(binaryOperatorExpr->rightValue);
+//
+//            processLocalVariableDeclExpr(llvm::dyn_cast<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue), true);
+//
+//            binaryOperatorExpr->resultType = binaryOperatorExpr->leftValue->resultType->deepCopy();
+//
+//            // We don't do further processing
+//            return;
+//        }
+//    } else {
+//        processExpr(binaryOperatorExpr->leftValue);
+//    }
+//
+//    if (llvm::isa<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue)) {
+//        // TODO: Support the other type suffixes
+//        if (binaryOperatorExpr->operatorName() == "*") {
+//            if (!llvm::isa<IdentifierExpr>(binaryOperatorExpr->rightValue)) {
+//                printError("expected local variable name after pointer type!",
+//                           binaryOperatorExpr->rightValue->startPosition(),
+//                           binaryOperatorExpr->rightValue->endPosition());
+//                return;
+//            }
+//
+//            auto localVarTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue);
+//            auto varNameExpr = llvm::dyn_cast<IdentifierExpr>(binaryOperatorExpr->rightValue);
+//
+//            if (varNameExpr->hasTemplateArguments()) {
+//                printError("local variable name cannot have template arguments!",
+//                           varNameExpr->startPosition(),
+//                           varNameExpr->endPosition());
+//                return;
+//            }
+//
+//            binaryOperatorExpr->leftValue = nullptr;
+//
+//            std::string varName = varNameExpr->name();
+//
+//            localVarTypeRef->resolvedType = new PointerType(localVarTypeRef->startPosition(),
+//                                                            localVarTypeRef->endPosition(),
+//                                                            TypeQualifier::None,
+//                                                            localVarTypeRef->resolvedType);
+//
+//            auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(),
+//                                                              binaryOperatorExpr->endPosition(), localVarTypeRef,
+//                                                              varName);
+//
+//            // TODO: Process the local variable in a nested
+//            // We only process the local variable here if it is not a part of a nested binary operator
+//            // This is so we can support handling initial value handling within the `processLocalVariableDeclExpr`
+//            // function.
+//            if (!isNestedBinaryOperator) {
+//                processLocalVariableDeclExpr(localVarDeclExpr, false);
+//            }
+//
+//            // Delete the binary operator expression (this will delete the left and right expressions)
+//            delete binaryOperatorExpr;
+//            expr = localVarDeclExpr;
+//
+//            return;
+//        } else if (binaryOperatorExpr->operatorName() == "&") {
+//            if (!llvm::isa<IdentifierExpr>(binaryOperatorExpr->rightValue)) {
+//                printError("expected local variable name after reference type!",
+//                           binaryOperatorExpr->rightValue->startPosition(),
+//                           binaryOperatorExpr->rightValue->endPosition());
+//                return;
+//            }
+//
+//            auto localVarTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(binaryOperatorExpr->leftValue);
+//            auto varNameExpr = llvm::dyn_cast<IdentifierExpr>(binaryOperatorExpr->rightValue);
+//
+//            if (varNameExpr->hasTemplateArguments()) {
+//                printError("local variable name cannot have template arguments!",
+//                           varNameExpr->startPosition(),
+//                           varNameExpr->endPosition());
+//                return;
+//            }
+//
+//            binaryOperatorExpr->leftValue = nullptr;
+//
+//            std::string varName = varNameExpr->name();
+//
+//            localVarTypeRef->resolvedType = new ReferenceType(localVarTypeRef->startPosition(),
+//                                                            localVarTypeRef->endPosition(),
+//                                                            TypeQualifier::None,
+//                                                            localVarTypeRef->resolvedType);
+//
+//            auto localVarDeclExpr = new LocalVariableDeclExpr(binaryOperatorExpr->startPosition(),
+//                                                              binaryOperatorExpr->endPosition(), localVarTypeRef,
+//                                                              varName);
+//
+//            // TODO: Process the local variable in a nested
+//            // We only process the local variable here if it is not a part of a nested binary operator
+//            // This is so we can support handling initial value handling within the `processLocalVariableDeclExpr`
+//            // function.
+//            if (!isNestedBinaryOperator) {
+//                processLocalVariableDeclExpr(localVarDeclExpr, false);
+//            }
+//
+//            // Delete the binary operator expression (this will delete the left and right expressions)
+//            delete binaryOperatorExpr;
+//
+//            expr = localVarDeclExpr;
+//
+//            return;
+//        } else {
+//            printError("unsupported binary operator expression with a type as an lvalue!",
+//                       binaryOperatorExpr->startPosition(),
+//                       binaryOperatorExpr->endPosition());
+//            return;
+//        }
+//    }
+//
+//    processExpr(binaryOperatorExpr->rightValue);
+//
+//    if (binaryOperatorExpr->isBuiltInAssignmentOperator()) {
+//        Type* leftType = binaryOperatorExpr->leftValue->resultType;
+//        Type* rightType = binaryOperatorExpr->rightValue->resultType;
+//
+//        if (getTypeIsReference(leftType)) {
+//            // If the left type is a reference and the left value is a local variable declaration then we set the left variable to the reference of what is on the right...
+//            // If the left value ISN'T a local variable then we deref the left value and set it equal to the right value (with the right value being converted to an rvalue)
+//            if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
+//                // Right value must be either lvalue or reference
+//                if (!(rightType->isLValue() || getTypeIsReference(rightType))) {
+//                    printError("initial value for reference variable MUST be an lvalue!",
+//                               binaryOperatorExpr->rightValue->startPosition(),
+//                               binaryOperatorExpr->rightValue->endPosition());
+//                    return;
+//                }
+//
+//                // If the right type isn't already a reference then make it one...
+//                if (!getTypeIsReference(rightType)) {
+//                    binaryOperatorExpr->rightValue = new PrefixOperatorExpr(
+//                            binaryOperatorExpr->rightValue->startPosition(),
+//                            binaryOperatorExpr->rightValue->endPosition(),
+//                            ".ref", binaryOperatorExpr->rightValue);
+//                    processExpr(binaryOperatorExpr->rightValue);
+//                    rightType = binaryOperatorExpr->rightValue->resultType;
+//                }
+//            } else {
+//                // This will dereference the left value
+//                dereferenceReferences(binaryOperatorExpr->leftValue);
+//                leftType = binaryOperatorExpr->leftValue->resultType;
+//
+//                // The right value here MUST be an rvalue...
+//                convertLValueToRValue(binaryOperatorExpr->rightValue);
+//                rightType = binaryOperatorExpr->rightValue->resultType;
+//            }
+//        } else {
+//            // If the left value isn't a reference then the right value has to be an rvalue...
+//            convertLValueToRValue(binaryOperatorExpr->rightValue);
+//            rightType = binaryOperatorExpr->rightValue->resultType;
+//        }
+//
+//        if (!TypeComparer::getTypesAreSame(leftType, rightType, true)) {
+//            binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
+//                                                                  binaryOperatorExpr->rightValue->endPosition(),
+//                                                                  leftType->deepCopy(),
+//                                                                  binaryOperatorExpr->rightValue);
+//        }
+//
+//        binaryOperatorExpr->resultType = leftType->deepCopy();
+//
+//        if (binaryOperatorExpr->operatorName() != "=") {
+//            if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
+//                printError("operator '" + binaryOperatorExpr->operatorName() + "' not supported in variable declaration!",
+//                           binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+//                return;
+//            }
+//
+//            std::string rightOperatorName;
+//
+//            if (binaryOperatorExpr->operatorName() == ">>=") {
+//                rightOperatorName = ">>";
+//            } else if (binaryOperatorExpr->operatorName() == "<<=") {
+//                rightOperatorName = "<<";
+//            } else if (binaryOperatorExpr->operatorName() == "+=") {
+//                rightOperatorName = "+";
+//            } else if (binaryOperatorExpr->operatorName() == "-=") {
+//                rightOperatorName = "-";
+//            } else if (binaryOperatorExpr->operatorName() == "*=") {
+//                rightOperatorName = "*";
+//            } else if (binaryOperatorExpr->operatorName() == "/=") {
+//                rightOperatorName = "/";
+//            } else if (binaryOperatorExpr->operatorName() == "%=") {
+//                rightOperatorName = "%";
+//            } else if (binaryOperatorExpr->operatorName() == "&=") {
+//                rightOperatorName = "&";
+//            } else if (binaryOperatorExpr->operatorName() == "|=") {
+//                rightOperatorName = "|";
+//            } else if (binaryOperatorExpr->operatorName() == "^=") {
+//                rightOperatorName = "^";
+//            } else {
+//                printError(
+//                        "[INTERNAL] unknown built in assignment operator '" + binaryOperatorExpr->operatorName() + "'!",
+//                        binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+//                return;
+//            }
+//
+//            Expr* leftValue = binaryOperatorExpr->leftValue;
+//            convertLValueToRValue(leftValue);
+//            // We set a new right value with an `LValueToRValueExpr` that doesn't own the pointer. Making it so the left L2R expression doesn't delete the pointer since the binary operator owns it.
+//            auto newRightValue = new BinaryOperatorExpr(binaryOperatorExpr->startPosition(),
+//                                                        binaryOperatorExpr->endPosition(),
+//                                                        rightOperatorName,
+//                                                        leftValue,
+//                                                        binaryOperatorExpr->rightValue);
+//
+//            newRightValue->resultType = leftType->deepCopy();
+//
+//            // Set the new right value and change the operator name to '='
+//            binaryOperatorExpr->setOperatorName("=");
+//            binaryOperatorExpr->rightValue = newRightValue;
+//        } else {
+//            // At this point the operator is an "="
+//            if (currentFunctionIsConstructor &&
+//                    llvm::isa<RefStructMemberVariableExpr>(binaryOperatorExpr->leftValue)) {
+//                // If the left value is a struct member variable then we have to set `constructorAssignedMember` when
+//                // we're in a constructor
+//                auto refStructMemberVariable = llvm::dyn_cast<RefStructMemberVariableExpr>(binaryOperatorExpr->leftValue);
+//
+//                if (llvm::isa<StructType>(refStructMemberVariable->refVariable->type)) {
+//                    // We only do this when it is a struct type...
+//                    if (refStructMemberVariable->structType->decl() == currentStruct) {
+//                        // We only check if the struct is the same type as our current type (we also don't set
+//                        // `constructorAssignedMember` if it is a base member we're setting)
+//
+//                        if (std::find(constructorAssignedMember.begin(), constructorAssignedMember.end(),
+//                                      refStructMemberVariable->refVariable) == constructorAssignedMember.end()) {
+//                            // If the variable being set isn't in `constructorAssignedMember` then we have to add it
+//                            constructorAssignedMember.push_back(refStructMemberVariable->refVariable);
+//                            // TODO: We need to convert a move constructor here WITHOUT destructing the member variable
+//                            //       (because the member variable is garbage right now, this will be the first construction)
+//                            //       We might want a special `assign` constructor for only this scenario? Or how should we
+//                            //       perform this?
+//                        }
+//                    }
+//                }
+//            }
+//        }
+//
+//        return;
+//    } else {
+//        convertLValueToRValue(binaryOperatorExpr->leftValue);
+//        convertLValueToRValue(binaryOperatorExpr->rightValue);
+//
+//        Type* leftType = binaryOperatorExpr->leftValue->resultType;
+//        Type* rightType = binaryOperatorExpr->rightValue->resultType;
+//
+//        if (llvm::isa<BuiltInType>(leftType) && llvm::isa<BuiltInType>(rightType)) {
+//            auto leftBuiltInType = llvm::dyn_cast<BuiltInType>(leftType);
+//            auto rightBuiltInType = llvm::dyn_cast<BuiltInType>(rightType);
+//
+//            bool leftIsSigned = leftBuiltInType->isSigned();
+//            bool rightIsSigned = rightBuiltInType->isSigned();
+//            bool leftIsFloating = leftBuiltInType->isFloating();
+//            bool rightIsFloating = rightBuiltInType->isFloating();
+//
+//            // If one side is signed and the other isn't then we cast to the signed side.
+//            if (leftIsSigned) {
+//                if (!rightIsSigned) {
+//                    binaryOperatorExpr->leftValue = new ImplicitCastExpr(binaryOperatorExpr->leftValue->startPosition(),
+//                                                                         binaryOperatorExpr->leftValue->endPosition(),
+//                                                                         rightType->deepCopy(),
+//                                                                         binaryOperatorExpr->leftValue);
+//                    binaryOperatorExpr->resultType = rightType->deepCopy();
+//                    return;
+//                }
+//            } else { // left is not signed...
+//                if (rightIsSigned) {
+//                    binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
+//                                                                          binaryOperatorExpr->rightValue->endPosition(),
+//                                                                          leftType->deepCopy(),
+//                                                                          binaryOperatorExpr->rightValue);
+//                    binaryOperatorExpr->resultType = leftType->deepCopy();
+//                    return;
+//                }
+//            }
+//
+//            // If one side is floating and the other isn't then we cast to the floating side.
+//            if (leftIsFloating) {
+//                if (!rightIsFloating) {
+//                    binaryOperatorExpr->leftValue = new ImplicitCastExpr(binaryOperatorExpr->leftValue->startPosition(),
+//                                                                         binaryOperatorExpr->leftValue->endPosition(),
+//                                                                         rightType->deepCopy(),
+//                                                                         binaryOperatorExpr->leftValue);
+//                    binaryOperatorExpr->resultType = rightType->deepCopy();
+//                    return;
+//                }
+//            } else { // left is not signed...
+//                if (rightIsFloating) {
+//                    binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
+//                                                                          binaryOperatorExpr->rightValue->endPosition(),
+//                                                                          leftType->deepCopy(),
+//                                                                          binaryOperatorExpr->rightValue);
+//                    binaryOperatorExpr->resultType = leftType->deepCopy();
+//                    return;
+//                }
+//            }
+//
+//            // If one side is bigger than the other then we casting to the bigger side.
+//            if (leftBuiltInType->size() > rightBuiltInType->size()) {
+//                binaryOperatorExpr->rightValue = new ImplicitCastExpr(binaryOperatorExpr->rightValue->startPosition(),
+//                                                                      binaryOperatorExpr->rightValue->endPosition(),
+//                                                                      leftType->deepCopy(),
+//                                                                      binaryOperatorExpr->rightValue);
+//                binaryOperatorExpr->resultType = leftType->deepCopy();
+//                return;
+//            } else if (leftBuiltInType->size() < rightBuiltInType->size()) {
+//                binaryOperatorExpr->leftValue = new ImplicitCastExpr(binaryOperatorExpr->leftValue->startPosition(),
+//                                                                     binaryOperatorExpr->leftValue->endPosition(),
+//                                                                     rightType->deepCopy(),
+//                                                                     binaryOperatorExpr->leftValue);
+//                binaryOperatorExpr->resultType = rightType->deepCopy();
+//                return;
+//            }
+//
+//            // If we reach this point then both are exactly the same type in everything but name. We do nothing if there isn't a custom implicit cast operator for each type name
+//        }
+//    }
+//
+//    binaryOperatorExpr->resultType = binaryOperatorExpr->leftValue->resultType->deepCopy();
+//}
 
 void DeclResolver::processCharacterLiteralExpr(CharacterLiteralExpr *characterLiteralExpr) {
     // TODO: Type suffix support
     characterLiteralExpr->resultType = new BuiltInType({}, {}, TypeQualifier::None, "char");
 }
 
-void DeclResolver::processExplicitCastExpr(ExplicitCastExpr *explicitCastExpr) {
+void DeclResolver::processExplicitCastExpr(Expr*& expr) {
+    auto explicitCastExpr = llvm::dyn_cast<ExplicitCastExpr>(expr);
+
     // Convert any template type references to the supplied type
     applyTemplateTypeArguments(explicitCastExpr->castType);
 
-    explicitCastExpr->resultType = explicitCastExpr->castType->deepCopy();
+    processExpr(explicitCastExpr->castee);
+
+    Type* castType = explicitCastExpr->castType;
+    Expr* castee = explicitCastExpr->castee;
+
+    // We steal these pointers
+    explicitCastExpr->castType = nullptr;
+    explicitCastExpr->castee = nullptr;
+    delete explicitCastExpr;
+
+    expr = applyCast(castee->resultType, castType, castee, CastOperatorType::Explicit);
+
+    // This is copied in `applyCast`, we delete it since it is no longer in use
+    delete castType;
 }
 
 void DeclResolver::processFloatLiteralExpr(FloatLiteralExpr *floatLiteralExpr) {
@@ -1398,7 +1825,9 @@ void DeclResolver::processFloatLiteralExpr(FloatLiteralExpr *floatLiteralExpr) {
     floatLiteralExpr->resultType = new BuiltInType({}, {}, TypeQualifier::None, "float");
 }
 
-void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
+void DeclResolver::processFunctionCallExpr(Expr*& expr) {
+    auto functionCallExpr = llvm::dyn_cast<FunctionCallExpr>(expr);
+
     if (functionCallExpr->hasArguments()) {
         // TODO: Support overloading the operator ()
         for (Expr*& arg : functionCallExpr->arguments) {
@@ -1411,61 +1840,248 @@ void DeclResolver::processFunctionCallExpr(FunctionCallExpr *functionCallExpr) {
         functionCallArgs = &functionCallExpr->arguments;
     }
 
-    exprIsFunctionCall = true;
-    // We process the function reference expression to HOPEFULLY have `functionCallExpr->resultType` be a `FunctionPointerType` if it isn't then we error
-    processExpr(functionCallExpr->functionReference);
-    exprIsFunctionCall = false;
+    // If `functionCallExpr->functionReference` is a type reference then the function call is actually a constructor call
+    // TODO: Should we move some of this to `TypeResolver`?
+    if (llvm::isa<ResolvedTypeRefExpr>(functionCallExpr->functionReference)) {
+        auto resolvedTypeRef = llvm::dyn_cast<ResolvedTypeRefExpr>(functionCallExpr->functionReference);
 
-    if (llvm::isa<TempNamespaceRefExpr>(functionCallExpr->functionReference) ||
-        functionCallExpr->functionReference->resultType == nullptr) {
-        // This will trigger an error in `CodeVerifier`, this most likely means the function that was called is named the same as a namespace
-        functionCallExpr->resultType = new BuiltInType({}, {}, TypeQualifier::None, "int32");
-        functionCallArgs = nullptr;
-        return;
-    }
+        // TODO: We need to allow constructing ANY type (except traits, abstracts, etc.) with a single argument
+        //       e.g. `int i = int(12);`, `EnumType et = EnumType(enumVar)`
+        if (!llvm::isa<StructType>(resolvedTypeRef->resolvedType)) {
+            printError("type `" + resolvedTypeRef->resolvedType->getString() +
+                       "` does not have any constructors!",
+                       functionCallExpr->functionReference->startPosition(),
+                       functionCallExpr->functionReference->endPosition());
+        }
 
-    // TODO: Support `ConstType`, `MutType`, and `ImmutType` since they can all contain `FunctionPointerType`
-    if (llvm::isa<FunctionPointerType>(functionCallExpr->functionReference->resultType)) {
-        auto functionPointerType = llvm::dyn_cast<FunctionPointerType>(functionCallExpr->functionReference->resultType);
+        auto structType = llvm::dyn_cast<StructType>(resolvedTypeRef->resolvedType);
+        auto structDecl = structType->decl();
 
-        for (std::size_t i = 0; i < functionCallExpr->arguments.size(); ++i) {
-            if (!getTypeIsReference(functionPointerType->paramTypes[i])) {
-                convertLValueToRValue(functionCallExpr->arguments[i]);
+        ConstructorDecl* foundConstructor = nullptr;
+        // `isExactMatch` is used to check for ambiguity
+        bool isExactMatch = false;
+        bool isAmbiguous = false;
+
+        if (!functionCallExpr->hasArguments()) {
+            // If there aren't any arguments we grab the public, default constructor
+            for (ConstructorDecl* constructorDecl : structDecl->constructors) {
+                // Skip any constructors not visible to us
+                if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
+                                                              constructorDecl)) {
+                    continue;
+                }
+
+                // TODO: We should account for constructors that have parameters but they all have defaults...
+                if (!constructorDecl->hasParameters()) {
+                    foundConstructor = constructorDecl;
+                    isExactMatch = true;
+                    break;
+                }
             }
+        } else {
+            for (ConstructorDecl *constructorDecl : structDecl->constructors) {
+                // Skip any constructors not visible to us
+                if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
+                                                              constructorDecl)) {
+                    continue;
+                }
 
-            Type* checkParamType = functionPointerType->paramTypes[i];
-            Type* checkArgType = functionCallExpr->arguments[i]->resultType;
-
-            if (llvm::isa<ReferenceType>(checkParamType)) checkParamType = llvm::dyn_cast<ReferenceType>(checkParamType)->referenceToType;
-            if (llvm::isa<ReferenceType>(checkArgType)) checkArgType = llvm::dyn_cast<ReferenceType>(checkArgType)->referenceToType;
-
-            if (!TypeComparer::getTypesAreSame(checkParamType, checkArgType)) {
-                // We will handle this in the verifier.
-                auto implicitCastExpr = new ImplicitCastExpr(functionCallExpr->arguments[i]->startPosition(),
-                                                             functionCallExpr->arguments[i]->endPosition(),
-                                                             functionPointerType->paramTypes[i]->deepCopy(),
-                                                             functionCallExpr->arguments[i]);
-
-                processImplicitCastExpr(implicitCastExpr);
-
-                functionCallExpr->arguments[i] = implicitCastExpr;
+                if (!checkConstructorOrFunctionMatchesCall(foundConstructor, constructorDecl,
+                                                           &functionCallExpr->arguments,
+                                                           &isExactMatch, &isAmbiguous)) {
+                    printError("constructor call is ambiguous!",
+                               functionCallExpr->startPosition(), functionCallExpr->endPosition());
+                }
             }
         }
 
-        // We set the result type of this expression to the result type of the function being called.
-        functionCallExpr->resultType = functionPointerType->resultType->deepCopy();
-        // This makes references technically rvalue references internally...
-        functionCallExpr->resultType->setIsLValue(false);
+        if (foundConstructor) {
+            if (isAmbiguous) {
+                printError("constructor call is ambiguous!",
+                           functionCallExpr->startPosition(), functionCallExpr->endPosition());
+            }
+
+            if (!isExactMatch) {
+                // TODO: Implicitly cast and extract default values from the constructor parameter list
+            }
+
+            currentFileAst->addImportExtern(foundConstructor);
+
+            // Since we found a found a constructor we have to convert any lvalues to rvalues and
+            // dereference references where it makes sense...
+            for (std::size_t i = 0; i < foundConstructor->parameters.size(); ++i) {
+                if (!getTypeIsReference(foundConstructor->parameters[i]->type)) {
+                    dereferenceReferences(functionCallExpr->arguments[i]);
+                    convertLValueToRValue(functionCallExpr->arguments[i]);
+                }
+            }
+
+            // Replace the function call with the constructor call
+            auto newResult = new ConstructTemporaryValueExpr(expr->startPosition(), expr->endPosition(),
+                                                             foundConstructor, std::move(functionCallExpr->arguments));
+            newResult->resultType = structType->deepCopy();
+            newResult->resultType->setIsLValue(true);
+            delete functionCallExpr;
+            expr = newResult;
+        } else {
+            printError("`" + structDecl->name() + "` "
+                       "does not have a constructor that matches the provided parameters!",
+                       functionCallExpr->startPosition(), functionCallExpr->endPosition());
+        }
     } else {
-        printError("expression is not a valid function reference!",
-                   functionCallExpr->functionReference->startPosition(),
-                   functionCallExpr->functionReference->endPosition());
+        // If the `functionCallExpr` isn't a type then we try to resolve what it is
+        exprIsFunctionCall = true;
+        // We process the function reference expression to HOPEFULLY have `functionCallExpr->resultType` be a `FunctionPointerType` if it isn't then we error
+        processExpr(functionCallExpr->functionReference);
+        exprIsFunctionCall = false;
+
+        if (llvm::isa<TempNamespaceRefExpr>(functionCallExpr->functionReference) ||
+            functionCallExpr->functionReference->resultType == nullptr) {
+            // This will trigger an error in `CodeVerifier`, this most likely means the function that was called is named the same as a namespace
+            functionCallExpr->resultType = new BuiltInType({}, {}, TypeQualifier::None, "int32");
+            functionCallArgs = nullptr;
+            return;
+        }
+
+        auto checkType = functionCallExpr->functionReference->resultType;
+
+        // TODO: Support `ConstType`, `MutType`, and `ImmutType` since they can all contain `FunctionPointerType`
+        if (llvm::isa<FunctionPointerType>(checkType)) {
+            auto functionPointerType = llvm::dyn_cast<FunctionPointerType>(
+                    functionCallExpr->functionReference->resultType);
+
+            for (std::size_t i = 0; i < functionCallExpr->arguments.size(); ++i) {
+                Type *checkParamType = functionPointerType->paramTypes[i];
+                Type *checkArgType = functionCallExpr->arguments[i]->resultType;
+
+                if (llvm::isa<ReferenceType>(checkParamType))
+                    checkParamType = llvm::dyn_cast<ReferenceType>(checkParamType)->referenceToType;
+                if (llvm::isa<ReferenceType>(checkArgType))
+                    checkArgType = llvm::dyn_cast<ReferenceType>(checkArgType)->referenceToType;
+
+                if (!TypeComparer::getTypesAreSame(checkParamType, checkArgType)) {
+                    // We will handle this in the verifier.
+                    functionCallExpr->arguments[i] = applyCast(functionCallExpr->arguments[i]->resultType,
+                                                               functionPointerType->paramTypes[i],
+                                                               functionCallExpr->arguments[i],
+                                                               CastOperatorType::Implicit);
+                }
+
+                if (!getTypeIsReference(functionPointerType->paramTypes[i])) {
+                    convertLValueToRValue(functionCallExpr->arguments[i]);
+                }
+            }
+
+            // We set the result type of this expression to the result type of the function being called.
+            functionCallExpr->resultType = functionPointerType->resultType->deepCopy();
+            // Function results are put onto the stack to make them referencable. Because of this we have to mark them as
+            // an `lvalue`
+            // TODO: We might want to make a `readonly` type qualifier for function results.
+            //       They ARE NOT settable but aren't strict-const, they're implicitly mutable.
+            functionCallExpr->resultType->setIsLValue(true);
+        } else if (llvm::isa<StructType>(checkType)) {
+            auto structType = llvm::dyn_cast<StructType>(checkType);
+            auto structDecl = structType->decl();
+
+            CallOperatorDecl* foundCallOperator = nullptr;
+            // `isExactMatch` is used to check for ambiguity
+            bool isExactMatch = false;
+            bool isAmbiguous = false;
+
+            for (Decl* decl : structDecl->members) {
+                // Skip any decls not visible to us
+                if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
+                                                              decl)) {
+                    continue;
+                }
+
+                if (llvm::isa<CallOperatorDecl>(decl)) {
+                    auto checkCallOperatorDecl = llvm::dyn_cast<CallOperatorDecl>(decl);
+
+                    if (!checkConstructorOrFunctionMatchesCall(foundCallOperator, checkCallOperatorDecl,
+                                                               &functionCallExpr->arguments,
+                                                               &isExactMatch, &isAmbiguous)) {
+                        printError("struct call operator use is ambiguous!",
+                                   functionCallExpr->startPosition(), functionCallExpr->endPosition());
+                    }
+                }
+            }
+
+            if (foundCallOperator == nullptr) {
+                for (Decl* decl : structDecl->inheritedMembers) {
+                    // Skip any decls not visible to us
+                    if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
+                                                                  decl)) {
+                        continue;
+                    }
+
+                    if (llvm::isa<CallOperatorDecl>(decl)) {
+                        auto checkCallOperatorDecl = llvm::dyn_cast<CallOperatorDecl>(decl);
+
+                        if (!checkConstructorOrFunctionMatchesCall(foundCallOperator, checkCallOperatorDecl,
+                                                                   &functionCallExpr->arguments,
+                                                                   &isExactMatch, &isAmbiguous)) {
+                            printError("struct call operator use is ambiguous!",
+                                       functionCallExpr->startPosition(), functionCallExpr->endPosition());
+                        }
+                    }
+                }
+            }
+
+            if (foundCallOperator != nullptr) {
+                if (isAmbiguous) {
+                    printError("struct call operator use is ambiguous!",
+                               functionCallExpr->startPosition(), functionCallExpr->endPosition());
+                }
+
+                if (!isExactMatch) {
+                    // TODO: Implicitly cast and extract default values from the constructor parameter list
+                }
+
+                currentFileAst->addImportExtern(foundCallOperator);
+
+                auto newExpr = new CustomCallOperatorCallExpr(expr->startPosition(), expr->endPosition(),
+                                                              structType->doVTableCalls() && foundCallOperator->isVirtual(),
+                                                              foundCallOperator,
+                                                              functionCallExpr->functionReference,
+                                                              std::move(functionCallExpr->arguments));
+
+                newExpr->resultType = foundCallOperator->resultType->deepCopy();
+                newExpr->resultType->setIsLValue(true);
+
+                // We steal this pointer
+                functionCallExpr->functionReference = nullptr;
+
+                // Replace the function call with our custom call operator call
+                delete functionCallExpr;
+                expr = newExpr;
+
+                for (std::size_t i = 0; i < foundCallOperator->parameters.size(); ++i) {
+                    if (!getTypeIsReference(foundCallOperator->parameters[i]->type)) {
+                        dereferenceReferences(newExpr->arguments[i]);
+                        convertLValueToRValue(newExpr->arguments[i]);
+                    }
+                }
+            } else {
+                printError("struct `" + structDecl->name() + "` does not have a call operator with the provided parameter types!",
+                           functionCallExpr->startPosition(), functionCallExpr->endPosition());
+            }
+        } else {
+            printError("expression is not a valid function reference!",
+                       functionCallExpr->functionReference->startPosition(),
+                       functionCallExpr->functionReference->endPosition());
+        }
     }
 
     functionCallArgs = nullptr;
 }
 
 bool DeclResolver::canImplicitCast(const Type* to, const Type* from) {
+    // You CANNOT implicitly cast from const to non-const.
+    if (from->qualifier() == TypeQualifier::Const && (to->qualifier() != TypeQualifier::Const)) {
+        return false;
+    }
+
     if (llvm::isa<BuiltInType>(to)) {
         if (llvm::isa<BuiltInType>(from)) {
             // If `to` and `from` are both built in types then they CAN be implicitly casted...
@@ -1477,6 +2093,19 @@ bool DeclResolver::canImplicitCast(const Type* to, const Type* from) {
         if (llvm::isa<PointerType>(from)) {
             auto fromPtr = llvm::dyn_cast<PointerType>(from);
             return canImplicitCast(toPtr->pointToType, fromPtr->pointToType);
+        }
+    } else if (llvm::isa<StructType>(to)) {
+        auto toStruct = llvm::dyn_cast<StructType>(to);
+
+        if (llvm::isa<StructType>(from)) {
+            auto fromStruct = llvm::dyn_cast<StructType>(from);
+
+            // TODO: We need to check for overloaded casts
+            if (toStruct->decl() == fromStruct->decl()) {
+                // Obviously if the structs are the same they can be `implicitly casted` which is a no-op for the same
+                // type
+                return true;
+            }
         }
     }
 
@@ -2074,36 +2703,6 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
 
     // TODO: then class/struct template params
 
-    // then current file
-    for (Decl* decl : currentFileAst->topLevelDecls()) {
-        if (decl->name() == identifierExpr->name()) {
-            if (processIdentifierExprForDecl(decl, identifierExpr, hasTemplateArgs,
-                                             foundFunction, isExactMatch, isAmbiguous)) {
-                auto variableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
-                auto globalVariableRef = new RefGlobalVariableExpr(identifierExpr->startPosition(),
-                                                                   identifierExpr->endPosition(),
-                                                                   variableDecl);
-
-                globalVariableRef->resultType = variableDecl->type->deepCopy();
-                // A global variable reference is an lvalue.
-                globalVariableRef->resultType->setIsLValue(true);
-                // NOTE: Global variables cannot be references currently
-                //dereferenceReferences(globalVariableRef);
-//                delete identifierExpr;
-//                expr = globalVariableRef;
-//                return;
-                delete expr;
-                expr = globalVariableRef;
-
-                if (globalVariableRef->globalVariable()->parentNamespace != nullptr) {
-                    currentFileAst->addImportExtern(globalVariableRef->globalVariable());
-                }
-
-                return;
-            }
-        }
-    }
-
     // then current namespace
     if (currentNamespace) {
         for (Decl* decl : currentNamespace->nestedDecls()) {
@@ -2136,6 +2735,35 @@ void DeclResolver::processIdentifierExpr(Expr*& expr) {
         }
     }
 
+    // then current file
+    for (Decl* decl : currentFileAst->topLevelDecls()) {
+        if (decl->name() == identifierExpr->name()) {
+            if (processIdentifierExprForDecl(decl, identifierExpr, hasTemplateArgs,
+                                             foundFunction, isExactMatch, isAmbiguous)) {
+                auto variableDecl = llvm::dyn_cast<GlobalVariableDecl>(decl);
+                auto globalVariableRef = new RefGlobalVariableExpr(identifierExpr->startPosition(),
+                                                                   identifierExpr->endPosition(),
+                                                                   variableDecl);
+
+                globalVariableRef->resultType = variableDecl->type->deepCopy();
+                // A global variable reference is an lvalue.
+                globalVariableRef->resultType->setIsLValue(true);
+                // NOTE: Global variables cannot be references currently
+                //dereferenceReferences(globalVariableRef);
+//                delete identifierExpr;
+//                expr = globalVariableRef;
+//                return;
+                delete expr;
+                expr = globalVariableRef;
+
+                if (globalVariableRef->globalVariable()->parentNamespace != nullptr) {
+                    currentFileAst->addImportExtern(globalVariableRef->globalVariable());
+                }
+
+                return;
+            }
+        }
+    }
 
     // then imports.
     if (currentImports) {
@@ -2219,19 +2847,167 @@ void DeclResolver::processImplicitCastExpr(ImplicitCastExpr *implicitCastExpr) {
     }
 }
 
-void DeclResolver::processIndexerCallExpr(IndexerCallExpr *indexerCallExpr) {
+void DeclResolver::processIndexerCallExpr(Expr*& expr) {
+    auto indexerCallExpr = llvm::dyn_cast<IndexerCallExpr>(expr);
+
     // TODO: Support overloading the indexer operator []
     processExpr(indexerCallExpr->indexerReference);
 
-    for (Expr*& argument : indexerCallExpr->arguments()) {
+    for (Expr*& argument : indexerCallExpr->arguments) {
         processExpr(argument);
     }
-    printError("array indexer calls not yet supported!", indexerCallExpr->startPosition(), indexerCallExpr->endPosition());
+
+    auto refType = indexerCallExpr->indexerReference->resultType;
+
+    if (llvm::isa<StructType>(refType)) {
+        auto structType = llvm::dyn_cast<StructType>(refType);
+        auto structDecl = structType->decl();
+
+        IndexOperatorDecl* foundIndexOperator = nullptr;
+        // `isExactMatch` is used to check for ambiguity
+        bool isExactMatch = false;
+        bool isAmbiguous = false;
+
+        for (Decl* decl : structDecl->members) {
+            // Skip any decls not visible to us
+            if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
+                                                          decl)) {
+                continue;
+            }
+
+            if (llvm::isa<IndexOperatorDecl>(decl)) {
+                auto checkIndexOperator = llvm::dyn_cast<IndexOperatorDecl>(decl);
+
+                if (!checkConstructorOrFunctionMatchesCall(foundIndexOperator, checkIndexOperator,
+                                                           &indexerCallExpr->arguments,
+                                                           &isExactMatch, &isAmbiguous)) {
+                    printError("indexer call is ambiguous!",
+                               indexerCallExpr->startPosition(), indexerCallExpr->endPosition());
+                }
+            }
+        }
+
+        if (foundIndexOperator == nullptr) {
+            for (Decl* decl : structDecl->inheritedMembers) {
+                // Skip any decls not visible to us
+                if (!VisibilityChecker::canAccessStructMember(structType, currentStruct,
+                                                              decl)) {
+                    continue;
+                }
+
+                if (llvm::isa<IndexOperatorDecl>(decl)) {
+                    auto checkIndexOperator = llvm::dyn_cast<IndexOperatorDecl>(decl);
+
+                    if (!checkConstructorOrFunctionMatchesCall(foundIndexOperator, checkIndexOperator,
+                                                               &indexerCallExpr->arguments,
+                                                               &isExactMatch, &isAmbiguous)) {
+                        printError("indexer call is ambiguous!",
+                                   indexerCallExpr->startPosition(), indexerCallExpr->endPosition());
+                    }
+                }
+            }
+        }
+
+        if (foundIndexOperator != nullptr) {
+            if (isAmbiguous) {
+                printError("indexer call is ambiguous!",
+                           indexerCallExpr->startPosition(), indexerCallExpr->endPosition());
+            }
+
+            if (!isExactMatch) {
+                // TODO: Implicitly cast and extract default values from the constructor parameter list
+            }
+
+            currentFileAst->addImportExtern(foundIndexOperator);
+
+            auto newExpr = new CustomIndexOperatorCallExpr(expr->startPosition(), expr->endPosition(),
+                                                           structType->doVTableCalls() && foundIndexOperator->isVirtual(),
+                                                           foundIndexOperator,
+                                                           indexerCallExpr->indexerReference,
+                                                           std::move(indexerCallExpr->arguments));
+
+            newExpr->resultType = foundIndexOperator->resultType->deepCopy();
+            newExpr->resultType->setIsLValue(true);
+
+            // We steal this pointer
+            indexerCallExpr->indexerReference = nullptr;
+
+            // Replace the indexer with our custom index operator call
+            delete indexerCallExpr;
+            expr = newExpr;
+
+            for (std::size_t i = 0; i < foundIndexOperator->parameters.size(); ++i) {
+                if (!getTypeIsReference(foundIndexOperator->parameters[i]->type)) {
+                    dereferenceReferences(newExpr->arguments[i]);
+                    convertLValueToRValue(newExpr->arguments[i]);
+                }
+            }
+
+            return;
+        }
+
+        printError("struct type `" + refType->getString() + "` does not have an indexer operator matching the provided arguments!",
+                   indexerCallExpr->startPosition(), indexerCallExpr->endPosition());
+    } else {
+        printError("type `" + refType->getString() + "` does not have an indexer operator!",
+                   indexerCallExpr->startPosition(), indexerCallExpr->endPosition());
+    }
 }
 
 void DeclResolver::processIntegerLiteralExpr(IntegerLiteralExpr *integerLiteralExpr) {
     // TODO: Type suffix support
     integerLiteralExpr->resultType = (new BuiltInType({}, {}, TypeQualifier::None, "int"));
+}
+
+void DeclResolver::processInfixMacroCallExpr(Expr*& expr) {
+    auto infixMacroCallExpr = llvm::dyn_cast<InfixMacroCallExpr>(expr);
+
+    processExpr(infixMacroCallExpr->leftValue);
+    processExpr(infixMacroCallExpr->rightValue);
+
+    auto leftType = infixMacroCallExpr->leftValue->resultType;
+    auto rightType = infixMacroCallExpr->rightValue->resultType;
+
+    // TODO: Once we support actual macros we'll have to search for them too
+    if (!llvm::isa<StructType>(leftType)) {
+        printError("custom infix operators currently only support structs!",
+                   expr->startPosition(), expr->endPosition());
+    }
+
+    auto structType = llvm::dyn_cast<StructType>(leftType);
+    auto structDecl = structType->decl();
+
+    std::vector<Expr*> operatorArgs {
+            infixMacroCallExpr->rightValue
+    };
+
+    OperatorDecl* foundOperator = findInfixOperatorOrError(structDecl, &operatorArgs,
+                                                           infixMacroCallExpr->macroName(),
+                                                           infixMacroCallExpr->startPosition(),
+                                                           infixMacroCallExpr->endPosition());
+
+    // TODO: We need to check if `rightValue` needs referenced, dereferenced, or implicitly casted...
+    if (foundOperator == nullptr) {
+        printError("infix operator `" + infixMacroCallExpr->macroName() + "` not found in struct `" +
+                   structDecl->name() + "`!",
+                   expr->startPosition(), expr->endPosition());
+        return;
+    }
+
+    auto newResult = new CustomInfixOperatorCallExpr(expr->startPosition(), expr->endPosition(),
+                                                structType->doVTableCalls() && foundOperator->isVirtual(),
+                                                     foundOperator,
+                                                     infixMacroCallExpr->leftValue,
+                                                     infixMacroCallExpr->rightValue);
+
+    newResult->resultType = foundOperator->resultType->deepCopy();
+    newResult->resultType->setIsLValue(true);
+
+    infixMacroCallExpr->leftValue = nullptr;
+    infixMacroCallExpr->rightValue = nullptr;
+    delete infixMacroCallExpr;
+
+    expr = newResult;
 }
 
 void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVariableDeclExpr, bool hasInitialValue) {
@@ -2325,7 +3101,7 @@ void DeclResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVari
 }
 
 void DeclResolver::processLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr) {
-    printError("[INTERNAL] LocalVariableDeclOrPrefixOperatorCallExpr found in declaration resolver!",
+    printError("[INTERNAL] PotentialLocalVariableDecl found in declaration resolver!",
                expr->startPosition(), expr->endPosition());
 }
 
@@ -2486,7 +3262,7 @@ void DeclResolver::processMemberAccessCallExpr(Expr*& expr) {
     } else {
         if (memberAccessCallExpr->isArrowCall()) {
             // Make `objectRef` a dereference then `.`
-            auto prefixOperatorCall = new PrefixOperatorExpr(memberAccessCallExpr->objectRef->startPosition(),
+            Expr* prefixOperatorCall = new PrefixOperatorExpr(memberAccessCallExpr->objectRef->startPosition(),
                                                              memberAccessCallExpr->objectRef->endPosition(),
                                                              "*",
                                                              memberAccessCallExpr->objectRef);
@@ -2590,8 +3366,6 @@ void DeclResolver::processParenExpr(ParenExpr *parenExpr) {
     processExpr(parenExpr->containedExpr);
 
     parenExpr->resultType = parenExpr->containedExpr->resultType->deepCopy();
-
-    convertLValueToRValue(parenExpr->containedExpr);
 }
 
 void DeclResolver::processPostfixOperatorExpr(PostfixOperatorExpr *postfixOperatorExpr) {
@@ -2606,47 +3380,119 @@ void DeclResolver::processPotentialExplicitCastExpr(Expr*& expr) {
                expr->startPosition(), expr->endPosition());
 }
 
-void DeclResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorExpr) {
+void DeclResolver::processPrefixMacroCallExpr(Expr *&expr) {
+    auto prefixMacroCallExpr = llvm::dyn_cast<PrefixMacroCallExpr>(expr);
+
+    processExpr(prefixMacroCallExpr->expr);
+
+    if (!llvm::isa<StructType>(prefixMacroCallExpr->expr->resultType)) {
+        printError("custom prefix operators/macros currently only work on struct types!",
+                   prefixMacroCallExpr->startPosition(), prefixMacroCallExpr->endPosition());
+    }
+
+    auto structType = llvm::dyn_cast<StructType>(prefixMacroCallExpr->expr->resultType);
+    auto structDecl = structType->decl();
+
+    OperatorDecl* foundOperator = findPrefixOperator(structDecl, prefixMacroCallExpr->macroName());
+
+    if (!foundOperator) {
+        printError("prefix operator `" + prefixMacroCallExpr->macroName() + "` was not found for struct `" +
+                   structDecl->name() + "`!",
+                   prefixMacroCallExpr->startPosition(), prefixMacroCallExpr->endPosition());
+        return;
+    }
+
+    auto customPrefixOperatorCall = new CustomPrefixOperatorCallExpr(expr->startPosition(), expr->endPosition(),
+                                                                     structType->doVTableCalls() && foundOperator->isVirtual(),
+                                                                     foundOperator,
+                                                                     prefixMacroCallExpr->expr);
+    customPrefixOperatorCall->resultType = foundOperator->resultType->deepCopy();
+    customPrefixOperatorCall->resultType->setIsLValue(true);
+    // We steal this pointer
+    prefixMacroCallExpr->expr = nullptr;
+    delete prefixMacroCallExpr;
+
+    expr = customPrefixOperatorCall;
+}
+
+void DeclResolver::processPrefixOperatorExpr(Expr*& expr) {
+    auto prefixOperatorExpr = llvm::dyn_cast<PrefixOperatorExpr>(expr);
+
     processExpr(prefixOperatorExpr->expr);
 
     gulc::Type* checkType = prefixOperatorExpr->expr->resultType;
 
-    // TODO: Support operator overloading type resolution
-    // TODO: Support `sizeof`, `alignof`, `offsetof`, and `nameof`
-    if (prefixOperatorExpr->operatorName() == "&") { // Address
-        prefixOperatorExpr->resultType = new PointerType({}, {}, TypeQualifier::None, prefixOperatorExpr->expr->resultType->deepCopy());
-    } else if (prefixOperatorExpr->operatorName() == "*") { // Dereference
-        if (llvm::isa<PointerType>(checkType)) {
-            auto pointerType = llvm::dyn_cast<PointerType>(checkType);
-            prefixOperatorExpr->resultType = pointerType->pointToType->deepCopy();
-            // A dereferenced value is an lvalue
-            prefixOperatorExpr->resultType->setIsLValue(true);
-        } else {
-            printError("cannot dereference non-pointer type `" + prefixOperatorExpr->expr->resultType->getString() + "`!",
+    if (llvm::isa<StructType>(checkType)) {
+        auto structType = llvm::dyn_cast<StructType>(checkType);
+        auto structDecl = structType->decl();
+
+        OperatorDecl* foundOperator = findPrefixOperator(structDecl, prefixOperatorExpr->operatorName());
+
+        if (!foundOperator) {
+            printError("prefix operator `" + prefixOperatorExpr->operatorName() + "` was not found for struct `" +
+                       structDecl->name() + "`!",
                        prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
             return;
         }
-    } else if (prefixOperatorExpr->operatorName() == ".ref") {
-        if (!(llvm::isa<RefLocalVariableExpr>(prefixOperatorExpr->expr) ||
-              llvm::isa<RefParameterExpr>(prefixOperatorExpr->expr))) {
-            printError("cannot create reference to non-variable call expressions!",
-                       prefixOperatorExpr->expr->startPosition(), prefixOperatorExpr->expr->endPosition());
-            return;
-        }
 
-        prefixOperatorExpr->resultType = new ReferenceType({}, {}, TypeQualifier::None, prefixOperatorExpr->expr->resultType->deepCopy());
-    } else if (prefixOperatorExpr->operatorName() == ".deref") {
-        if (llvm::isa<ReferenceType>(checkType)) {
-            auto referenceType = llvm::dyn_cast<ReferenceType>(checkType);
-            prefixOperatorExpr->resultType = referenceType->referenceToType->deepCopy();
-            // A dereferenced value is an lvalue
-            prefixOperatorExpr->resultType->setIsLValue(true);
-        } else {
-            printError("[INTERNAL] expected reference type!", prefixOperatorExpr->expr->startPosition(), prefixOperatorExpr->expr->endPosition());
-            return;
-        }
+        auto customPrefixOperatorCall = new CustomPrefixOperatorCallExpr(expr->startPosition(), expr->endPosition(),
+                                                                         structType->doVTableCalls() && foundOperator->isVirtual(),
+                                                                         foundOperator,
+                                                                         prefixOperatorExpr->expr);
+        customPrefixOperatorCall->resultType = foundOperator->resultType->deepCopy();
+        customPrefixOperatorCall->resultType->setIsLValue(true);
+        // We steal this pointer
+        prefixOperatorExpr->expr = nullptr;
+        delete prefixOperatorExpr;
+
+        expr = customPrefixOperatorCall;
     } else {
-        prefixOperatorExpr->resultType = prefixOperatorExpr->expr->resultType->deepCopy();
+        // TODO: Support operator overloading type resolution
+        // TODO: Support `sizeof`, `alignof`, `offsetof`, and `nameof`
+        if (prefixOperatorExpr->operatorName() == "&") { // Address
+            prefixOperatorExpr->resultType = new PointerType({}, {}, TypeQualifier::None,
+                                                             prefixOperatorExpr->expr->resultType->deepCopy());
+        } else if (prefixOperatorExpr->operatorName() == "*") { // Dereference
+            if (llvm::isa<PointerType>(checkType)) {
+                auto pointerType = llvm::dyn_cast<PointerType>(checkType);
+                prefixOperatorExpr->resultType = pointerType->pointToType->deepCopy();
+                // A dereferenced value is an lvalue
+                prefixOperatorExpr->resultType->setIsLValue(true);
+            } else {
+                printError("cannot dereference non-pointer type `" +
+                           prefixOperatorExpr->expr->resultType->getString() + "`!",
+                           prefixOperatorExpr->startPosition(), prefixOperatorExpr->endPosition());
+                return;
+            }
+        } else if (prefixOperatorExpr->operatorName() == ".ref") {
+            if (!(llvm::isa<RefLocalVariableExpr>(prefixOperatorExpr->expr) ||
+                  llvm::isa<RefParameterExpr>(prefixOperatorExpr->expr))) {
+                printError("cannot create reference to non-variable call expressions!",
+                           prefixOperatorExpr->expr->startPosition(), prefixOperatorExpr->expr->endPosition());
+                return;
+            }
+
+            prefixOperatorExpr->resultType = new ReferenceType({}, {}, TypeQualifier::None,
+                                                               prefixOperatorExpr->expr->resultType->deepCopy());
+        } else if (prefixOperatorExpr->operatorName() == ".deref") {
+            if (llvm::isa<ReferenceType>(checkType)) {
+                auto referenceType = llvm::dyn_cast<ReferenceType>(checkType);
+                prefixOperatorExpr->resultType = referenceType->referenceToType->deepCopy();
+                // A dereferenced value is an lvalue
+                prefixOperatorExpr->resultType->setIsLValue(true);
+            } else {
+                printError("[INTERNAL] expected reference type!",
+                           prefixOperatorExpr->expr->startPosition(), prefixOperatorExpr->expr->endPosition());
+                return;
+            }
+        } else if (prefixOperatorExpr->operatorName() == "--" || prefixOperatorExpr->operatorName() == "++") {
+            prefixOperatorExpr->resultType = prefixOperatorExpr->expr->resultType->deepCopy();
+        } else {
+            // TODO: Is this correct? I think the only prefix operators that will reach here are `+`, `-`, `!`, and `~`
+            convertLValueToRValue(prefixOperatorExpr->expr);
+
+            prefixOperatorExpr->resultType = prefixOperatorExpr->expr->resultType->deepCopy();
+        }
     }
 }
 
@@ -2679,9 +3525,9 @@ void DeclResolver::dereferenceReferences(Expr*& potentialReference) {
         auto referenceType = llvm::dyn_cast<ReferenceType>(checkType);
 
         if (referenceType->isLValue()) {
-            auto newPotentialReference = new PrefixOperatorExpr(potentialReference->startPosition(),
-                                                                potentialReference->endPosition(),
-                                                                ".deref", potentialReference);
+            Expr* newPotentialReference = new PrefixOperatorExpr(potentialReference->startPosition(),
+                                                                 potentialReference->endPosition(),
+                                                                 ".deref", potentialReference);
             processPrefixOperatorExpr(newPotentialReference);
             //newPotentialReference->resultType->setIsLValue(potentialReference->resultType->isLValue());
             potentialReference = newPotentialReference;
@@ -2748,4 +3594,126 @@ unsigned int DeclResolver::applyTemplateTypeArguments(Type*& type) {
     }
     // TODO: Whenever we support template types we need to also handle their argument types here...
     return 0;
+}
+
+Expr *DeclResolver::applyCast(Type *from, Type *to, Expr *castee, CastOperatorType castType) {
+    if (llvm::isa<StructType>(from)) {
+        auto structType = llvm::dyn_cast<StructType>(from);
+        auto structDecl = structType->decl();
+
+        for (Decl* checkDecl : structDecl->members) {
+            if (llvm::isa<CastOperatorDecl>(checkDecl)) {
+                auto checkCastOperator = llvm::dyn_cast<CastOperatorDecl>(checkDecl);
+
+                // If `castType` is implicit then we can ONLY check implicit casts
+                // If `castType` is explicit we also allow using `implicit` casts
+                if (castType == CastOperatorType::Implicit) {
+                    if (checkCastOperator->castOperatorType() != CastOperatorType::Implicit) {
+                        continue;
+                    }
+                }
+
+                // TODO: This might not work if `to` is const while result type isn't.
+                //       casting from non-const to const is valid, so we need to support it.
+                if (TypeComparer::getTypesAreSame(checkCastOperator->resultType, to)) {
+                    auto result = new CustomCastOperatorCallExpr(castee->startPosition(),
+                                                                 castee->endPosition(),
+                                                                 structType->doVTableCalls() && checkCastOperator->isVirtual(),
+                                                                 checkCastOperator,
+                                                                 castee);
+                    result->resultType = to->deepCopy();
+                    // Returned values are always lvalues
+                    result->resultType->setIsLValue(true);
+
+                    return result;
+                }
+            }
+        }
+
+        // Check the inherited members
+        for (Decl* checkDecl : structDecl->inheritedMembers) {
+            if (llvm::isa<CastOperatorDecl>(checkDecl)) {
+                auto checkCastOperator = llvm::dyn_cast<CastOperatorDecl>(checkDecl);
+
+                // If `castType` is implicit then we can ONLY check implicit casts
+                // If `castType` is explicit we also allow using `implicit` casts
+                if (castType == CastOperatorType::Implicit) {
+                    if (checkCastOperator->castOperatorType() != CastOperatorType::Implicit) {
+                        continue;
+                    }
+                }
+
+                // TODO: This might not work if `to` is const while result type isn't.
+                //       casting from non-const to const is valid, so we need to support it.
+                if (TypeComparer::getTypesAreSame(checkCastOperator->resultType, to)) {
+                    auto result = new CustomCastOperatorCallExpr(castee->startPosition(),
+                                                                 castee->endPosition(),
+                                                                 structType->doVTableCalls() && checkCastOperator->isVirtual(),
+                                                                 checkCastOperator,
+                                                                 castee);
+                    result->resultType = to->deepCopy();
+                    // Returned values are always lvalues
+                    result->resultType->setIsLValue(true);
+
+                    return result;
+                }
+            }
+        }
+
+        // Check for upcasting
+        if (llvm::isa<StructType>(to)) {
+            auto toStructType = llvm::dyn_cast<StructType>(to);
+            auto toStructDecl = toStructType->decl();
+
+            for (StructDecl* checkBase = structDecl->baseStruct; checkBase != nullptr; checkBase = checkBase->baseStruct) {
+                if (toStructDecl == checkBase) {
+                    Expr* result;
+
+                    if (castType == CastOperatorType::Explicit) {
+                        result = new ExplicitCastExpr(castee->startPosition(),
+                                                      castee->endPosition(),
+                                                      to->deepCopy(),
+                                                      castee);
+                    } else {
+                        result = new ImplicitCastExpr(castee->startPosition(),
+                                                      castee->endPosition(),
+                                                      to->deepCopy(),
+                                                      castee);
+                    }
+
+                    result->resultType = to->deepCopy();
+                    // We retain the `lvalue`-ness of a type when casted.
+                    result->resultType->setIsLValue(from->isLValue());
+
+                    return result;
+                }
+            }
+        }
+
+        printError("struct `" + structDecl->name() + "` does not have an implicit cast operator to type `" +
+                   to->getString() + "`!", castee->startPosition(), castee->endPosition());
+        return nullptr;
+    } else {
+        // If `from` isn't a struct type we let the code verifier validate the implicit cast...
+        // TODO: Once we support extensions we need to check if `from` has an extension casting support
+        Expr* result;
+
+        if (castType == CastOperatorType::Explicit) {
+            result = new ExplicitCastExpr(castee->startPosition(),
+                                          castee->endPosition(),
+                                          to->deepCopy(),
+                                          castee);
+        } else {
+            result = new ImplicitCastExpr(castee->startPosition(),
+                                          castee->endPosition(),
+                                          to->deepCopy(),
+                                          castee);
+        }
+
+        result->resultType = to->deepCopy();
+        // We retain the `lvalue`-ness of a type when casted.
+        result->resultType->setIsLValue(from->isLValue());
+
+        return result;
+    }
 }

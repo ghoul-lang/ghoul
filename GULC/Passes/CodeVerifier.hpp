@@ -51,6 +51,11 @@
 #include <AST/Decls/NamespaceDecl.hpp>
 #include <AST/Decls/TemplateFunctionDecl.hpp>
 #include <AST/Decls/StructDecl.hpp>
+#include <AST/Decls/OperatorDecl.hpp>
+#include <AST/Exprs/AssignmentBinaryOperatorExpr.hpp>
+#include <AST/Decls/CallOperatorDecl.hpp>
+#include <AST/Decls/CastOperatorDecl.hpp>
+#include <AST/Decls/IndexOperatorDecl.hpp>
 
 namespace gulc {
     class CodeVerifier {
@@ -70,6 +75,7 @@ namespace gulc {
         bool checkDeclNameInUse(const std::string& name, Decl* ignoreDecl, bool ignoreFunctions = false);
         bool checkFunctionExists(FunctionDecl* function);
         bool checkParamsAreSame(std::vector<ParameterDecl*>& params1, std::vector<ParameterDecl*>& params2);
+        bool checkOperatorExists(OperatorDecl* operatorDecl);
 
         void printError(const std::string& message, TextPosition startPosition, TextPosition endPosition);
         void printWarning(const std::string& message, TextPosition startPosition, TextPosition endPosition);
@@ -80,10 +86,14 @@ namespace gulc {
         void verifyExpr(Expr*& expr);
 
         // Decls
+        void verifyCallOperatorDecl(CallOperatorDecl* callOperatorDecl);
+        void verifyCastOperatorDecl(CastOperatorDecl* castOperatorDecl);
         void verifyConstructorDecl(ConstructorDecl* constructorDecl);
         void verifyFunctionDecl(FunctionDecl* functionDecl);
         void verifyGlobalVariableDecl(GlobalVariableDecl* globalVariableDecl);
+        void verifyIndexOperatorDecl(IndexOperatorDecl* indexOperatorDecl);
         void verifyNamespaceDecl(NamespaceDecl* namespaceDecl);
+        void verifyOperatorDecl(OperatorDecl* operatorDecl);
         void verifyStructDecl(StructDecl* structDecl);
         void verifyTemplateFunctionDecl(TemplateFunctionDecl* templateFunctionDecl);
 
@@ -105,6 +115,7 @@ namespace gulc {
         void verifyWhileStmt(WhileStmt* whileStmt);
 
         // Exprs
+        void verifyAssignmentBinaryOperatorExpr(AssignmentBinaryOperatorExpr* assignmentBinaryOperatorExpr);
         void verifyBinaryOperatorExpr(Expr*& expr);
         void verifyCharacterLiteralExpr(CharacterLiteralExpr* characterLiteralExpr);
         void verifyExplicitCastExpr(ExplicitCastExpr* explicitCastExpr);

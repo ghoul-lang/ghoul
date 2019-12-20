@@ -32,7 +32,7 @@
 #include <AST/Exprs/ParenExpr.hpp>
 #include <AST/Exprs/FloatLiteralExpr.hpp>
 #include <AST/Exprs/PotentialExplicitCastExpr.hpp>
-#include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
+#include <AST/Exprs/PotentialLocalVariableDeclExpr.hpp>
 #include <AST/Exprs/IndexerCallExpr.hpp>
 #include <AST/Stmts/LabeledStmt.hpp>
 #include <AST/Stmts/IfStmt.hpp>
@@ -94,7 +94,7 @@ namespace gulc {
         static void printParenExpr(const ParenExpr* parenExpr, const std::string& prefix = "");
         static void printFloatLiteralExpr(const FloatLiteralExpr* floatLiteralExpr, const std::string& prefix = "");
         static void printPotentialExplicitCastExpr(const PotentialExplicitCastExpr* potentialExplicitCastExpr, const std::string& prefix = "");
-        static void printLocalVariableDeclOrPrefixOperatorCallExpr(const LocalVariableDeclOrPrefixOperatorCallExpr* localVariableDeclOrPrefixOperatorCallExpr, const std::string& prefix = "");
+        static void printLocalVariableDeclOrPrefixOperatorCallExpr(const PotentialLocalVariableDeclExpr* localVariableDeclOrPrefixOperatorCallExpr, const std::string& prefix = "");
         static void printIndexerCallExpr(const IndexerCallExpr* indexerCallExpr, const std::string& prefix = "");
         static void printCharacterLiteralExpr(const CharacterLiteralExpr* characterLiteralExpr, const std::string& prefix = "");
         static void printStringLiteralExpr(const StringLiteralExpr* stringLiteralExpr, const std::string& prefix = "");

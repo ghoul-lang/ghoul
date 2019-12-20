@@ -52,6 +52,7 @@
 #include <AST/FileAST.hpp>
 #include <AST/Exprs/DestructParameterExpr.hpp>
 #include <AST/Exprs/DestructMemberVariableExpr.hpp>
+#include <AST/Exprs/AssignmentBinaryOperatorExpr.hpp>
 
 namespace gulc {
     /**
@@ -106,6 +107,7 @@ namespace gulc {
         void processTryFinallyStmt(TryFinallyStmt* tryFinallyStmt);
         void processWhileStmt(WhileStmt* whileStmt);
 
+        void processAssignmentBinaryOperatorExpr(Expr *&expr);
         void processBinaryOperatorExpr(Expr*& expr);
         void processCharacterLiteralExpr(CharacterLiteralExpr* characterLiteralExpr);
         void processExplicitCastExpr(ExplicitCastExpr* explicitCastExpr);

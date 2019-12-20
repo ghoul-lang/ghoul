@@ -36,7 +36,12 @@ namespace gulc {
 
     class FunctionDecl : public Decl {
     public:
-        static bool classof(const Decl *decl) { return decl->getDeclKind() == Kind::Function; }
+        static bool classof(const Decl *decl) {
+            Kind kind = decl->getDeclKind();
+
+            return kind == Kind::Function || kind == Kind::Operator || kind == Kind::CastOperator ||
+                   kind == Kind::CallOperator || kind == Kind::IndexOperator;
+        }
 
         FunctionDecl(std::vector<Attr*> attributes, std::string name, std::string sourceFile,
                      TextPosition startPosition, TextPosition endPosition,
@@ -50,7 +55,17 @@ namespace gulc {
                      TextPosition startPosition, TextPosition endPosition,
                      Visibility visibility, FunctionModifiers modifier, Type* resultType,
                      std::vector<ParameterDecl*> parameters, CompoundStmt* body, std::vector<Expr*> templateArguments)
-                : Decl(Kind::Function, std::move(attributes), std::move(name), std::move(sourceFile),
+                : FunctionDecl(Kind::Function, std::move(attributes), std::move(name), std::move(sourceFile),
+                               startPosition, endPosition, visibility, modifier, resultType,
+                               std::move(parameters), body, std::move(templateArguments)) {}
+
+    protected:
+        // Since `OperatorDecl` extends us we allow children to set the decl kind...
+        FunctionDecl(Kind kind, std::vector<Attr*> attributes, std::string name, std::string sourceFile,
+                     TextPosition startPosition, TextPosition endPosition,
+                     Visibility visibility, FunctionModifiers modifier, Type* resultType,
+                     std::vector<ParameterDecl*> parameters, CompoundStmt* body, std::vector<Expr*> templateArguments)
+                : Decl(kind, std::move(attributes), std::move(name), std::move(sourceFile),
                        startPosition, endPosition, visibility),
                   templateArguments(std::move(templateArguments)), resultType(resultType),
                   parameters(std::move(parameters)), _body(body), _isMain(false), _modifier(modifier) {
@@ -58,6 +73,8 @@ namespace gulc {
                 _isMain = true;
             }
         }
+
+    public:
 
         std::vector<Expr*> templateArguments;
         Type* resultType;
@@ -121,7 +138,7 @@ namespace gulc {
             delete _body;
         }
 
-    private:
+    protected:
         CompoundStmt* _body;
         bool _isMain;
         FunctionModifiers _modifier;

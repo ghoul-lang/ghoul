@@ -225,6 +225,10 @@ void gulc::CodeGen::generateImportExtern(const gulc::Decl *decl) {
         case gulc::Decl::Kind::Enum:
             // We don't generate any code for the enum declaration...
             break;
+        case gulc::Decl::Kind::CallOperator:
+        case gulc::Decl::Kind::CastOperator:
+        case gulc::Decl::Kind::IndexOperator:
+        case gulc::Decl::Kind::Operator:
         case gulc::Decl::Kind::Function:
             generateExternFunctionDecl(llvm::dyn_cast<FunctionDecl>(decl));
             break;
@@ -268,26 +272,37 @@ void gulc::CodeGen::generateDecl(const gulc::Decl *decl, bool isInternal) {
 void gulc::CodeGen::generateStmt(const gulc::Stmt *stmt, const std::string& stmtName) {
     switch (stmt->getStmtKind()) {
         case gulc::Stmt::Kind::Break:
-            return generateBreakStmt(llvm::dyn_cast<BreakStmt>(stmt));
+            generateBreakStmt(llvm::dyn_cast<BreakStmt>(stmt));
+            break;
         case gulc::Stmt::Kind::Case:
             printError("`case` not yet supported!", stmt->startPosition(), stmt->endPosition());
             return;
         case gulc::Stmt::Kind::Compound:
-            return generateCompoundStmt(llvm::dyn_cast<CompoundStmt>(stmt));
+            generateCompoundStmt(llvm::dyn_cast<CompoundStmt>(stmt));
+            break;
         case gulc::Stmt::Kind::Continue:
-            return generateContinueStmt(llvm::dyn_cast<ContinueStmt>(stmt));
+            generateContinueStmt(llvm::dyn_cast<ContinueStmt>(stmt));
+            break;
         case gulc::Stmt::Kind::Do:
-            return generateDoStmt(llvm::dyn_cast<DoStmt>(stmt), stmtName);
+            generateDoStmt(llvm::dyn_cast<DoStmt>(stmt), stmtName);
+            break;
         case gulc::Stmt::Kind::For:
-            return generateForStmt(llvm::dyn_cast<ForStmt>(stmt), stmtName);
+            generateForStmt(llvm::dyn_cast<ForStmt>(stmt), stmtName);
+            break;
         case gulc::Stmt::Kind::Goto:
-            return generateGotoStmt(llvm::dyn_cast<GotoStmt>(stmt));
+            generateGotoStmt(llvm::dyn_cast<GotoStmt>(stmt));
+            break;
         case gulc::Stmt::Kind::If:
-            return generateIfStmt(llvm::dyn_cast<IfStmt>(stmt));
+            generateIfStmt(llvm::dyn_cast<IfStmt>(stmt));
+            break;
         case gulc::Stmt::Kind::Labeled:
-            return generateLabeledStmt(llvm::dyn_cast<LabeledStmt>(stmt));
+            generateLabeledStmt(llvm::dyn_cast<LabeledStmt>(stmt));
+            break;
         case gulc::Stmt::Kind::Return:
-            return generateReturnStmt(llvm::dyn_cast<ReturnStmt>(stmt));
+            generateReturnStmt(llvm::dyn_cast<ReturnStmt>(stmt));
+            // NOTE: We return for `ReturnStmt` due to the fact that llvm will seg fault if we clean up temporaries
+            //       AFTER returning.
+            return;
         case gulc::Stmt::Kind::Switch:
             printError("`switch` not yet supported!", stmt->startPosition(), stmt->endPosition());
             return;
@@ -301,9 +316,11 @@ void gulc::CodeGen::generateStmt(const gulc::Stmt *stmt, const std::string& stmt
             printError("`finally` not yet supported!", stmt->startPosition(), stmt->endPosition());
             return;
         case gulc::Stmt::Kind::While:
-            return generateWhileStmt(llvm::dyn_cast<WhileStmt>(stmt), stmtName);
+            generateWhileStmt(llvm::dyn_cast<WhileStmt>(stmt), stmtName);
+            break;
         case gulc::Stmt::Kind::ConstructStructMemberVariable:
-            return generateConstructStructMemberVariableStmt(llvm::dyn_cast<ConstructStructMemberVariableStmt>(stmt));
+            generateConstructStructMemberVariableStmt(llvm::dyn_cast<ConstructStructMemberVariableStmt>(stmt));
+            break;
         case gulc::Stmt::Kind::Expr:
             generateExpr(llvm::dyn_cast<Expr>(stmt));
             break;
@@ -312,10 +329,14 @@ void gulc::CodeGen::generateStmt(const gulc::Stmt *stmt, const std::string& stmt
                        stmt->startPosition(), stmt->endPosition());
             return;
     }
+
+    cleanupTemporaryValues();
 }
 
 llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
     switch (expr->getExprKind()) {
+        case gulc::Expr::Kind::AssignmentBinaryOperator:
+            return generateAssignmentBinaryOperatorExpr(llvm::dyn_cast<AssignmentBinaryOperatorExpr>(expr));
         case gulc::Expr::Kind::BinaryOperator:
             return generateBinaryOperatorExpr(llvm::dyn_cast<BinaryOperatorExpr>(expr));
         case gulc::Expr::Kind::CharacterLiteral:
@@ -388,6 +409,18 @@ llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
             return generateRefBaseExpr(llvm::dyn_cast<RefBaseExpr>(expr));
         case gulc::Expr::Kind::Reconstruct:
             return generateReconstructExpr(llvm::dyn_cast<ReconstructExpr>(expr));
+        case gulc::Expr::Kind::CustomInfixOperatorCall:
+            return generateCustomInfixOperatorCallExpr(llvm::dyn_cast<CustomInfixOperatorCallExpr>(expr));
+        case gulc::Expr::Kind::ConstructTemporaryValue:
+            return generateConstructTemporaryValueExpr(llvm::dyn_cast<ConstructTemporaryValueExpr>(expr));
+        case gulc::Expr::Kind::CustomPrefixOperatorCall:
+            return generateCustomPrefixOperatorCallExpr(llvm::dyn_cast<CustomPrefixOperatorCallExpr>(expr));
+        case gulc::Expr::Kind::CustomCastOperatorCall:
+            return generateCustomCastOperatorCallExpr(llvm::dyn_cast<CustomCastOperatorCallExpr>(expr));
+        case gulc::Expr::Kind::CustomIndexOperatorCall:
+            return generateCustomIndexOperatorCallExpr(llvm::dyn_cast<CustomIndexOperatorCallExpr>(expr));
+        case gulc::Expr::Kind::CustomCallOperatorCall:
+            return generateCustomCallOperatorCallExpr(llvm::dyn_cast<CustomCallOperatorCallExpr>(expr));
         default:
             printError("unexpected expression type in code generator!",
                        expr->startPosition(), expr->endPosition());
@@ -399,6 +432,7 @@ llvm::Value* gulc::CodeGen::generateExpr(const Expr* expr) {
 void gulc::CodeGen::addBlockAndSetInsertionPoint(llvm::BasicBlock* basicBlock) {
     currentFunction->getBasicBlockList().push_back(basicBlock);
     irBuilder->SetInsertPoint(basicBlock);
+
 }
 
 // Externs
@@ -765,21 +799,21 @@ void gulc::CodeGen::generateCompoundStmt(const gulc::CompoundStmt* compoundStmt)
 
 void gulc::CodeGen::generateReturnStmt(const gulc::ReturnStmt *returnStmt) {
     if (returnStmt->hasReturnValue()) {
-        if (returnStmt->preReturnExprs.empty()) {
-            irBuilder->CreateRet(generateExpr(returnStmt->returnValue));
-        } else {
-            llvm::Value* returnValue = generateExpr(returnStmt->returnValue);
+        llvm::Value* returnValue = generateExpr(returnStmt->returnValue);
 
-            for (Expr* preReturnExpr : returnStmt->preReturnExprs) {
-                generateExpr(preReturnExpr);
-            }
-
-            irBuilder->CreateRet(returnValue);
+        for (Expr* preReturnExpr : returnStmt->preReturnExprs) {
+            generateExpr(preReturnExpr);
         }
+
+        cleanupTemporaryValues();
+
+        irBuilder->CreateRet(returnValue);
     } else {
         for (Expr* preReturnExpr : returnStmt->preReturnExprs) {
             generateExpr(preReturnExpr);
         }
+
+        cleanupTemporaryValues();
 
         irBuilder->CreateRetVoid();
     }
@@ -1178,54 +1212,104 @@ llvm::Constant *gulc::CodeGen::generateRefEnumConstant(const gulc::RefEnumConsta
     }
 }
 
-llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperatorExpr *binaryOperatorExpr) {
-    llvm::Value* leftValue = generateExpr(binaryOperatorExpr->leftValue);
-    llvm::Value* rightValue = generateExpr(binaryOperatorExpr->rightValue);
+llvm::Value *gulc::CodeGen::generateAssignmentBinaryOperatorExpr(const gulc::AssignmentBinaryOperatorExpr *assignmentBinaryOperatorExpr) {
+    llvm::Value* leftValue = generateExpr(assignmentBinaryOperatorExpr->leftValue);
+    llvm::Value* rightValue = generateExpr(assignmentBinaryOperatorExpr->rightValue);
 
-    gulc::Type* resultType = binaryOperatorExpr->resultType;
+    // If there is a nested operator we need to calculate the result of that first...
+    if (assignmentBinaryOperatorExpr->hasNestedOperator()) {
+        // TODO: Finish operator overloading
+        if (assignmentBinaryOperatorExpr->nestedOperatorOverload != nullptr) {
+            printError("operator overloading not yet finished!",
+                       assignmentBinaryOperatorExpr->startPosition(), assignmentBinaryOperatorExpr->endPosition());
+        } else {
+            llvm::Value* tempLeftValue = leftValue;
+            llvm::Value* tempRightValue = rightValue;
 
+            gulc::Type* binaryOperationType = assignmentBinaryOperatorExpr->leftValue->resultType;
+
+            // If the left value is an `lvalue` (which it always will be) we convert to rvalue
+            if (assignmentBinaryOperatorExpr->leftValue->resultType->isLValue()) {
+                tempLeftValue = irBuilder->CreateLoad(tempLeftValue);
+            }
+
+            // If the left value is a reference we dereference it
+            if (llvm::isa<ReferenceType>(assignmentBinaryOperatorExpr->leftValue->resultType)) {
+                tempLeftValue = irBuilder->CreateLoad(tempLeftValue);
+
+                // We need to know what the binary operation type is if the left side is a reference.
+                binaryOperationType = llvm::dyn_cast<ReferenceType>(binaryOperationType)->referenceToType;
+            }
+
+            // If the right value is an `lvalue` (which it shouldn't be) we convert to rvalue
+            if (assignmentBinaryOperatorExpr->rightValue->resultType->isLValue()) {
+                tempLeftValue = irBuilder->CreateLoad(tempLeftValue);
+            }
+
+            // If the right value is a reference (which it shouldn't be) we dereference it
+            if (llvm::isa<ReferenceType>(assignmentBinaryOperatorExpr->rightValue->resultType)) {
+                tempLeftValue = irBuilder->CreateLoad(tempLeftValue);
+            }
+
+            rightValue = generateBuiltInBinaryOperation(binaryOperationType,
+                                                        assignmentBinaryOperatorExpr->nestedOperator(),
+                                                        tempLeftValue, tempRightValue,
+                                                        assignmentBinaryOperatorExpr->startPosition(),
+                                                        assignmentBinaryOperatorExpr->endPosition());
+        }
+    }
+
+    // Finish by storing either the original right value or the nested operator result into the left value
+    irBuilder->CreateStore(rightValue, leftValue, false);
+
+    // We ALWAYS return the left value for assignments
+    return leftValue;
+}
+
+llvm::Value* gulc::CodeGen::generateBuiltInBinaryOperation(gulc::Type *type, std::string const &operatorName,
+                                                            llvm::Value *leftValue, llvm::Value *rightValue,
+                                                            const gulc::TextPosition &startPosition,
+                                                            const gulc::TextPosition &endPosition) {
     // We handle the binary operators based on the result type...
-    if (llvm::isa<EnumType>(resultType)) {
-        resultType = llvm::dyn_cast<EnumType>(resultType)->baseType();
+    if (llvm::isa<EnumType>(type)) {
+        type = llvm::dyn_cast<EnumType>(type)->baseType();
     }
 
     // TODO: Support the `PointerType`
     bool isFloat = false;
     bool isSigned = false;
 
-    if (llvm::isa<BuiltInType>(resultType)) {
-        auto builtInType = llvm::dyn_cast<BuiltInType>(resultType);
+    if (llvm::isa<BuiltInType>(type)) {
+        auto builtInType = llvm::dyn_cast<BuiltInType>(type);
 
         isFloat = builtInType->isFloating();
         isSigned = builtInType->isSigned();
-    } else if (!(llvm::isa<PointerType>(resultType) ||
-                 llvm::isa<ReferenceType>(resultType))) {
+    } else if (!(llvm::isa<PointerType>(type) ||
+                 llvm::isa<ReferenceType>(type))) {
         printError("unknown binary operator expression!",
-                   binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+                   startPosition, endPosition);
         return nullptr;
     }
 
-    if (binaryOperatorExpr->operatorName() == "=") {
-        return irBuilder->CreateStore(rightValue, leftValue, false);
-    } else if (binaryOperatorExpr->operatorName() == "+") {
+    if (operatorName == "+") {
         if (isFloat) {
             return irBuilder->CreateFAdd(leftValue, rightValue);
         } else {
             return irBuilder->CreateAdd(leftValue, rightValue);
         }
-    } else if (binaryOperatorExpr->operatorName() == "-") {
+    } else if (operatorName == "-") {
         if (isFloat) {
             return irBuilder->CreateFSub(leftValue, rightValue);
         } else {
             return irBuilder->CreateSub(leftValue, rightValue);
         }
-    } else if (binaryOperatorExpr->operatorName() == "*") {
+    } else if (operatorName == "*") {
         if (isFloat) {
             return irBuilder->CreateFMul(leftValue, rightValue);
         } else {
             return irBuilder->CreateMul(leftValue, rightValue);
         }
-    } else if (binaryOperatorExpr->operatorName() == "/") {
+    } else if (operatorName == "/") {
         if (isFloat) {
             return irBuilder->CreateFDiv(leftValue, rightValue);
         } else {
@@ -1236,7 +1320,7 @@ llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperato
                 return irBuilder->CreateUDiv(leftValue, rightValue);
             }
         }
-    } else if (binaryOperatorExpr->operatorName() == "%") {
+    } else if (operatorName == "%") {
         if (isFloat) {
             return irBuilder->CreateFRem(leftValue, rightValue);
         } else {
@@ -1247,23 +1331,23 @@ llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperato
                 return irBuilder->CreateURem(leftValue, rightValue);
             }
         }
-    } else if (binaryOperatorExpr->operatorName() == "^") {
+    } else if (operatorName == "^") {
         return irBuilder->CreateXor(leftValue, rightValue);
-    } else if (binaryOperatorExpr->operatorName() == "<<") {
+    } else if (operatorName == "<<") {
         return irBuilder->CreateShl(leftValue, rightValue);
-    } else if (binaryOperatorExpr->operatorName() == ">>") {
+    } else if (operatorName == ">>") {
         if (isSigned) {
             return irBuilder->CreateAShr(leftValue, rightValue);
         } else {
             return irBuilder->CreateLShr(leftValue, rightValue);
         }
-    } else if (binaryOperatorExpr->operatorName() == "==") {
+    } else if (operatorName == "==") {
         if (isFloat) {
             return irBuilder->CreateFCmpOEQ(leftValue, rightValue);
         } else {
             return irBuilder->CreateICmpEQ(leftValue, rightValue);
         }
-    } else if (binaryOperatorExpr->operatorName() == ">") {
+    } else if (operatorName == ">") {
         if (isFloat) {
             return irBuilder->CreateFCmpOGT(leftValue, rightValue);
         } else {
@@ -1273,7 +1357,7 @@ llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperato
                 return irBuilder->CreateICmpUGT(leftValue, rightValue);
             }
         }
-    } else if (binaryOperatorExpr->operatorName() == ">=") {
+    } else if (operatorName == ">=") {
         if (isFloat) {
             return irBuilder->CreateFCmpOGE(leftValue, rightValue);
         } else {
@@ -1283,7 +1367,7 @@ llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperato
                 return irBuilder->CreateICmpUGE(leftValue, rightValue);
             }
         }
-    } else if (binaryOperatorExpr->operatorName() == "<") {
+    } else if (operatorName == "<") {
         if (isFloat) {
             return irBuilder->CreateFCmpOLT(leftValue, rightValue);
         } else {
@@ -1293,7 +1377,7 @@ llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperato
                 return irBuilder->CreateICmpULT(leftValue, rightValue);
             }
         }
-    } else if (binaryOperatorExpr->operatorName() == "<=") {
+    } else if (operatorName == "<=") {
         if (isFloat) {
             return irBuilder->CreateFCmpOLE(leftValue, rightValue);
         } else {
@@ -1304,10 +1388,21 @@ llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperato
             }
         }
     } else {
-        printError("binary operator '" + binaryOperatorExpr->operatorName() + "' not yet supported!",
-                   binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+        printError("binary operator '" + operatorName + "' not yet supported!",
+                   startPosition, endPosition);
         return nullptr;
     }
+}
+
+llvm::Value* gulc::CodeGen::generateBinaryOperatorExpr(const gulc::BinaryOperatorExpr *binaryOperatorExpr) {
+    llvm::Value* leftValue = generateExpr(binaryOperatorExpr->leftValue);
+    llvm::Value* rightValue = generateExpr(binaryOperatorExpr->rightValue);
+
+    gulc::Type* resultType = binaryOperatorExpr->resultType;
+
+    return generateBuiltInBinaryOperation(resultType, binaryOperatorExpr->operatorName(),
+                                          leftValue, rightValue,
+                                          binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
 }
 
 llvm::Value *gulc::CodeGen::generateIntegerLiteralExpr(const gulc::IntegerLiteralExpr *integerLiteralExpr) {
@@ -1399,7 +1494,8 @@ llvm::Value *gulc::CodeGen::generateIdentifierExpr(const gulc::IdentifierExpr *i
 
 llvm::Value *gulc::CodeGen::generateImplicitCastExpr(const gulc::ImplicitCastExpr *implicitCastExpr) {
     llvm::Value* result = generateExpr(implicitCastExpr->castee);
-    castValue(implicitCastExpr->castType, implicitCastExpr->castee->resultType, result);
+    castValue(implicitCastExpr->castType, implicitCastExpr->castee->resultType, result,
+              implicitCastExpr->startPosition(), implicitCastExpr->endPosition());
     return result;
 }
 
@@ -1436,7 +1532,7 @@ llvm::Value *gulc::CodeGen::generateFunctionCallExpr(const gulc::FunctionCallExp
         }
     }
 
-    return irBuilder->CreateCall(func, llvmArgs);
+    return makeTemporaryValue(functionCallExpr->resultType, irBuilder->CreateCall(func, llvmArgs));
 }
 
 llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperatorExpr *prefixOperatorExpr) {
@@ -1469,11 +1565,9 @@ llvm::Value *gulc::CodeGen::generatePrefixOperatorExpr(const gulc::PrefixOperato
             }
         } else if (prefixOperatorExpr->operatorName() == "-") {
             if (builtInType->isFloating()) {
-                llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
-                return irBuilder->CreateFNeg(rvalue);
+                return irBuilder->CreateFNeg(lvalue);
             } else {
-                llvm::Value* rvalue = irBuilder->CreateLoad(lvalue);
-                return irBuilder->CreateNeg(rvalue);
+                return irBuilder->CreateNeg(lvalue);
             }
         } else if (prefixOperatorExpr->operatorName() == "&" || prefixOperatorExpr->operatorName() == ".ref") {
             // NOTE: All error checking for this should be performed in a pass before the code generator
@@ -1819,6 +1913,169 @@ llvm::Value *gulc::CodeGen::generateReconstructExpr(const gulc::ReconstructExpr 
     return thisResult;
 }
 
+llvm::Value *gulc::CodeGen::generateRefOperatorExpr(bool isVTableCall, FunctionDecl* functionDecl,
+                                                    llvm::Value* objectRef,
+                                                    TextPosition const& startPosition,
+                                                    TextPosition const& endPosition) {
+    if (isVTableCall) {
+        if (functionDecl->parentStruct != nullptr) {
+            gulc::StructDecl *structDecl = functionDecl->parentStruct;
+
+            bool vtableFunctionFound = false;
+            std::size_t vtableFunctionIndex = 0;
+
+            // Find the index of the referenced function in the vtable
+            for (std::size_t i = 0; i < structDecl->vtable.size(); ++i) {
+                if (functionDecl == structDecl->vtable[i]) {
+                    vtableFunctionFound = true;
+                    vtableFunctionIndex = i;
+                    break;
+                }
+            }
+
+            if (!vtableFunctionFound) {
+                printError("[INTERNAL] referenced virtual function was not found in the vtable!",
+                           startPosition, endPosition);
+            }
+
+            return getVTableFunctionPointer(structDecl, objectRef, vtableFunctionIndex,
+                                            getFunctionType(functionDecl));
+        } else {
+            printError("virtual operator called on non-struct type, this is not yet supported!",
+                       startPosition, endPosition);
+        }
+    } else {
+        return module->getFunction(functionDecl->mangledName());
+    }
+
+    printError("[INTERNAL] custom operator call was not resolved properly!",
+               startPosition, endPosition);
+    return nullptr;
+}
+
+llvm::Value *gulc::CodeGen::generateCustomInfixOperatorCallExpr(const gulc::CustomInfixOperatorCallExpr *customOperatorCallExpr) {
+    // An operator call is basically just syntactic sugar for a function call, we do it basically the same as a
+    // function call except operators can ONLY exist within a `struct/class`, `trait`, or `extension`
+    llvm::Value* leftValue = generateExpr(customOperatorCallExpr->leftValue);
+    llvm::Value* rightValue = generateExpr(customOperatorCallExpr->rightValue);
+
+    llvm::Value* operatorRef = generateRefOperatorExpr(customOperatorCallExpr->isVTableCall,
+                                                       customOperatorCallExpr->operatorDecl, leftValue,
+                                                       customOperatorCallExpr->startPosition(),
+                                                       customOperatorCallExpr->endPosition());
+
+    std::vector<llvm::Value*> operatorArgs {
+        leftValue,
+        rightValue
+    };
+
+    return makeTemporaryValue(customOperatorCallExpr->resultType,
+                              irBuilder->CreateCall(operatorRef, operatorArgs));
+}
+
+llvm::Value *gulc::CodeGen::generateConstructTemporaryValueExpr(const gulc::ConstructTemporaryValueExpr *constructTemporaryValueExpr) {
+    llvm::Type* valueType = generateLlvmType(constructTemporaryValueExpr->resultType);
+    llvm::AllocaInst* allocaInst = this->irBuilder->CreateAlloca(valueType);
+
+    temporaryValues.emplace_back(TemporaryValue(constructTemporaryValueExpr->resultType, allocaInst));
+
+    llvm::Function* constructorFunc = module->getFunction(constructTemporaryValueExpr->constructorDecl->mangledName());
+
+    std::vector<llvm::Value*> llvmArgs{};
+    llvmArgs.reserve(constructTemporaryValueExpr->arguments.size() + 1);
+
+    llvmArgs.push_back(allocaInst);
+
+    for (Expr* argument : constructTemporaryValueExpr->arguments) {
+        llvmArgs.push_back(generateExpr(argument));
+    }
+
+
+    irBuilder->CreateCall(constructorFunc, llvmArgs);
+
+    return allocaInst;
+}
+
+llvm::Value *gulc::CodeGen::generateCustomPrefixOperatorCallExpr(const gulc::CustomPrefixOperatorCallExpr *customPrefixOperatorCallExpr) {
+    // An operator call is basically just syntactic sugar for a function call, we do it basically the same as a
+    // function call except operators can ONLY exist within a `struct/class`, `trait`, or `extension`
+    llvm::Value* expr = generateExpr(customPrefixOperatorCallExpr->expr);
+
+    llvm::Value* operatorRef = generateRefOperatorExpr(customPrefixOperatorCallExpr->isVTableCall,
+                                                       customPrefixOperatorCallExpr->operatorDecl,
+                                                       expr,
+                                                       customPrefixOperatorCallExpr->startPosition(),
+                                                       customPrefixOperatorCallExpr->endPosition());
+
+    std::vector<llvm::Value*> operatorArgs {
+            expr
+    };
+
+    return makeTemporaryValue(customPrefixOperatorCallExpr->resultType,
+                              irBuilder->CreateCall(operatorRef, operatorArgs));
+}
+
+llvm::Value *gulc::CodeGen::generateCustomCastOperatorCallExpr(const gulc::CustomCastOperatorCallExpr *customCastOperatorCallExpr) {
+    // An operator call is basically just syntactic sugar for a function call, we do it basically the same as a
+    // function call except operators can ONLY exist within a `struct/class`, `trait`, or `extension`
+    llvm::Value* castee = generateExpr(customCastOperatorCallExpr->castee);
+
+    llvm::Value* operatorRef = generateRefOperatorExpr(customCastOperatorCallExpr->isVTableCall,
+                                                       customCastOperatorCallExpr->castOperatorDecl,
+                                                       castee,
+                                                       customCastOperatorCallExpr->startPosition(),
+                                                       customCastOperatorCallExpr->endPosition());
+
+    std::vector<llvm::Value*> operatorArgs {
+            castee
+    };
+
+    return makeTemporaryValue(customCastOperatorCallExpr->resultType,
+                              irBuilder->CreateCall(operatorRef, operatorArgs));
+}
+
+llvm::Value *gulc::CodeGen::generateCustomIndexOperatorCallExpr(const gulc::CustomIndexOperatorCallExpr *customIndexOperatorCallExpr) {
+    llvm::Value* objectRef = generateExpr(customIndexOperatorCallExpr->objectRef);
+
+    llvm::Value* operatorRef = generateRefOperatorExpr(customIndexOperatorCallExpr->isVTableCall,
+                                                       customIndexOperatorCallExpr->indexOperatorDecl,
+                                                       objectRef,
+                                                       customIndexOperatorCallExpr->startPosition(),
+                                                       customIndexOperatorCallExpr->endPosition());
+
+    std::vector<llvm::Value*> operatorArgs {
+            objectRef
+    };
+
+    for (Expr* argument : customIndexOperatorCallExpr->arguments) {
+        operatorArgs.push_back(generateExpr(argument));
+    }
+
+    return makeTemporaryValue(customIndexOperatorCallExpr->resultType,
+                              irBuilder->CreateCall(operatorRef, operatorArgs));
+}
+
+llvm::Value *gulc::CodeGen::generateCustomCallOperatorCallExpr(const gulc::CustomCallOperatorCallExpr *customCallOperatorCallExpr) {
+    llvm::Value* objectRef = generateExpr(customCallOperatorCallExpr->objectRef);
+
+    llvm::Value* operatorRef = generateRefOperatorExpr(customCallOperatorCallExpr->isVTableCall,
+                                                       customCallOperatorCallExpr->callOperatorDecl,
+                                                       objectRef,
+                                                       customCallOperatorCallExpr->startPosition(),
+                                                       customCallOperatorCallExpr->endPosition());
+
+    std::vector<llvm::Value*> operatorArgs {
+            objectRef
+    };
+
+    for (Expr* argument : customCallOperatorCallExpr->arguments) {
+        operatorArgs.push_back(generateExpr(argument));
+    }
+
+    return makeTemporaryValue(customCallOperatorCallExpr->resultType,
+                              irBuilder->CreateCall(operatorRef, operatorArgs));
+}
+
 void gulc::CodeGen::generateBaseConstructorCallExpr(const gulc::BaseConstructorCallExpr *baseConstructorCallExpr) {
     // NOTE: We NEVER call the vtable constructor when calling the base constructor
     llvm::Function* baseConstructorFunc = module->getFunction(baseConstructorCallExpr->baseConstructor->mangledName());
@@ -1868,7 +2125,8 @@ void gulc::CodeGen::generateBaseDestructorCallExpr(const gulc::BaseDestructorCal
     irBuilder->CreateCall(baseDestructorFunc, llvmArgs);
 }
 
-void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& value) {
+void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& value,
+                              TextPosition const& startPosition, TextPosition const& endPosition) {
     if (llvm::isa<BuiltInType>(from)) {
         auto fromBuiltIn = llvm::dyn_cast<BuiltInType>(from);
 
@@ -1913,7 +2171,7 @@ void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& va
         } else if (llvm::isa<PointerType>(to)) {
             if (fromBuiltIn->isFloating()) {
                 printError("[INTERNAL] casting from a float to a pointer is NOT supported!",
-                           to->startPosition(), to->endPosition());
+                           startPosition, endPosition);
                 return;
             }
 
@@ -1927,11 +2185,10 @@ void gulc::CodeGen::castValue(gulc::Type *to, gulc::Type *from, llvm::Value*& va
             return;
         } else {
             printError("[INTERNAL] reference '" + from->getString() + "' to non-reference '" + to->getString() + "' cast found in code gen!",
-                       to->startPosition(), to->endPosition());
+                       startPosition, endPosition);
         }
     }
 
-    // TODO: We need to have the start and end positions passed to us
     printError("casting to type `" + to->getString() + "` from type `" + from->getString() + "` is not supported!",
-               to->startPosition(), to->endPosition());
+               startPosition, endPosition);
 }

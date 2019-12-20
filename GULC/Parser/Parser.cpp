@@ -32,7 +32,7 @@
 #include <AST/Exprs/FloatLiteralExpr.hpp>
 #include <AST/Exprs/PotentialExplicitCastExpr.hpp>
 #include <AST/Types/TemplateTypenameType.hpp>
-#include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
+#include <AST/Exprs/PotentialLocalVariableDeclExpr.hpp>
 #include <AST/Stmts/LabeledStmt.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
 #include <AST/Exprs/LocalVariableDeclExpr.hpp>
@@ -46,6 +46,11 @@
 #include <AST/Decls/StructDecl.hpp>
 #include <AST/Decls/ConstructorDecl.hpp>
 #include <AST/Attrs/UnresolvedAttr.hpp>
+#include <AST/Exprs/InfixMacroCallExpr.hpp>
+#include <AST/Exprs/PrefixMacroCallExpr.hpp>
+#include <AST/Decls/OperatorDecl.hpp>
+#include <AST/Decls/IndexOperatorDecl.hpp>
+#include <AST/Decls/CallOperatorDecl.hpp>
 #include "Parser.hpp"
 
 using namespace gulc;
@@ -599,10 +604,10 @@ qualifierFound:
                                   std::move(baseTypes), std::move(constructors), std::move(members), destructor);
         }
         case TokenType::UNION:
-            printError("unions not yet supported!", startPosition, endPosition);
+            printError("unions are not yet supported!", startPosition, endPosition);
             return nullptr;
-        case TokenType::INTERFACE:
-            printError("interfaces not yet supported!", startPosition, endPosition);
+        case TokenType::TRAIT:
+            printError("traits are not yet supported!", startPosition, endPosition);
             return nullptr;
         case TokenType::ENUM: {
             _lexer.consumeType(TokenType::ENUM);
@@ -717,6 +722,56 @@ qualifierFound:
 
             return new DestructorDecl(attributes, verifyName, _filePath, startPosition, endPosition, modifier, compoundStmt);
         }
+        case TokenType::EXPLICIT: {
+            _lexer.consumeType(TokenType::EXPLICIT);
+
+            if (!_lexer.consumeType(TokenType::OPERATOR)) {
+                printError("expected `operator` after `explicit`; found '" +
+                           _lexer.peekToken().currentSymbol + "'!",
+                           _lexer.peekToken().startPosition,
+                           _lexer.peekToken().endPosition);
+            }
+
+            Type* resultType = parseType(true);
+
+            FunctionModifiers modifier = FunctionModifiers::None;
+
+            if (isVirtual) {
+                modifier = FunctionModifiers::Virtual;
+            } else if (isAbstract) {
+                modifier = FunctionModifiers::Abstract;
+            } else if (isOverride) {
+                modifier = FunctionModifiers::Override;
+            }
+
+            return parseCastOperatorDecl(std::move(attributes), startPosition, endPosition, modifier,
+                                         CastOperatorType::Explicit, visibility, resultType);
+        }
+        case TokenType::IMPLICIT: {
+            _lexer.consumeType(TokenType::IMPLICIT);
+
+            if (!_lexer.consumeType(TokenType::OPERATOR)) {
+                printError("expected `operator` after `implicit`; found '" +
+                           _lexer.peekToken().currentSymbol + "'!",
+                           _lexer.peekToken().startPosition,
+                           _lexer.peekToken().endPosition);
+            }
+
+            Type* resultType = parseType(true);
+
+            FunctionModifiers modifier = FunctionModifiers::None;
+
+            if (isVirtual) {
+                modifier = FunctionModifiers::Virtual;
+            } else if (isAbstract) {
+                modifier = FunctionModifiers::Abstract;
+            } else if (isOverride) {
+                modifier = FunctionModifiers::Override;
+            }
+
+            return parseCastOperatorDecl(std::move(attributes), startPosition, endPosition, modifier,
+                                         CastOperatorType::Implicit, visibility, resultType);
+        }
         case TokenType::CONST:
         case TokenType::MUT:
         case TokenType::SYMBOL: {
@@ -748,6 +803,64 @@ qualifierFound:
                     name = _lexer.peekToken().currentSymbol;
                     _lexer.consumeType(TokenType::SYMBOL);
                     break;
+                case TokenType::OPERATOR: { // Operator overloading or creation
+                    _lexer.consumeType(TokenType::OPERATOR);
+
+                    FunctionModifiers modifier = FunctionModifiers::None;
+
+                    if (isVirtual) {
+                        modifier = FunctionModifiers::Virtual;
+                    } else if (isAbstract) {
+                        modifier = FunctionModifiers::Abstract;
+                    } else if (isOverride) {
+                        modifier = FunctionModifiers::Override;
+                    }
+
+                    if (_lexer.consumeType(TokenType::PREFIX)) {
+                        return parseOperatorDecl(std::move(attributes), startPosition, endPosition, modifier,
+                                                 OperatorType::Prefix, visibility, resultType);
+                    } else if (_lexer.consumeType(TokenType::INFIX)) {
+                        return parseOperatorDecl(std::move(attributes), startPosition, endPosition, modifier,
+                                                 OperatorType::Infix, visibility, resultType);
+                    } else if (_lexer.consumeType(TokenType::POSTFIX)) {
+                        return parseOperatorDecl(std::move(attributes), startPosition, endPosition, modifier,
+                                                 OperatorType::Postfix, visibility, resultType);
+                    } else if (_lexer.peekToken().currentSymbol == "this") {
+                        // TODO: `this` should probably be a set in stone keyword to reduce potential confusion from
+                        //       misuse
+                        _lexer.consumeType(TokenType::SYMBOL);
+
+                        if (_lexer.peekType() == TokenType::LSQUARE) {
+                            std::vector<ParameterDecl*> parameters = parseIndexerParameterDecls(startPosition);
+
+                            CompoundStmt* body = parseCompoundStmt();
+
+                            return new IndexOperatorDecl(std::move(attributes), _filePath,
+                                                         startPosition, endPosition,
+                                                         visibility, modifier, resultType,
+                                                         std::move(parameters), body);
+                        } else if (_lexer.peekType() == TokenType::LPAREN) {
+                            std::vector<ParameterDecl*> parameters = parseParameterDecls(startPosition);
+
+                            CompoundStmt* body = parseCompoundStmt();
+
+                            return new CallOperatorDecl(std::move(attributes), _filePath,
+                                                        startPosition, endPosition,
+                                                        visibility, modifier, resultType,
+                                                        std::move(parameters), body);
+                        } else {
+                            printError("expected `[` or `(` after `operator this`; found '" +
+                                       _lexer.peekToken().currentSymbol + "'!",
+                                       _lexer.peekToken().startPosition,
+                                       _lexer.peekToken().endPosition);
+                        }
+                    } else {
+                        printError("expected `infix`, `prefix`, or `postfix` after `operator`; found '" +
+                                   _lexer.peekToken().currentSymbol + "'!",
+                                   _lexer.peekToken().startPosition,
+                                   _lexer.peekToken().endPosition);
+                    }
+                }
                 default:
                     printError("unexpected token in top-level declaration! (found '" + _lexer.peekToken().currentSymbol + "')",
                                _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
@@ -1022,44 +1135,19 @@ std::vector<ParameterDecl*> Parser::parseParameterDecls(TextPosition startPositi
     TextPosition endPosition = _lexer.peekToken().endPosition;
 
     if (!_lexer.consumeType(TokenType::LPAREN)) {
-        printError("expected start '(' for function declaration! (found '" + _lexer.peekToken().currentSymbol + "')", startPosition, endPosition);
+        printError("expected start '(' for parameter list! (found '" + _lexer.peekToken().currentSymbol + "')", startPosition, endPosition);
         return std::vector<ParameterDecl*>();
     }
 
-    for (Token peekedToken = _lexer.peekToken();
-         peekedToken.tokenType != TokenType::RPAREN && peekedToken.tokenType != TokenType::ENDOFFILE;
-         peekedToken = _lexer.peekToken()) {
-        std::vector<Attr*> paramAttributes;
+    while (_lexer.peekType() != TokenType::RPAREN && _lexer.peekType() != TokenType::ENDOFFILE) {
+        ParameterDecl* parsedParameter = parseParameterDecl();
 
-        if (_lexer.peekType() == TokenType::LSQUARE) {
-            paramAttributes = parseAttributes();
-        }
-
-        Type* paramType = parseType();
-
-        peekedToken = _lexer.peekToken();
-
-        std::string paramName = peekedToken.currentSymbol;
-        endPosition = _lexer.peekToken().endPosition;
-
-        if (!_lexer.consumeType(TokenType::SYMBOL)) {
-            printError("expected parameter name! (found '" + _lexer.peekToken().currentSymbol + "')", peekedToken.startPosition, peekedToken.endPosition);
+        // If it is null we do nothing (this will never really happen, we exit on error in the parseParameterDecls)
+        if (parsedParameter == nullptr) {
             return std::vector<ParameterDecl*>();
         }
 
-        peekedToken = _lexer.peekToken();
-
-        Expr* defaultArgument = nullptr;
-
-        if (peekedToken.tokenType == TokenType::EQUALS) {
-            _lexer.consumeType(TokenType::EQUALS);
-            defaultArgument = parseExpr(false, false);
-            endPosition = defaultArgument->endPosition();
-        }
-
-        // Add new 'ParameterDecl' to the result list
-        result.push_back(new ParameterDecl(paramAttributes, paramName, _filePath, paramType->startPosition(),
-                                           endPosition, paramType, defaultArgument));
+        result.push_back(parsedParameter);
 
         if (!_lexer.consumeType(TokenType::COMMA)) {
             // If there isn't a comma then we expect there to be a closing parenthesis
@@ -1074,6 +1162,128 @@ std::vector<ParameterDecl*> Parser::parseParameterDecls(TextPosition startPositi
     }
 
     return result;
+}
+
+std::vector<ParameterDecl *> Parser::parseIndexerParameterDecls(TextPosition startPosition) {
+    std::vector<ParameterDecl*> result{};
+
+    TextPosition endPosition = _lexer.peekToken().endPosition;
+
+    if (!_lexer.consumeType(TokenType::LSQUARE)) {
+        printError("expected start '[' for parameter list! (found '" + _lexer.peekToken().currentSymbol + "')", startPosition, endPosition);
+        return std::vector<ParameterDecl*>();
+    }
+
+    while (_lexer.peekType() != TokenType::RSQUARE && _lexer.peekType() != TokenType::ENDOFFILE) {
+        ParameterDecl* parsedParameter = parseParameterDecl();
+
+        // If it is null we do nothing (this will never really happen, we exit on error in the parseParameterDecls)
+        if (parsedParameter == nullptr) {
+            return std::vector<ParameterDecl*>();
+        }
+
+        result.push_back(parsedParameter);
+
+        if (!_lexer.consumeType(TokenType::COMMA)) {
+            // If there isn't a comma then we expect there to be a closing parenthesis
+            break;
+        }
+    }
+
+    if (!_lexer.consumeType(TokenType::RSQUARE)) {
+        printError("expected end ']' for indexer declaration! (found '" + _lexer.peekToken().currentSymbol + "')",
+                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+        return std::vector<ParameterDecl*>();
+    }
+
+    return result;
+}
+
+ParameterDecl *Parser::parseParameterDecl() {
+    TextPosition endPosition;
+
+    std::vector<Attr*> paramAttributes;
+
+    if (_lexer.peekType() == TokenType::LSQUARE) {
+        paramAttributes = parseAttributes();
+    }
+
+    Type* paramType = parseType();
+
+    std::string paramName = _lexer.peekToken().currentSymbol;
+    endPosition = _lexer.peekToken().endPosition;
+
+    if (!_lexer.consumeType(TokenType::SYMBOL)) {
+        printError("expected parameter name! (found '" + _lexer.peekToken().currentSymbol + "')",
+                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+        return nullptr;
+    }
+
+    Expr* defaultArgument = nullptr;
+
+    if (_lexer.consumeType(TokenType::EQUALS)) {
+        defaultArgument = parseExpr(false, false);
+        endPosition = defaultArgument->endPosition();
+    }
+
+    // Add new 'ParameterDecl' to the result list
+    return new ParameterDecl(paramAttributes, paramName, _filePath, paramType->startPosition(),
+                             endPosition, paramType, defaultArgument);
+}
+
+OperatorDecl *Parser::parseOperatorDecl(std::vector<Attr*> attributes,
+                                        TextPosition startPosition, TextPosition endPosition,
+                                        FunctionModifiers modifier, OperatorType operatorType,
+                                        Decl::Visibility visibility, Type* resultType) {
+    std::string operatorName = _lexer.peekToken().currentSymbol;
+    // An operator name can be just about anything, we validate if it is a valid operator
+    // in a compiler pass rather than here...
+    _lexer.consumeType(_lexer.peekType());
+
+    if (_lexer.peekType() != TokenType::LPAREN) {
+        printError("expected `(` after operator `" + operatorName + "`, found '" +
+                   _lexer.peekToken().currentSymbol + "'!",
+                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+    }
+
+    std::vector<ParameterDecl*> parameters = parseParameterDecls(startPosition);
+
+    // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
+    CompoundStmt* compoundStmt = parseCompoundStmt();
+
+    return new OperatorDecl(std::move(attributes), _filePath, startPosition, endPosition,
+                            operatorType, operatorName, visibility, modifier,
+                            resultType, parameters, compoundStmt);
+}
+
+CastOperatorDecl* Parser::parseCastOperatorDecl(std::vector<Attr *> attributes, TextPosition startPosition, TextPosition endPosition,
+                                                FunctionModifiers modifier, CastOperatorType castOperatorType,
+                                                Decl::Visibility visibility, Type *resultType) {
+    if (!_lexer.consumeType(TokenType::LPAREN)) {
+        if (castOperatorType == CastOperatorType::Implicit) {
+            printError("expected `(` after `implicit`, found '" + _lexer.peekToken().currentSymbol + "'!",
+                       _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+        } else if (castOperatorType == CastOperatorType::Explicit) {
+            printError("expected `(` after `explicit`, found '" + _lexer.peekToken().currentSymbol + "'!",
+                       _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+        } else {
+            printError("expected `(`, found '" + _lexer.peekToken().currentSymbol + "'!",
+                       _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+        }
+    }
+
+    if (!_lexer.consumeType(TokenType::RPAREN)) {
+        printError("expected `)` but found '" + _lexer.peekToken().currentSymbol +
+                   "', note that custom cast operators cannot have parameters!",
+                   _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+    }
+
+    // TODO: Allow modifiers after the end parenthesis (e.g. 'where T : IArray<?>'
+    CompoundStmt* body = parseCompoundStmt();
+
+    return new CastOperatorDecl(std::move(attributes), _filePath,
+                                startPosition, endPosition, castOperatorType,
+                                visibility, modifier, resultType, body);
 }
 
 /**
@@ -1939,17 +2149,50 @@ Expr *Parser::parseAssignmentMisc(bool isStatement, bool templateTypingAllowed) 
     TextPosition endPosition;
     Expr* result = parseLogicalOr(isStatement, templateTypingAllowed);
 
-    // TODO: We need to handle more than just `SYMBOL`
-    if (isStatement && _lexer.peekType() == TokenType::SYMBOL) {
-        // Variable names cannot have generics so we ignore generics (TODO: But type names can have generics? we shouldn't stop them from being parsed...)
-        // TODO: NOTE: We WILL parse postfix `++` and postfix `--` here. If this is a custom prefix operator call then
-        //  postfix `++`/`--` should be performed on the result of the operator...
-        Expr* identifier = parseCallPostfixOrMemberAccess(false, true);
-        endPosition = identifier->endPosition();
-        result = new LocalVariableDeclOrPrefixOperatorCallExpr(startPosition, endPosition, result, identifier);
+    // TODO: I don't think `isStatement` should matter now... We should think about removing it.
+    if (_lexer.peekType() == TokenType::SYMBOL) {
+        endPosition = _lexer.peekToken().endPosition;
+
+        // Variable names cannot have templates so we ignore templates
+        std::string name = _lexer.peekToken().currentSymbol;
+
+        // We know the token type is a symbol here so we don't check it
+        _lexer.consumeType(TokenType::SYMBOL);
+
+        // If the next token is `~` then this is an infix macro/operator...
+        if (_lexer.consumeType(TokenType::TILDE)) {
+            Expr* rightValue = parseLogicalOr(false, false);
+
+            result = new InfixMacroCallExpr(startPosition, endPosition, name, {}, result, rightValue);
+        } else {
+            std::vector<Expr*> initializerArguments;
+
+            if (_lexer.consumeType(TokenType::LPAREN)) {
+                // If there is a `(` then we need to parse the initializer arguments
+                while (_lexer.peekType() != TokenType::RPAREN && _lexer.peekType() != TokenType::ENDOFFILE) {
+                    initializerArguments.push_back(parseExpr(false, false));
+
+                    if (!_lexer.consumeType(TokenType::COMMA)) break;
+                }
+
+                endPosition = _lexer.peekToken().endPosition;
+
+                if (!_lexer.consumeType(TokenType::RPAREN)) {
+                    printError("expected ending ')' for initializer arguments! (found '" +
+                               _lexer.peekToken().currentSymbol + "')",
+                               _lexer.peekToken().startPosition, _lexer.peekToken().endPosition);
+                    return nullptr;
+                }
+            }
+
+            // At this point it is just a potential local variable declaration
+            result = new PotentialLocalVariableDeclExpr(startPosition, endPosition, result, name, initializerArguments);
+        }
     }
 
     switch (_lexer.peekType()) {
+        // TODO: We might want to move this an variable declarations to the it's own function that goes between
+        //       `parseAssignmentMisc` and `parseLogicalOr`
         case TokenType::QUESTION: {
             _lexer.consumeType(TokenType::QUESTION);
             Expr* trueExpr = parseAssignmentMisc(false, false);
@@ -2576,6 +2819,28 @@ Expr *Parser::parsePrefixes(bool isStatement, bool templateTypingAllowed) {
                 _lexer.peekType() == TokenType::NUMBER) {
                 Expr* castee = parsePrefixes(false, false);
                 endPosition = castee->endPosition();
+
+                if (llvm::isa<IdentifierExpr>(castee)) {
+                    // If the `castee` is just a symbol and ends with `~` then it is a custom infix operator
+                    // E.g. `12 plus~ 34;`, `test is~ int32;`
+                    if (_lexer.consumeType(TokenType::TILDE)) {
+                        Expr* rightValue = parseLogicalOr(false, false);
+                        endPosition = rightValue->endPosition();
+
+                        auto identifier = llvm::dyn_cast<IdentifierExpr>(castee);
+
+                        std::string name = identifier->name();
+                        std::vector<Expr*> templateArguments = std::move(identifier->templateArguments);
+
+                        // Delete the no longer needed identifier
+                        delete castee;
+
+                        return new InfixMacroCallExpr(startPosition, endPosition, name,
+                                                      std::move(templateArguments),
+                                                      nestedExpr, rightValue);
+                    }
+                }
+
                 return new PotentialExplicitCastExpr(startPosition, endPosition, nestedExpr, castee);
             } else {
                 return new ParenExpr(startPosition, endPosition, nestedExpr);
@@ -2791,6 +3056,23 @@ Expr *Parser::parseVariableLiteralOrParen(bool isStatement, bool templateTypingA
                 } else {
                     _lexer.returnToCheckpoint(checkpoint);
                 }
+            } else if (_lexer.peekType() == TokenType::NOT) {
+                // If there is an `!` after the symbol then this is a prefix macro/operator call
+                // TODO: We need to be able to check if there is a space between the last symbol and this one.
+                //       This might be useful to add to the lexer since it could also be used for the #region tags
+                _lexer.consumeType(TokenType::NOT);
+
+                // TODO: Should `templateTypingAllowed` be true?
+                Expr* expr = parseLogicalOr(false, false);
+
+                std::string name = result->name();
+                std::vector<Expr*> templateArguments = std::move(result->templateArguments);
+
+                // We don't use the identifier...
+                delete result;
+
+                return new PrefixMacroCallExpr(startPosition, expr->endPosition(), result->name(),
+                                               templateArguments, expr);
             }
 
             if (_lexer.peekType() == TokenType::MUT ||

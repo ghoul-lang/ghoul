@@ -28,7 +28,12 @@ namespace gulc {
             BinaryOperator,
             PostfixOperator,
             PrefixOperator,
-            CustomPrefixOperator,
+            AssignmentBinaryOperator,
+            CustomInfixOperatorCall,
+            CustomPrefixOperatorCall,
+            CustomCastOperatorCall,
+            CustomIndexOperatorCall,
+            CustomCallOperatorCall,
 
             Ternary,
 
@@ -50,7 +55,7 @@ namespace gulc {
             ImplicitCast,
             LValueToRValue,
 
-            LocalVariableDeclOrPrefixOperatorCallExpr,
+            PotentialLocalVariableDecl,
 
             ResolvedTypeRef,
             UnresolvedTypeRef,
@@ -75,7 +80,12 @@ namespace gulc {
             BaseDestructorCall,
             Reconstruct,
 
-            RefBase
+            RefBase,
+
+            InfixMacroCall,
+            PrefixMacroCall,
+
+            ConstructTemporaryValue
         };
 
         Kind getExprKind() const { return _kind; }

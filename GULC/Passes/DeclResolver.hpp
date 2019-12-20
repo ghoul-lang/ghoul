@@ -61,6 +61,9 @@
 #include <AST/Decls/StructDecl.hpp>
 #include <AST/Types/StructType.hpp>
 #include <Targets/Target.hpp>
+#include <AST/Exprs/AssignmentBinaryOperatorExpr.hpp>
+#include <AST/Exprs/PrefixMacroCallExpr.hpp>
+#include <AST/Exprs/CustomCastOperatorCallExpr.hpp>
 
 namespace gulc {
     // Handles resolving variable calls and function calls to their absolute paths, also handles creating 'ImplicitCastExpr's
@@ -141,17 +144,24 @@ namespace gulc {
         bool processTryFinallyStmt(TryFinallyStmt* tryFinallyStmt);
         bool processWhileStmt(WhileStmt* whileStmt);
 
+        OperatorDecl* findInfixOperatorOrError(StructDecl* structDecl, std::vector<Expr*>* args,
+                                               std::string const& operatorName,
+                                               TextPosition const& startPosition,
+                                               TextPosition const& endPosition);
+        OperatorDecl* findPrefixOperator(StructDecl* structDecl, std::string const& operatorName);
+        void processAssignmentBinaryOperatorExpr(AssignmentBinaryOperatorExpr* assignmentBinaryOperatorExpr);
         void processBinaryOperatorExpr(Expr*& expr, bool isNestedBinaryOperator);
         void processCharacterLiteralExpr(CharacterLiteralExpr* characterLiteralExpr);
-        void processExplicitCastExpr(ExplicitCastExpr* explicitCastExpr);
+        void processExplicitCastExpr(Expr*& expr);
         void processFloatLiteralExpr(FloatLiteralExpr* floatLiteralExpr);
-        void processFunctionCallExpr(FunctionCallExpr* functionCallExpr);
+        void processFunctionCallExpr(Expr*& expr);
         void processIdentifierExpr(Expr*& identifierExpr);
         // Returns true if the `checkDecl` is a `GlobalVariableDecl`
         bool processIdentifierExprForDecl(Decl *checkDecl, IdentifierExpr* identifierExpr, bool hasTemplateArgs,
                                           FunctionDecl*& foundFunction, bool& isExactMatch, bool& isAmbiguous);
         void processImplicitCastExpr(ImplicitCastExpr* implicitCastExpr);
-        void processIndexerCallExpr(IndexerCallExpr* indexerCallExpr);
+        void processIndexerCallExpr(Expr*& expr);
+        void processInfixMacroCallExpr(Expr*& expr);
         void processIntegerLiteralExpr(IntegerLiteralExpr* integerLiteralExpr);
         void processLocalVariableDeclExpr(LocalVariableDeclExpr* localVariableDeclExpr, bool hasInitialValue);
         void processLocalVariableDeclOrPrefixOperatorCallExpr(Expr*& expr);
@@ -159,7 +169,8 @@ namespace gulc {
         void processParenExpr(ParenExpr* parenExpr);
         void processPostfixOperatorExpr(PostfixOperatorExpr* postfixOperatorExpr);
         void processPotentialExplicitCastExpr(Expr*& expr);
-        void processPrefixOperatorExpr(PrefixOperatorExpr* prefixOperatorExpr);
+        void processPrefixMacroCallExpr(Expr*& expr);
+        void processPrefixOperatorExpr(Expr*& expr);
         void processResolvedTypeRefExpr(ResolvedTypeRefExpr* resolvedTypeRefExpr);
         void processStringLiteralExpr(StringLiteralExpr* stringLiteralExpr);
         void processTernaryExpr(TernaryExpr* ternaryExpr);
@@ -176,6 +187,8 @@ namespace gulc {
         bool attemptAccessStructMember(MemberAccessCallExpr* memberAccessCallExpr, Expr*& outExpr,
                                        bool hasTemplateArgs, StructType* originalStructType, Decl* checkMember,
                                        FunctionDecl*& foundFunction, bool& isExactMatch, bool& isAmbiguous);
+
+        Expr* applyCast(Type* from, Type* to, Expr* castee, CastOperatorType castType);
 
         // Context management
         FileAST* currentFileAst;

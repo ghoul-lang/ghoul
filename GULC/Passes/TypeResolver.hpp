@@ -50,6 +50,8 @@
 #include <AST/Decls/TemplateFunctionDecl.hpp>
 #include <AST/Decls/StructDecl.hpp>
 #include <Targets/Target.hpp>
+#include <AST/Exprs/InfixMacroCallExpr.hpp>
+#include <AST/Exprs/PrefixMacroCallExpr.hpp>
 
 namespace gulc {
     /**
@@ -111,7 +113,7 @@ namespace gulc {
         void processTryFinallyStmt(TryFinallyStmt* tryFinallyStmt);
         void processWhileStmt(WhileStmt* whileStmt);
 
-        void processBinaryOperatorExpr(BinaryOperatorExpr* binaryOperatorExpr);
+        void processBinaryOperatorExpr(Expr*& expr);
         void processCharacterLiteralExpr(CharacterLiteralExpr* characterLiteralExpr);
         void processExplicitCastExpr(ExplicitCastExpr* explicitCastExpr);
         void processFloatLiteralExpr(FloatLiteralExpr* floatLiteralExpr);
@@ -121,6 +123,7 @@ namespace gulc {
         void processIdentifierExpr(Expr*& expr);
         void processImplicitCastExpr(ImplicitCastExpr* implicitCastExpr);
         void processIndexerCallExpr(IndexerCallExpr* indexerCallExpr);
+        void processInfixMacroCallExpr(InfixMacroCallExpr* infixMacroCallExpr);
         void processIntegerLiteralExpr(IntegerLiteralExpr* integerLiteralExpr);
         void processLocalVariableDeclExpr(LocalVariableDeclExpr* localVariableDeclExpr);
         void processLocalVariableDeclOrPrefixOperatorCallExpr(Expr*& expr);
@@ -128,6 +131,7 @@ namespace gulc {
         void processParenExpr(ParenExpr* parenExpr);
         void processPostfixOperatorExpr(PostfixOperatorExpr* postfixOperatorExpr);
         void processPotentialExplicitCastExpr(Expr*& expr);
+        void processPrefixMacroCallExpr(PrefixMacroCallExpr* prefixMacroCallExpr);
         void processPrefixOperatorExpr(PrefixOperatorExpr* prefixOperatorExpr);
         void processResolvedTypeRefExpr(ResolvedTypeRefExpr* resolvedTypeRefExpr);
         void processStringLiteralExpr(StringLiteralExpr* stringLiteralExpr);

@@ -19,8 +19,7 @@
 #include <AST/Types/PointerType.hpp>
 #include <AST/Types/EnumType.hpp>
 #include <AST/Exprs/UnresolvedTypeRefExpr.hpp>
-#include <AST/Exprs/LocalVariableDeclOrPrefixOperatorCallExpr.hpp>
-#include <AST/Exprs/CustomPrefixOperatorExpr.hpp>
+#include <AST/Exprs/PotentialLocalVariableDeclExpr.hpp>
 #include <AST/Exprs/PotentialExplicitCastExpr.hpp>
 #include <AST/Exprs/RefEnumConstantExpr.hpp>
 #include <AST/Exprs/TempNamespaceRefExpr.hpp>
@@ -29,6 +28,7 @@
 #include <AST/Attrs/PodAttr.hpp>
 #include <AST/Attrs/MoveAttr.hpp>
 #include <AST/Attrs/CopyAttr.hpp>
+#include <AST/Exprs/AssignmentBinaryOperatorExpr.hpp>
 #include "TypeResolver.hpp"
 
 using namespace gulc;
@@ -311,6 +311,11 @@ NamespaceDecl* TypeResolver::validateImportPath(NamespaceDecl *checkNamespace, c
 
 void TypeResolver::processDecl(Decl *decl, Decl::Visibility visibilityIfUnspecified) {
     switch (decl->getDeclKind()) {
+        // Operator doesn't have anything specific to it related to types, it can be processed as a function
+        case Decl::Kind::Operator:
+        case Decl::Kind::CastOperator:
+        case Decl::Kind::CallOperator:
+        case Decl::Kind::IndexOperator:
         case Decl::Kind::Function:
             processFunctionDecl(llvm::dyn_cast<FunctionDecl>(decl));
 
@@ -411,7 +416,7 @@ void TypeResolver::processStmt(Stmt *&stmt) {
 void TypeResolver::processExpr(Expr *&expr) {
     switch (expr->getExprKind()) {
         case Expr::Kind::BinaryOperator:
-            processBinaryOperatorExpr(llvm::dyn_cast<BinaryOperatorExpr>(expr));
+            processBinaryOperatorExpr(expr);
             break;
         case Expr::Kind::CharacterLiteral:
             processCharacterLiteralExpr(llvm::dyn_cast<CharacterLiteralExpr>(expr));
@@ -434,15 +439,14 @@ void TypeResolver::processExpr(Expr *&expr) {
         case Expr::Kind::IndexerCall:
             processIndexerCallExpr(llvm::dyn_cast<IndexerCallExpr>(expr));
             break;
+        case Expr::Kind::InfixMacroCall:
+            processInfixMacroCallExpr(llvm::dyn_cast<InfixMacroCallExpr>(expr));
+            break;
         case Expr::Kind::IntegerLiteral:
             processIntegerLiteralExpr(llvm::dyn_cast<IntegerLiteralExpr>(expr));
             break;
         case Expr::Kind::LocalVariableDecl:
             processLocalVariableDeclExpr(llvm::dyn_cast<LocalVariableDeclExpr>(expr));
-            break;
-        case Expr::Kind::LocalVariableDeclOrPrefixOperatorCallExpr:
-            // Casting isn't required for this function. It will handle the casting for us since this is a type we will be completely removing from the AST in this function
-            processLocalVariableDeclOrPrefixOperatorCallExpr(expr);
             break;
         case Expr::Kind::MemberAccessCall:
             processMemberAccessCallExpr(expr);
@@ -455,6 +459,13 @@ void TypeResolver::processExpr(Expr *&expr) {
             break;
         case Expr::Kind::PotentialExplicitCast:
             processPotentialExplicitCastExpr(expr);
+            break;
+        case Expr::Kind::PotentialLocalVariableDecl:
+            // Casting isn't required for this function. It will handle the casting for us since this is a type we will be completely removing from the AST in this function
+            processLocalVariableDeclOrPrefixOperatorCallExpr(expr);
+            break;
+        case Expr::Kind::PrefixMacroCall:
+            processPrefixMacroCallExpr(llvm::dyn_cast<PrefixMacroCallExpr>(expr));
             break;
         case Expr::Kind::PrefixOperator:
             processPrefixOperatorExpr(llvm::dyn_cast<PrefixOperatorExpr>(expr));
@@ -1014,9 +1025,72 @@ void TypeResolver::processWhileStmt(WhileStmt *whileStmt) {
 }
 
 // Exprs
-void TypeResolver::processBinaryOperatorExpr(BinaryOperatorExpr *binaryOperatorExpr) {
+void TypeResolver::processBinaryOperatorExpr(Expr*& expr) {
+    auto binaryOperatorExpr = llvm::dyn_cast<BinaryOperatorExpr>(expr);
+
     processExpr(binaryOperatorExpr->leftValue);
     processExpr(binaryOperatorExpr->rightValue);
+
+    // We split some combined operators out here. Any assignment operators that aren't just `=` will be split
+    // So "i += 1" becomes "i = i + 1". This is because of GUL not having the ability to overload assignment operators
+    std::string checkOperatorName = binaryOperatorExpr->operatorName();
+
+    if (checkOperatorName == "=" || checkOperatorName == ">>=" || checkOperatorName == "<<=" ||
+        checkOperatorName == "+=" || checkOperatorName == "-=" || checkOperatorName == "*=" ||
+        checkOperatorName == "/=" || checkOperatorName == "%=" || checkOperatorName == "&=" ||
+        checkOperatorName == "|=" || checkOperatorName == "^=") {
+        AssignmentBinaryOperatorExpr* newAssignmentBinaryOperator;
+
+        if (checkOperatorName == "=") {
+            newAssignmentBinaryOperator = new AssignmentBinaryOperatorExpr(binaryOperatorExpr->startPosition(),
+                                                                           binaryOperatorExpr->endPosition(),
+                                                                           binaryOperatorExpr->leftValue,
+                                                                           binaryOperatorExpr->rightValue);
+        } else {
+            std::string nestedOperator;
+
+            if (checkOperatorName == ">>=") {
+                nestedOperator = ">>";
+            } else if (checkOperatorName == "<<=") {
+                nestedOperator = "<<";
+            } else if (checkOperatorName == "+=") {
+                nestedOperator = "+";
+            } else if (checkOperatorName == "-=") {
+                nestedOperator = "-";
+            } else if (checkOperatorName == "*=") {
+                nestedOperator = "*";
+            } else if (checkOperatorName == "/=") {
+                nestedOperator = "/";
+            } else if (checkOperatorName == "%=") {
+                nestedOperator = "%";
+            } else if (checkOperatorName == "&=") {
+                nestedOperator = "&";
+            } else if (checkOperatorName == "|=") {
+                nestedOperator = "|";
+            } else if (checkOperatorName == "^=") {
+                nestedOperator = "^";
+            } else {
+                printError(
+                        "[INTERNAL] unknown built in assignment operator '" + checkOperatorName + "'!",
+                        binaryOperatorExpr->startPosition(), binaryOperatorExpr->endPosition());
+                return;
+            }
+
+            newAssignmentBinaryOperator = new AssignmentBinaryOperatorExpr(binaryOperatorExpr->startPosition(),
+                                                                           binaryOperatorExpr->endPosition(),
+                                                                           binaryOperatorExpr->leftValue,
+                                                                           binaryOperatorExpr->rightValue,
+                                                                           nestedOperator);
+        }
+
+        // We steal these two pointers
+        binaryOperatorExpr->leftValue = nullptr;
+        binaryOperatorExpr->rightValue = nullptr;
+        // Delete the old binary operator
+        delete binaryOperatorExpr;
+        // Replace where the old binary operator was with the new operator
+        expr = newAssignmentBinaryOperator;
+    }
 }
 
 void TypeResolver::processCharacterLiteralExpr(CharacterLiteralExpr *characterLiteralExpr) {
@@ -1204,8 +1278,19 @@ void TypeResolver::processIndexerCallExpr(IndexerCallExpr *indexerCallExpr) {
     processExpr(indexerCallExpr->indexerReference);
 
     if (indexerCallExpr->hasArguments()) {
-        for (Expr*& arg : indexerCallExpr->arguments()) {
+        for (Expr*& arg : indexerCallExpr->arguments) {
             processExpr(arg);
+        }
+    }
+}
+
+void TypeResolver::processInfixMacroCallExpr(InfixMacroCallExpr *infixMacroCallExpr) {
+    processExpr(infixMacroCallExpr->leftValue);
+    processExpr(infixMacroCallExpr->rightValue);
+
+    if (infixMacroCallExpr->hasTemplateArguments()) {
+        for (Expr*& templateArgument : infixMacroCallExpr->templateArguments) {
+            processExpr(templateArgument);
         }
     }
 }
@@ -1224,38 +1309,14 @@ void TypeResolver::processLocalVariableDeclExpr(LocalVariableDeclExpr *localVari
 }
 
 void TypeResolver::processLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr) {
-    auto localVariableDeclOrPrefixOperatorCall = llvm::dyn_cast<LocalVariableDeclOrPrefixOperatorCallExpr>(expr);
+    auto potentialLocalVariableDecl = llvm::dyn_cast<PotentialLocalVariableDeclExpr>(expr);
 
-    processExpr(localVariableDeclOrPrefixOperatorCall->typeOrPrefixOperator);
-    processExpr(localVariableDeclOrPrefixOperatorCall->nameOrExpr);
+    processExpr(potentialLocalVariableDecl->type);
 
     // If the type or prefix operator is a resolved type ref then it is a local variable declaration
-    if (llvm::isa<ResolvedTypeRefExpr>(localVariableDeclOrPrefixOperatorCall->typeOrPrefixOperator)) {
-        IdentifierExpr* nameExpr;
-        std::vector<Expr*> initializerArgs;
-
-        if (llvm::isa<IdentifierExpr>(localVariableDeclOrPrefixOperatorCall->nameOrExpr)) {
-            nameExpr = llvm::dyn_cast<IdentifierExpr>(localVariableDeclOrPrefixOperatorCall->nameOrExpr);
-        } else if (llvm::isa<FunctionCallExpr>(localVariableDeclOrPrefixOperatorCall->nameOrExpr)) {
-            // If we parsed a function call here but the `typeOrPrefixOperator` is a type then that means we parsed a
-            // condensed constructor call. I.e. `StructType t(param1, param2);`
-            auto functionCallExpr = llvm::dyn_cast<FunctionCallExpr>(localVariableDeclOrPrefixOperatorCall->nameOrExpr);
-
-            if (!llvm::isa<IdentifierExpr>(functionCallExpr->functionReference)) {
-                printError("unexpected expression where local variable name was expected!",
-                           localVariableDeclOrPrefixOperatorCall->nameOrExpr->startPosition(),
-                           localVariableDeclOrPrefixOperatorCall->nameOrExpr->endPosition());
-            }
-
-            nameExpr = llvm::dyn_cast<IdentifierExpr>(functionCallExpr->functionReference);
-            // Steal the function call arguments
-            initializerArgs = std::move(functionCallExpr->arguments);
-        } else {
-            printError("unexpected expression where local variable name was expected!",
-                       localVariableDeclOrPrefixOperatorCall->nameOrExpr->startPosition(),
-                       localVariableDeclOrPrefixOperatorCall->nameOrExpr->endPosition());
-            return;
-        }
+    if (llvm::isa<ResolvedTypeRefExpr>(potentialLocalVariableDecl->type)) {
+        // We steal the initializer arguments if there are any
+        std::vector<Expr*> initializerArgs = std::move(potentialLocalVariableDecl->initializerArguments);
 
         // Process the initializer args
         for (Expr*& initializerArg : initializerArgs) {
@@ -1263,31 +1324,25 @@ void TypeResolver::processLocalVariableDeclOrPrefixOperatorCallExpr(Expr *&expr)
         }
 
         auto newLocalVariableExpr = new LocalVariableDeclExpr(expr->startPosition(), expr->endPosition(),
-                                                              localVariableDeclOrPrefixOperatorCall->typeOrPrefixOperator,
-                                                              nameExpr->name());
+                                                              potentialLocalVariableDecl->type,
+                                                              potentialLocalVariableDecl->name);
         // Set the initializer args (there might not be any...)
         newLocalVariableExpr->initializerArgs = std::move(initializerArgs);
         // We steal this pointer.
-        localVariableDeclOrPrefixOperatorCall->typeOrPrefixOperator = nullptr;
-        delete localVariableDeclOrPrefixOperatorCall;
+        potentialLocalVariableDecl->type = nullptr;
+        delete potentialLocalVariableDecl;
         // This isn't really needed...but oh well
         processLocalVariableDeclExpr(newLocalVariableExpr);
         expr = newLocalVariableExpr;
         return;
     }
 
-    if (llvm::isa<UnresolvedTypeRefExpr>(localVariableDeclOrPrefixOperatorCall->typeOrPrefixOperator)) {
+    if (llvm::isa<UnresolvedTypeRefExpr>(potentialLocalVariableDecl->type)) {
         printDebugWarning("UNRESOLVED TYPE FOUND IN LOCAL VARIABLE DECL OR PREFIX OPERATOR CALL");
     }
 
-    // If we reach this point then we assume the expression is a prefix operator call
-    auto customPrefixOperator = new CustomPrefixOperatorExpr(expr->startPosition(), expr->endPosition(),
-                                                             localVariableDeclOrPrefixOperatorCall->typeOrPrefixOperator,
-                                                             localVariableDeclOrPrefixOperatorCall->nameOrExpr);
-    localVariableDeclOrPrefixOperatorCall->typeOrPrefixOperator = nullptr;
-    localVariableDeclOrPrefixOperatorCall->nameOrExpr = nullptr;
-    delete localVariableDeclOrPrefixOperatorCall;
-    expr = customPrefixOperator;
+    printError("INTERNAL: PotentialLocalVariableDecl was not resolvable!",
+               potentialLocalVariableDecl->startPosition(), potentialLocalVariableDecl->endPosition());
 }
 
 void TypeResolver::processMemberAccessCallExpr(Expr*& expr) {
@@ -1409,6 +1464,16 @@ void TypeResolver::processPotentialExplicitCastExpr(Expr *&expr) {
     delete potentialExplicitCastExpr;
 
     expr = explicitCast;
+}
+
+void TypeResolver::processPrefixMacroCallExpr(PrefixMacroCallExpr *prefixMacroCallExpr) {
+    processExpr(prefixMacroCallExpr->expr);
+
+    if (prefixMacroCallExpr->hasTemplateArguments()) {
+        for (Expr*& templateArgument : prefixMacroCallExpr->templateArguments) {
+            processExpr(templateArgument);
+        }
+    }
 }
 
 void TypeResolver::processPrefixOperatorExpr(PrefixOperatorExpr *prefixOperatorExpr) {

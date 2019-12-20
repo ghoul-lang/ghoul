@@ -1,4 +1,3 @@
-[POD]
 struct vec2i
 {
     public int x;
@@ -15,70 +14,77 @@ struct vec2i
         this.x = x;
         this.y = y;
     }
-}
 
-struct BaseStruct
-{
-    public int i;
-    public int j;
-    public int l;
-    public vec2i hmm;
-
-    public BaseStruct()
+    public vec2i operator infix add(vec2i const& rightValue)
     {
-        i = 44;
+        return vec2i(x + rightValue.x, y + rightValue.y);
     }
 
-    public BaseStruct(int i, int j)
+    public vec2i operator prefix abs()
     {
-        this.i = i;
-        this.j = j;
-        this.l = i + j;
+        int resultX = x;
+        int resultY = y;
+
+        if (resultX < 0)
+        {
+            resultX = -resultX;
+        }
+
+        if (resultY < 0)
+        {
+            resultY = -resultY;
+        }
+
+        return vec2i(resultX, resultY);
     }
 
-    public virtual void SetI()
+    public vec2i operator prefix +()
     {
-        i = 4;
-    }
-
-    virtual ~BaseStruct()
-    {
-        i = 0;
-        j = 0;
-        l = 0;
+        return abs! this;
     }
 }
 
-struct ChildStruct : BaseStruct
+struct vec3i
 {
-    public int k;
-    public vec2i position;
+    public int x;
+    public int y;
+    public int z;
 
-    public ChildStruct()
-        : this(69, 420, 12) {}
-
-    public ChildStruct(int i, int j, int k)
-        : base(i, j)
+    public vec3i()
     {
-        this.k = k;
+        x = 0;
+        y = 0;
+        z = 0;
     }
 
-    public override void SetI()
+    public vec3i(int x, int y, int z)
     {
-        i = 12;
+        this.x = x;
+        this.y = y;
+        this.z = z;
     }
 
-    public int GetBaseI()
+    public explicit operator vec2i()
     {
-        return base.i;
+        return vec2i(x, y);
+    }
+
+    public int operator this[int x]
+    {
+        return x;
+    }
+
+    public int operator this(int x, int y, int z)
+    {
+        return x + y + z;
     }
 }
 
 int main()
 {
-    BaseStruct bs;
-    ChildStruct test(44, 12, 69);
-    ChildStruct* cs = &test;
+    vec3i test3d(12, 12, 12);
+    vec2i test = (vec2i)test3d;
+    vec2i hmm = test add~ test;
 
-    return cs->i;
+    return test3d(hmm.x, 3, 2);
 }

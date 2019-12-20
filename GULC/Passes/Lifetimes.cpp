@@ -118,6 +118,9 @@ void Lifetimes::processStmt(Stmt *&stmt) {
 
 void Lifetimes::processExpr(Expr *&expr) {
     switch (expr->getExprKind()) {
+        case Expr::Kind::AssignmentBinaryOperator:
+            processAssignmentBinaryOperatorExpr(expr);
+            break;
         case Expr::Kind::BinaryOperator:
             processBinaryOperatorExpr(expr);
             break;
@@ -473,45 +476,39 @@ void Lifetimes::processWhileStmt(WhileStmt *whileStmt) {
 }
 
 // Exprs
-void Lifetimes::processBinaryOperatorExpr(Expr *&expr) {
-    auto binaryOperatorExpr = llvm::dyn_cast<BinaryOperatorExpr>(expr);
+void Lifetimes::processAssignmentBinaryOperatorExpr(Expr *&expr) {
+    auto assignmentBinaryOperatorExpr = llvm::dyn_cast<AssignmentBinaryOperatorExpr>(expr);
 
-    processExpr(binaryOperatorExpr->leftValue);
-    processExpr(binaryOperatorExpr->rightValue);
+    processExpr(assignmentBinaryOperatorExpr->leftValue);
+    processExpr(assignmentBinaryOperatorExpr->rightValue);
 
-    if (binaryOperatorExpr->operatorName() == "=") {
+    if (!assignmentBinaryOperatorExpr->hasNestedOperator()) {
         // If the binary operator is an assignment operator and the left value is a struct
         // then we have to call the destructor on the left value and perform either a copy
         // or a move on the right value
-        if (llvm::isa<StructType>(binaryOperatorExpr->leftValue->resultType)) {
-            auto structType = llvm::dyn_cast<StructType>(binaryOperatorExpr->leftValue->resultType);
+        if (llvm::isa<StructType>(assignmentBinaryOperatorExpr->leftValue->resultType)) {
+            auto structType = llvm::dyn_cast<StructType>(assignmentBinaryOperatorExpr->leftValue->resultType);
             // TODO: Detect if we should move or copy
             auto useConstructor = structType->decl()->copyConstructor;
 
             if (structType->qualifier() == TypeQualifier::Const) {
                 printError("illegal assignment, left side is `const`!",
-                           binaryOperatorExpr->leftValue->startPosition(),
-                           binaryOperatorExpr->leftValue->endPosition());
-            }
-
-            if (!structType->isLValue()) {
-                printError("illegal assignment, left side is not assignable!",
-                           binaryOperatorExpr->leftValue->startPosition(),
-                           binaryOperatorExpr->leftValue->endPosition());
+                           assignmentBinaryOperatorExpr->leftValue->startPosition(),
+                           assignmentBinaryOperatorExpr->leftValue->endPosition());
             }
 
             if (useConstructor == nullptr) {
                 // We CANNOT assign a struct if it doesn't have the required constructor
                 printError("struct type `" + structType->decl()->name() + "` has deleted copy constructor!",
-                           binaryOperatorExpr->leftValue->startPosition(),
-                           binaryOperatorExpr->leftValue->endPosition());
+                           assignmentBinaryOperatorExpr->leftValue->startPosition(),
+                           assignmentBinaryOperatorExpr->leftValue->endPosition());
             }
 
-            if (llvm::isa<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue)) {
+            if (llvm::isa<LocalVariableDeclExpr>(assignmentBinaryOperatorExpr->leftValue)) {
                 // If the left value is a local variable declaration then we can easily replace `expr` with the
                 // local variable declaration that will have the right value be its initializer, setting the
                 // found constructor to the copy/move constructor
-                auto localVariableDecl = llvm::dyn_cast<LocalVariableDeclExpr>(binaryOperatorExpr->leftValue);
+                auto localVariableDecl = llvm::dyn_cast<LocalVariableDeclExpr>(assignmentBinaryOperatorExpr->leftValue);
 
                 if (localVariableDecl->hasInitializer()) {
                     // I believe we already check for this somewhere else but it doesn't hurt to verify here
@@ -520,29 +517,47 @@ void Lifetimes::processBinaryOperatorExpr(Expr *&expr) {
                                localVariableDecl->startPosition(), localVariableDecl->endPosition());
                 }
 
-                // TODO: Is the right value an rvalue? Is that okay? I believe it will always be an rvalue at this point
+                // `rightValue` is most likely an `LValueToRValueExpr` at this point. If it is we remove that to
+                // prevent issues as it is supposed to be an lvalue.
+                if (llvm::isa<LValueToRValueExpr>(assignmentBinaryOperatorExpr->rightValue)) {
+                    LValueToRValueExpr* lvalueToRValue = llvm::dyn_cast<LValueToRValueExpr>(assignmentBinaryOperatorExpr->rightValue);
+
+                    // Make the right value a proper lvalue again
+                    assignmentBinaryOperatorExpr->rightValue = lvalueToRValue->lvalue;
+
+                    // Delete the unused lvalue to rvalue conversion expression
+                    lvalueToRValue->lvalue = nullptr;
+                    delete lvalueToRValue;
+                }
+
                 localVariableDecl->initializerArgs = {
-                        binaryOperatorExpr->rightValue
+                        assignmentBinaryOperatorExpr->rightValue
                 };
 
                 localVariableDecl->foundConstructor = useConstructor;
 
                 // Safely delete `binaryOperatorExpr` and remove references to the left and right values since we steal
                 // them.
-                binaryOperatorExpr->leftValue = nullptr;
-                binaryOperatorExpr->rightValue = nullptr;
-                delete binaryOperatorExpr;
+                assignmentBinaryOperatorExpr->leftValue = nullptr;
+                assignmentBinaryOperatorExpr->rightValue = nullptr;
+                delete assignmentBinaryOperatorExpr;
 
                 // Replace the old binary operator with our local variable declaration that now has a copy or move
                 expr = localVariableDecl;
             } else {
+                if (!structType->isLValue()) {
+                    printError("illegal assignment, left side is not assignable!",
+                               assignmentBinaryOperatorExpr->leftValue->startPosition(),
+                               assignmentBinaryOperatorExpr->leftValue->endPosition());
+                }
+
                 // `rightValue` is most likely an `LValueToRValueExpr` at this point. If it is we remove that to
                 // prevent issues as it is supposed to be an lvalue.
-                if (llvm::isa<LValueToRValueExpr>(binaryOperatorExpr->rightValue)) {
-                    LValueToRValueExpr* lvalueToRValue = llvm::dyn_cast<LValueToRValueExpr>(binaryOperatorExpr->rightValue);
+                if (llvm::isa<LValueToRValueExpr>(assignmentBinaryOperatorExpr->rightValue)) {
+                    LValueToRValueExpr* lvalueToRValue = llvm::dyn_cast<LValueToRValueExpr>(assignmentBinaryOperatorExpr->rightValue);
 
                     // Make the right value a proper lvalue again
-                    binaryOperatorExpr->rightValue = lvalueToRValue->lvalue;
+                    assignmentBinaryOperatorExpr->rightValue = lvalueToRValue->lvalue;
 
                     // Delete the unused lvalue to rvalue conversion expression
                     lvalueToRValue->lvalue = nullptr;
@@ -552,28 +567,36 @@ void Lifetimes::processBinaryOperatorExpr(Expr *&expr) {
                 // If the left value is NOT a local variable declaration then we will replace `expr` with a
                 // constructor call with `this` being set to the left value and `other` being set to the right value
                 std::vector<Expr*> arguments = {
-                        binaryOperatorExpr->rightValue
+                        assignmentBinaryOperatorExpr->rightValue
                 };
 
                 // Create a reconstruction expression. This will call the constructor we provide and call the
                 // constructor on the already constructed value `this` with the `other` argument. We do this instead
                 // of having copy/move assignment operators
-                auto reconstructExpr = new ReconstructExpr(binaryOperatorExpr->startPosition(),
-                                                           binaryOperatorExpr->endPosition(),
-                                                           useConstructor, binaryOperatorExpr->leftValue,
+                auto reconstructExpr = new ReconstructExpr(assignmentBinaryOperatorExpr->startPosition(),
+                                                           assignmentBinaryOperatorExpr->endPosition(),
+                                                           useConstructor,
+                                                           assignmentBinaryOperatorExpr->leftValue,
                                                            arguments, true);
 
                 // Safely delete `binaryOperatorExpr` and remove references to the left and right values since we steal
                 // them.
-                binaryOperatorExpr->leftValue = nullptr;
-                binaryOperatorExpr->rightValue = nullptr;
-                delete binaryOperatorExpr;
+                assignmentBinaryOperatorExpr->leftValue = nullptr;
+                assignmentBinaryOperatorExpr->rightValue = nullptr;
+                delete assignmentBinaryOperatorExpr;
 
                 // Replace the old binary operator with our reconstruct expression
                 expr = reconstructExpr;
             }
         }
     }
+}
+
+void Lifetimes::processBinaryOperatorExpr(Expr *&expr) {
+    auto binaryOperatorExpr = llvm::dyn_cast<BinaryOperatorExpr>(expr);
+
+    processExpr(binaryOperatorExpr->leftValue);
+    processExpr(binaryOperatorExpr->rightValue);
 }
 
 void Lifetimes::processCharacterLiteralExpr(CharacterLiteralExpr *characterLiteralExpr) {
@@ -601,7 +624,7 @@ void Lifetimes::processImplicitCastExpr(ImplicitCastExpr *implicitCastExpr) {
 }
 
 void Lifetimes::processIndexerCallExpr(IndexerCallExpr *indexerCallExpr) {
-    for (Expr*& argument : indexerCallExpr->arguments()) {
+    for (Expr*& argument : indexerCallExpr->arguments) {
         processExpr(argument);
     }
 

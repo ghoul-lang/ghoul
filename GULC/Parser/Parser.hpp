@@ -36,6 +36,8 @@
 #include <AST/Stmts/TryStmt.hpp>
 #include <AST/FileAST.hpp>
 #include <AST/Attr.hpp>
+#include <AST/Decls/OperatorDecl.hpp>
+#include <AST/Decls/CastOperatorDecl.hpp>
 
 namespace gulc {
     class Parser {
@@ -57,6 +59,17 @@ namespace gulc {
         Decl* parseTopLevelDecl();
         std::vector<TemplateParameterDecl*> parseTemplateParameterDecls(TextPosition startPosition);
         std::vector<ParameterDecl*> parseParameterDecls(TextPosition startPosition);
+        std::vector<ParameterDecl*> parseIndexerParameterDecls(TextPosition startPosition);
+        ParameterDecl* parseParameterDecl();
+
+        OperatorDecl* parseOperatorDecl(std::vector<Attr*> attributes,
+                                        TextPosition startPosition, TextPosition endPosition,
+                                        FunctionModifiers modifier, OperatorType operatorType,
+                                        Decl::Visibility visibility, Type* resultType);
+        CastOperatorDecl* parseCastOperatorDecl(std::vector<Attr*> attributes,
+                                                TextPosition startPosition, TextPosition endPosition,
+                                                FunctionModifiers modifier, CastOperatorType castOperatorType,
+                                                Decl::Visibility visibility, Type* resultType);
 
         Type* parseType(bool parseSuffix = true);
         Type* parseTypeSuffix(Type* type);

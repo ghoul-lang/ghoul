@@ -26,14 +26,15 @@ namespace gulc {
 		SYMBOL,
 
 		// Keyword Tokens
-		INTERFACE, // 'interface'
+		TRAIT,
 		STRUCT,
 		CLASS,
 		UNION,
 		ENUM,
 		OPERATOR,
+        PREFIX,
 		INFIX,
-		PREFIX,
+		POSTFIX,
 		EXPLICIT,
 		IMPLICIT,
 		NAMESPACE,
@@ -59,9 +60,6 @@ namespace gulc {
 		TRY,
 		CATCH,
 		FINALLY,
-//		MODIFIER,
-		KEYWORD,
-		CHECK,
 
 		// Modifier Tokens
 		PUBLIC, // 'public'
@@ -77,9 +75,6 @@ namespace gulc {
 		SEALED, // 'sealed'
 		VIRTUAL, // 'virtual'
 		OVERRIDE, // 'override'
-		IN, // 'in'
-		OUT, // 'out'
-		REF, // 'ref'
 
 		// Operator Tokens
 		EQUALS, // '='
@@ -116,10 +111,18 @@ namespace gulc {
 		PIPEPIPE, // '||'
 		CARET, // '^'
 		CARETEQUALS, // '^='
+		// TODO: Add the exponents
+//        CARETCARET, // '^^' use for exponents
+//        CARETCARETEQUALS, // '^^='
 		PERIOD, // '.'
 		ARROW, // '->'
 		COLON, // ':'
 		QUESTION, // '?'
+		// TODO: Add these
+//        QUESTIONQUESTION, // '??'
+//        QUESTIONPERIOD, // '?.'
+//        QUESTIONARROW, // '?->'
+//        QUESTIONLSQUARE, // '?['
 
 		// Special Tokens
 		LCURLY, // '{'

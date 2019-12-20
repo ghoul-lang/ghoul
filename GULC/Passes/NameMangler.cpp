@@ -55,6 +55,26 @@ void NameMangler::processDecl(Decl *decl) {
             _manglerBase->mangle(function);
             break;
         }
+        case Decl::Kind::Operator: {
+            auto oper = llvm::dyn_cast<OperatorDecl>(decl);
+            _manglerBase->mangle(oper);
+            break;
+        }
+        case Decl::Kind::CastOperator: {
+            auto castOper = llvm::dyn_cast<CastOperatorDecl>(decl);
+            _manglerBase->mangle(castOper);
+            break;
+        }
+        case Decl::Kind::CallOperator: {
+            auto callOper = llvm::dyn_cast<CallOperatorDecl>(decl);
+            _manglerBase->mangle(callOper);
+            break;
+        }
+        case Decl::Kind::IndexOperator: {
+            auto indexOper = llvm::dyn_cast<IndexOperatorDecl>(decl);
+            _manglerBase->mangle(indexOper);
+            break;
+        }
         case Decl::Kind::GlobalVariable: {
             auto globalVariable = llvm::dyn_cast<GlobalVariableDecl>(decl);
             _manglerBase->mangle(globalVariable);

@@ -31,6 +31,10 @@ namespace gulc {
         void mangle(NamespaceDecl* namespaceDecl) override;
         void mangle(StructDecl* structDecl) override;
         void mangle(TemplateFunctionDecl* templateFunctionDecl) override;
+        void mangle(OperatorDecl* operatorDecl) override;
+        void mangle(CastOperatorDecl* castOperatorDecl) override;
+        void mangle(CallOperatorDecl* callOperatorDecl) override;
+        void mangle(IndexOperatorDecl* indexOperatorDecl) override;
 
     private:
         void mangleDeclEnum(EnumDecl* enumDecl, const std::string& prefix, const std::string& nameSuffix);
@@ -42,6 +46,10 @@ namespace gulc {
         void mangleNamespace(NamespaceDecl* namespaceDecl, const std::string& prefix);
         void mangleStruct(StructDecl* structDecl, const std::string& prefix);
         void mangleTemplateFunction(TemplateFunctionDecl* templateFunctionDecl, const std::string& prefix, const std::string& nameSuffix);
+        void mangleOperator(OperatorDecl* operatorDecl, const std::string& prefix, const std::string& nameSuffix);
+        void mangleCastOperator(CastOperatorDecl* castOperatorDecl, const std::string& prefix, const std::string& nameSuffix);
+        void mangleCallOperator(CallOperatorDecl* callOperatorDecl, const std::string& prefix, const std::string& nameSuffix);
+        void mangleIndexOperator(IndexOperatorDecl* indexOperatorDecl, const std::string& prefix, const std::string& nameSuffix);
 
         void mangleConstructor(ConstructorDecl* constructorDecl, const std::string& prefix, const std::string& nameSuffix);
         void mangleDestructor(DestructorDecl* destructorDecl, const std::string& prefix, const std::string& nameSuffix);
@@ -56,6 +64,8 @@ namespace gulc {
         std::string templateArgs(std::vector<TemplateParameterDecl*>& templateParams, std::vector<Expr*>& templateArgs);
         std::string templateArg(const Expr* expr);
         std::string exprPrimary(const Expr* expr);
+
+        std::string operatorName(OperatorType operatorType, const std::string& operatorText);
 
     };
 }
